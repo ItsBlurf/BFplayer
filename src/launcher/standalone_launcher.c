@@ -448,19 +448,24 @@ static int create_loopback_listener(void) {
     return listener;
 }
 
-static void send_response(int connection, int status, const char* body) {
+static void send_response(
+    int connection,
+    int status,
+    const char* content_type,
+    const char* body) {
     char header[512];
     const size_t body_length = body ? strlen(body) : 0U;
     const int header_length = snprintf(
         header,
         sizeof(header),
         "HTTP/1.1 %d %s\r\n"
-        "Content-Type: text/plain; charset=utf-8\r\n"
+        "Content-Type: %s; charset=utf-8\r\n"
         "Content-Length: %zu\r\n"
         "Cache-Control: no-store\r\n"
         "Connection: close\r\n\r\n",
         status,
         status == 200 ? "OK" : "Not Found",
+        content_type,
         body_length);
     if (header_length > 0 && header_length < (int)sizeof(header)) {
         (void)send(connection, header, (size_t)header_length, 0);
@@ -550,6 +555,32 @@ static int launch_embedded_player(void) {
 }
 
 static void serve_forever(int listener) {
+    static const char launch_page[] =
+        "<!doctype html><html><head>"
+        "<meta charset=\"utf-8\">"
+        "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
+        "<title>PS5 Media Center</title>"
+        "<style>"
+        "html,body{height:100%;margin:0;background:#050913;color:#f0f4ff;"
+        "font-family:Arial,sans-serif}body{display:flex;align-items:center;"
+        "justify-content:center;text-align:center}.card{width:min(760px,80vw);"
+        "padding:64px;border:1px solid #192a47;background:#0b1425;"
+        "box-shadow:0 24px 80px #000}.accent{height:4px;background:#2f89ff;"
+        "margin:0 auto 38px;width:120px}h1{font-size:42px;margin:0 0 20px}"
+        "p{font-size:24px;color:#9daac4;line-height:1.5}.count{color:#f4b22a;"
+        "font-size:72px;font-weight:bold;margin:18px}</style></head><body>"
+        "<main class=\"card\"><div class=\"accent\"></div>"
+        "<h1>Launching PS5 Media Center</h1>"
+        "<p>The player is starting. This page will close or return automatically.</p>"
+        "<div class=\"count\" id=\"count\">3</div>"
+        "<p>If this screen remains after the countdown, press the PS button once.</p>"
+        "</main><script>"
+        "let n=3;const e=document.getElementById('count');"
+        "const t=setInterval(()=>{n--;e.textContent=n>0?n:'Ready';"
+        "if(n<=0){clearInterval(t);setTimeout(()=>{"
+        "try{window.close()}catch(x){};try{history.back()}catch(x){}"
+        "},250)}},1000);"
+        "</script></body></html>";
     for (;;) {
         char request[2048];
         int connection = accept(listener, NULL, NULL);
@@ -580,12 +611,12 @@ static void serve_forever(int listener) {
             request[0] = '\0';
         }
         if (ps5mc_request_is_launch(request)) {
-            send_response(connection, 200, "Launching PS5 Media Center\n");
+            send_response(connection, 200, "text/html", launch_page);
             close(connection);
             launcher_log("request route=/launch");
             (void)launch_embedded_player();
         } else {
-            send_response(connection, 404, "Not found\n");
+            send_response(connection, 404, "text/plain", "Not found\n");
             close(connection);
         }
     }

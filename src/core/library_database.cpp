@@ -516,6 +516,30 @@ bool LibraryDatabase::finish_scan(bool commit) {
     return success && transaction_ok && commit;
 }
 
+bool LibraryDatabase::remove_root(const std::string& root) {
+    if (!database_ || scan_active_ || !valid_key(root)) {
+        error_ = "remove_root: invalid state";
+        return false;
+    }
+    sqlite3_stmt* statement = nullptr;
+    const bool success =
+        execute("BEGIN IMMEDIATE;") &&
+        prepare(&statement, "DELETE FROM roots WHERE path=?1;") &&
+        bind_text(statement, 1, root) &&
+        sqlite3_step(statement) == SQLITE_DONE;
+    finalize(statement);
+    if (!success) {
+        capture_error("remove_root");
+        execute("ROLLBACK;");
+        return false;
+    }
+    if (!execute("COMMIT;")) {
+        execute("ROLLBACK;");
+        return false;
+    }
+    return true;
+}
+
 bool LibraryDatabase::save_resume(const std::string& path, const ResumeState& state) {
     if (!database_ || !valid_key(path)) {
         error_ = "save_resume: invalid state";

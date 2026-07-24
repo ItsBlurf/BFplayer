@@ -11,9 +11,11 @@ player logs. Stop on a console disconnect, black screen that does not recover,
 or a fatal filesystem error.
 
 1. With HBL uninstalled and `/data/homebrew/PS5-MediaCenter` absent, inject only
-   the alpha.11 standalone payload. Verify it recreates its files, shows the
+   the alpha.12 standalone payload. Verify it recreates its files, keeps the
+   dashboard tile in Media, shows the
    Media Center icon in the active-app switcher, launches with no media
-   argument, and exits cleanly with Options.
+   argument, and exits cleanly with Options. Verify the dark launch countdown
+   returns/closes, or follow its PS-button fallback.
 2. Play a local 720p H.264/AAC MP4 with no subtitles for ten minutes.
 3. Pause/resume and seek repeatedly; verify A/V sync and clean return.
    Use R2+Triangle for every display-aspect override, L2+Triangle for every
@@ -26,7 +28,9 @@ or a fatal filesystem error.
    directions and verify the selected sidecar and delay survive reopening.
 8. Reopen the multitrack sample and verify audio/subtitle preferences restore;
    remux it with different stream indices and verify language fallback.
-9. Test USB and internal storage scans on small roots, then larger roots. Verify
+9. Verify an empty library performs no automatic storage scan. Open Add Media
+   and confirm it starts at `/`. Add small USB/internal sources, then larger
+   sources. Verify
    Continue Watching, Recently Played, title, duration, resolution, and codec
    metadata, then modify one file and confirm only that metadata is refreshed.
    Use Circle on an episode and verify Play From Here advances only after a
@@ -40,8 +44,13 @@ or a fatal filesystem error.
    and verify the choice persisted without pausing navigation. Play local M3U,
    PLS, and XSPF lists containing relative paths and confirm order, automatic
    advance, unsupported-entry filtering, and visible malformed-list errors.
-   Add title-specific and folder-level JPEG/PNG artwork, confirm priority and
-   aspect ratio, then replace an artwork file and verify Rescan refreshes it.
+   Use Square in a chosen folder and verify loose videos become Movies while
+   child folders containing videos become TV Shows. Confirm Square is rejected
+   at `/`. Press Triangle twice to remove a Movie and a TV Show and confirm
+   only their library rows disappear. Add title-specific and folder-level
+   JPEG/PNG artwork and confirm priority/aspect ratio. For a title without
+   artwork, verify an interior video-frame preview appears and the old logo
+   never appears in the right panel.
 10. Use local playlists containing HTTP/HLS, HTTPS, RTSP, RTMP, and UDP/RTP
     samples, including clean connection failure. Confirm a URL containing
     `user:password@` is rejected and a signed query value never appears in

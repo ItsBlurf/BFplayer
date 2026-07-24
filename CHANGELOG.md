@@ -1,5 +1,30 @@
 # Changelog
 
+## 0.1.0-alpha.12 - manual-library test build
+
+### Manual library management
+
+- Removed startup storage discovery and the Rescan action. Only media sources
+  explicitly selected by the user are indexed and retained in the library.
+- Add Media now opens at the PS5 filesystem root (`/`).
+- Added a two-press Triangle confirmation to remove the selected movie or TV
+  show source and its cached rows from the library.
+- Added an explicit bulk import action for a chosen folder: loose video files
+  become Movies, while immediate child folders containing video recursively
+  become TV Shows.
+- Kept recursive source traversal descriptor-bound, symlink-safe,
+  same-filesystem-only, bounded, cancellable, and fatal-I/O aware.
+
+### Artwork and launch handoff
+
+- Added bounded background FFmpeg extraction of an interior video frame when
+  no valid local JPEG/PNG artwork is available, including alternate positions
+  to avoid mostly black frames.
+- Removed the old logo from the empty artwork panel.
+- Replaced the white loopback launch response with a dark three-second
+  countdown page that attempts to close or return automatically.
+- Preserved `PSMC00001` as an English-only Media-category dashboard tile.
+
 ## 0.1.0-alpha.11 — independent runtime-host test build
 
 ### HBL-independent startup

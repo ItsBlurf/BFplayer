@@ -84,6 +84,14 @@ int main() {
           "second row upserts");
     check(database.finish_scan(true), "first scan commits");
     check(database.list_media().size() == 2, "two rows listed");
+    check(database.remove_root("/media"), "configured root can be removed");
+    check(database.list_media().empty(), "removing root cascades indexed media");
+    check(database.begin_scan("/media"), "root can be re-added after removal");
+    check(database.upsert_media({"/media/A.mkv", "A.mkv", ps5mc::MediaKind::video, 100, 10}),
+          "re-added movie upserts");
+    check(database.upsert_media({"/media/B.flac", "B.flac", ps5mc::MediaKind::audio, 200, 20}),
+          "re-added audio upserts");
+    check(database.finish_scan(true), "re-added root scan commits");
 
     ps5mc::MediaEntry metadata_entry{
         "/media/A.mkv", "A.mkv", ps5mc::MediaKind::video, 100, 10};

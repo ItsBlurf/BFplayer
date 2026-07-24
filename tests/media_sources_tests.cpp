@@ -46,6 +46,13 @@ int main() {
     };
     annotate_media_sources(sibling, decoded);
     check(sibling[0].series_root.empty(), "series root uses a path boundary");
+    check(!media_entry_is_covered_by_sources(sibling[0], decoded),
+          "unconfigured sibling is not covered");
+    sibling.push_back(entries[0]);
+    retain_configured_media(sibling, decoded);
+    check(sibling.size() == 1 &&
+              sibling[0].path == "/mnt/usb0/One Pace/Episode 1.mkv",
+          "manual source mode removes legacy auto-indexed rows");
 
     std::vector<MediaSource> nested_sources{
         {MediaSourceKind::movie_file,

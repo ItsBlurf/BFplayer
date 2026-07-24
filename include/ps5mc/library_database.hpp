@@ -48,6 +48,7 @@ public:
     bool media_needs_metadata_probe(const MediaEntry& entry);
     bool update_media_metadata(const MediaEntry& entry);
     bool finish_scan(bool commit);
+    bool remove_root(const std::string& root);
 
     bool save_resume(const std::string& path, const ResumeState& state);
     bool load_resume(const std::string& path, ResumeState& state);

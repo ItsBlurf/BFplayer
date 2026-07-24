@@ -15,8 +15,9 @@ evidence and references.
   HBL or deleting `/data/homebrew` cannot remove a hidden launch dependency.
 - Stripped, gzip-compressed embedded player for a much smaller LAN-injected
   payload, expanded and ELF-validated in memory only when launched.
-- No websrv runtime dependency, no port 8080, no catalog, and no file picker:
-  the English-only tile calls a private `127.0.0.1:9040/launch` route.
+- No websrv runtime dependency, port 8080, web catalog, or web file picker:
+  the English-only tile calls a private `127.0.0.1:9040/launch` route, and the
+  native in-app source browser starts at `/`.
 - FFmpeg 7.0.1 demuxing and software decoding from PacBrew v0.37.
 - SDL2 PS5 VideoOut, AudioOut, and controller backends.
 - libass text/ASS subtitle rendering plus FFmpeg bitmap subtitles.
@@ -27,8 +28,9 @@ evidence and references.
   all nine Desktop aspect choices, and all eleven Desktop crop choices.
 - Per-title audio/subtitle selection, external-subtitle path, language fallback,
   and subtitle-delay persistence.
-- Cancellable media-library indexing with All, Continue Watching, Recently
-  Played, Movies, TV Shows, Music, and Playlists categories.
+- Cancellable indexing of only the movie files and TV folders manually chosen
+  by the user, with All, Continue Watching, Recently Played, Movies, TV Shows,
+  Music, and Playlists categories.
 - PS5 on-screen-keyboard search across titles, filenames, paths, containers,
   and codec metadata, with cached multi-token filtering for large libraries.
 - Persistent Smart, Name, Recently Played, Newest, Duration, and File Size
@@ -38,6 +40,10 @@ evidence and references.
 - Native source selection from accessible PS5 storage: a selected file is
   presented as one movie, while a selected folder is persisted and grouped as
   one TV show with a naturally ordered episode view.
+- Explicit whole-library import for a chosen folder: loose video files become
+  Movies and immediate child folders containing video recursively become TV
+  Shows. No storage root is scanned automatically.
+- Two-press removal of a selected Movie or TV Show source from the library.
 - Broad indexing for the confirmed PacBrew FFmpeg demuxers, including common
   media plus raw AV1/VVC, IVF, NUT, WTV, Bink/Smacker, R3D, HCA, QOA, and more.
 - FFmpeg support for HTTP(S)/HLS, FTP, RTSP, RTMP, RTP, TCP/UDP, SCTP, and
@@ -46,6 +52,8 @@ evidence and references.
   and audio/video codecs; modified files are automatically re-probed.
 - Selected-title local artwork with deterministic JPEG/PNG sidecar discovery,
   aspect-correct rendering, one-texture caching, and file/dimension limits.
+- Bounded background extraction of an interior video frame when no usable
+  cover sidecar exists, with alternate positions used to avoid black frames.
 - Explicit Play From Here queues for naturally advancing through episodes or
   albums while Options still returns immediately to the library.
 - Bounded M3U, PLS, and XSPF playlist expansion with relative local paths,
@@ -137,21 +145,22 @@ Controller mappings in the media library:
 | --- | --- |
 | Cross | Play selected item |
 | Circle | Play from here in the current filtered/sorted view |
-| Triangle | Cycle library category |
+| Triangle | Remove the selected Movie/TV Show source (press twice) |
 | D-pad Left/Right | Previous/next library category |
 | Touchpad | Open the Add Media Source browser |
 | Create | Clear the active search |
 | L3 | Add/remove the selected item from Favorites |
 | R3 | Cycle and persist the library sort mode |
-| Square | Rescan configured storage roots |
 | D-pad Up/Down | Move one item |
 | L1/R1 | Move one page |
 | Options | Exit |
 
 Inside Add Media Source, Cross opens a folder or adds the highlighted media
 file as a standalone movie. Triangle adds the highlighted folder as one TV
-show, Square adds the current folder as one TV show, Circle goes to the parent
-folder, and Options closes the browser.
+show. Square explicitly imports the current folder as a whole library: loose
+video files become Movies and child folders containing videos become TV Shows.
+The browser always starts at `/`; Circle goes to the parent (or closes at `/`)
+and Options closes it.
 
 See [docs/STANDALONE_LAUNCHER.md](docs/STANDALONE_LAUNCHER.md),
 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md),
@@ -163,6 +172,6 @@ acceptance gates are tracked in
 [docs/COMPLETION_MATRIX.md](docs/COMPLETION_MATRIX.md).
 The current alpha is exhaustively offline-verified but cannot claim console
 runtime behavior. See
-[docs/ALPHA11_OFFLINE_VERIFICATION.md](docs/ALPHA11_OFFLINE_VERIFICATION.md),
+[docs/ALPHA12_OFFLINE_VERIFICATION.md](docs/ALPHA12_OFFLINE_VERIFICATION.md),
 [docs/FULL_VERIFICATION_AUDIT.md](docs/FULL_VERIFICATION_AUDIT.md), and
 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

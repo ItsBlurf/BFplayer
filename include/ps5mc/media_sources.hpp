@@ -27,5 +27,11 @@ struct MediaSource {
 void annotate_media_sources(
     std::vector<MediaEntry>& entries,
     const std::vector<MediaSource>& sources);
+[[nodiscard]] bool media_entry_is_covered_by_sources(
+    const MediaEntry& entry,
+    const std::vector<MediaSource>& sources);
+void retain_configured_media(
+    std::vector<MediaEntry>& entries,
+    const std::vector<MediaSource>& sources);
 
 } // namespace ps5mc

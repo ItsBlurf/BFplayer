@@ -1,6 +1,7 @@
 #include "ps5mc/library_ui.hpp"
 
 #include "ps5mc/artwork.hpp"
+#include "ps5mc/bulk_import.hpp"
 #include "ps5mc/controller_buttons.hpp"
 #include "ps5mc/diagnostics.hpp"
 #include "ps5mc/library_database.hpp"
@@ -8,6 +9,7 @@
 #include "ps5mc/library_view.hpp"
 #include "ps5mc/media_sources.hpp"
 #include "ps5mc/media_probe.hpp"
+#include "ps5mc/video_thumbnail.hpp"
 
 #include <SDL.h>
 #include <SDL_image.h>
@@ -15,6 +17,7 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cerrno>
 #include <cctype>
 #include <cmath>
@@ -259,17 +262,6 @@ std::string parent_path(const std::string& path) {
     return path.substr(0, slash);
 }
 
-bool path_is_same_or_child(
-    const std::string& path,
-    const std::string& root) {
-    if (path == root) {
-        return true;
-    }
-    return path.size() > root.size() &&
-           path.compare(0, root.size(), root) == 0 &&
-           (root == "/" || path[root.size()] == '/');
-}
-
 std::string series_group_key(const MediaEntry& entry) {
     if (!entry.series_root.empty()) {
         return entry.series_root;
@@ -401,24 +393,6 @@ std::string row_details(const MediaEntry& entry) {
     return details;
 }
 
-std::vector<std::string> default_roots() {
-    std::vector<std::string> roots{
-        "/data/media",
-        "/data/Media",
-        "/data/videos",
-        "/data/Videos",
-        "/data/Movies",
-        "/data/MediaPlayer/videos",
-    };
-    for (int index = 0; index < 8; ++index) {
-        roots.push_back("/mnt/usb" + std::to_string(index));
-    }
-    for (int index = 0; index < 8; ++index) {
-        roots.push_back("/mnt/ext" + std::to_string(index));
-    }
-    return roots;
-}
-
 bool is_directory(const std::string& path) {
     struct stat status {};
     return lstat(path.c_str(), &status) == 0 && S_ISDIR(status.st_mode) &&
@@ -441,6 +415,7 @@ struct LibraryUi::Impl {
     TTF_Font* footer_font = nullptr;
     SDL_mutex* mutex = nullptr;
     SDL_Thread* scan_thread = nullptr;
+    SDL_Thread* thumbnail_thread = nullptr;
     std::vector<MediaEntry> entries;
     std::vector<MediaSource> sources;
     std::string active_series_root;
@@ -464,6 +439,14 @@ struct LibraryUi::Impl {
     int artwork_generation = -1;
     std::string artwork_media_path;
     std::string artwork_path;
+    std::string thumbnail_request_path;
+    std::string thumbnail_error;
+    VideoThumbnail thumbnail_result;
+    std::atomic<bool> thumbnail_cancel{false};
+    bool thumbnail_loading = false;
+    bool thumbnail_ready = false;
+    bool artwork_is_video_frame = false;
+    std::int64_t artwork_position_ms = 0;
     std::string last_error;
     std::string database_path = "/data/PS5-MediaCenter/library.db";
     int selected = 0;
@@ -483,6 +466,8 @@ struct LibraryUi::Impl {
     std::string rendered_search_edit;
     std::string notice;
     std::uint64_t notice_until = 0;
+    std::string pending_remove_path;
+    std::uint64_t pending_remove_until = 0;
     int notice_generation = 0;
     int rendered_notice_generation = -1;
     bool search_editing = false;
@@ -622,8 +607,36 @@ struct LibraryUi::Impl {
             last_error = "Unable to open folder: " + path;
             return false;
         }
-        DIR* directory = opendir(path.c_str());
+        int open_flags = O_RDONLY;
+#ifdef O_CLOEXEC
+        open_flags |= O_CLOEXEC;
+#endif
+#ifdef O_NOFOLLOW
+        open_flags |= O_NOFOLLOW;
+#endif
+#ifdef O_DIRECTORY
+        open_flags |= O_DIRECTORY;
+#endif
+        const int descriptor = ::open(path.c_str(), open_flags);
+        if (descriptor < 0) {
+            last_error = "Unable to open folder: " + path +
+                " (errno " + std::to_string(errno) + ")";
+            return false;
+        }
+        struct stat opened_status {};
+        if (fstat(descriptor, &opened_status) != 0 ||
+            opened_status.st_dev != root_status.st_dev ||
+            opened_status.st_ino != root_status.st_ino ||
+            !S_ISDIR(opened_status.st_mode)) {
+            const int value = errno != 0 ? errno : ESTALE;
+            ::close(descriptor);
+            last_error = "Folder changed while opening: " + path +
+                " (errno " + std::to_string(value) + ")";
+            return false;
+        }
+        DIR* directory = fdopendir(descriptor);
         if (!directory) {
+            ::close(descriptor);
             last_error = "Unable to open folder: " + path +
                 " (errno " + std::to_string(errno) + ")";
             return false;
@@ -648,8 +661,13 @@ struct LibraryUi::Impl {
             }
             item_path += item->d_name;
             struct stat status {};
-            if (lstat(item_path.c_str(), &status) != 0 ||
-                S_ISLNK(status.st_mode)) {
+            if (fstatat(
+                    descriptor,
+                    item->d_name,
+                    &status,
+                    AT_SYMLINK_NOFOLLOW) != 0 ||
+                S_ISLNK(status.st_mode) ||
+                status.st_dev != root_status.st_dev) {
                 continue;
             }
             if (S_ISDIR(status.st_mode)) {
@@ -717,13 +735,11 @@ struct LibraryUi::Impl {
     }
 
     void open_browser() {
-        stop_scan();
         SDL_LockMutex(mutex);
         saved_library_selected = selected;
         saved_library_first_visible = first_visible;
         browser_mode = true;
-        const std::string initial =
-            is_directory("/mnt/usb0") ? "/mnt/usb0" : "/data";
+        const std::string initial = "/";
         SDL_UnlockMutex(mutex);
         if (!load_browser_directory(initial)) {
             SDL_LockMutex(mutex);
@@ -732,11 +748,10 @@ struct LibraryUi::Impl {
             first_visible = saved_library_first_visible;
             ++published_generation;
             SDL_UnlockMutex(mutex);
-            start_scan();
         }
     }
 
-    void close_browser(bool restart_scan) {
+    void close_browser() {
         SDL_LockMutex(mutex);
         browser_mode = false;
         browser_entries.clear();
@@ -745,9 +760,6 @@ struct LibraryUi::Impl {
         first_visible = saved_library_first_visible;
         ++published_generation;
         SDL_UnlockMutex(mutex);
-        if (restart_scan) {
-            start_scan();
-        }
     }
 
     bool persist_sources() {
@@ -770,7 +782,107 @@ struct LibraryUi::Impl {
         return true;
     }
 
+    void set_notice(std::string message, std::uint64_t milliseconds = 5000) {
+        SDL_LockMutex(mutex);
+        notice = std::move(message);
+        const std::uint64_t now = SDL_GetTicks64();
+        notice_until = now > UINT64_MAX - milliseconds
+            ? UINT64_MAX
+            : now + milliseconds;
+        ++notice_generation;
+        ++published_generation;
+        SDL_UnlockMutex(mutex);
+    }
+
+    void add_sources(
+        const std::vector<MediaSource>& additions,
+        const std::string& success_message) {
+        stop_scan();
+        std::size_t inserted = 0;
+        SDL_LockMutex(mutex);
+        for (MediaSource source : additions) {
+            source.path = normalize_media_source_path(std::move(source.path));
+            if (source.path.empty() || source.path[0] != '/') {
+                continue;
+            }
+            if (source.title.empty()) {
+                source.title = media_source_default_title(source.path);
+            }
+            const auto duplicate = std::find_if(
+                sources.begin(),
+                sources.end(),
+                [&](const MediaSource& current) {
+                    return current.kind == source.kind &&
+                           current.path == source.path;
+                });
+            if (duplicate == sources.end()) {
+                sources.push_back(std::move(source));
+                ++inserted;
+            }
+        }
+        annotate_media_sources(entries, sources);
+        SDL_UnlockMutex(mutex);
+        if (!persist_sources()) {
+            return;
+        }
+        diagnostics_log(
+            DiagnosticLevel::info,
+            "media-source batch added=%zu requested=%zu",
+            inserted,
+            additions.size());
+        close_browser();
+        set_notice(
+            success_message + "  |  " + std::to_string(inserted) +
+            " NEW SOURCES");
+        start_scan();
+    }
+
+    void bulk_import_current_folder(const std::string& current) {
+        if (current == "/") {
+            set_notice("Choose a media folder before using Import Library");
+            return;
+        }
+        stop_scan();
+        diagnostics_log(
+            DiagnosticLevel::info,
+            "bulk-import begin root=%s",
+            current.c_str());
+        const BulkImportResult result =
+            discover_bulk_media_sources(current);
+        if (!result.ok()) {
+            diagnostics_log(
+                DiagnosticLevel::error,
+                "bulk-import failed root=%s path=%s errno=%d",
+                current.c_str(),
+                result.fatal_path.c_str(),
+                result.fatal_errno);
+            set_notice(
+                "IMPORT FAILED  |  " +
+                (result.fatal_path.empty() ? current : result.fatal_path));
+            return;
+        }
+        if (result.sources.empty()) {
+            set_notice("No loose movies or TV-show folders found here");
+            return;
+        }
+        diagnostics_log(
+            DiagnosticLevel::info,
+            "bulk-import complete root=%s movies=%zu shows=%zu checked=%zu symlinks=%zu devices=%zu",
+            current.c_str(),
+            result.loose_movies,
+            result.tv_folders,
+            result.entries_checked,
+            result.skipped_symlinks,
+            result.skipped_devices);
+        add_sources(
+            result.sources,
+            "IMPORTED " + std::to_string(result.loose_movies) +
+            " MOVIES + " + std::to_string(result.tv_folders) +
+            " TV SHOWS");
+    }
+
     void add_source(MediaSourceKind kind, const std::string& raw_path) {
+        stop_scan();
         const std::string path = normalize_media_source_path(raw_path);
         struct stat status {};
         const bool valid =
@@ -815,8 +927,106 @@ struct LibraryUi::Impl {
             "media-source added kind=%s path=%s",
             kind == MediaSourceKind::tv_folder ? "tv-folder" : "movie-file",
             path.c_str());
-        close_browser(false);
+        close_browser();
         start_scan();
+    }
+
+    void remove_selected_source() {
+        MediaSource target{};
+        bool found = false;
+        std::string display;
+        SDL_LockMutex(mutex);
+        const std::vector<std::size_t>& filtered = filtered_indices_locked();
+        if (selected >= 0 && selected < static_cast<int>(filtered.size())) {
+            const MediaEntry& entry =
+                entries[filtered[static_cast<std::size_t>(selected)]];
+            const std::string group = series_group_key(entry);
+            for (const MediaSource& source : sources) {
+                const bool matches =
+                    (source.kind == MediaSourceKind::movie_file &&
+                     source.path == entry.path) ||
+                    (source.kind == MediaSourceKind::tv_folder &&
+                     source.path == group);
+                if (matches) {
+                    target = source;
+                    display = source.title.empty()
+                        ? media_source_default_title(source.path)
+                        : source.title;
+                    found = true;
+                    break;
+                }
+            }
+        }
+        const std::uint64_t now = SDL_GetTicks64();
+        if (!found) {
+            SDL_UnlockMutex(mutex);
+            set_notice("This item is not a configured library source");
+            return;
+        }
+        if (pending_remove_path != target.path ||
+            now >= pending_remove_until) {
+            pending_remove_path = target.path;
+            pending_remove_until =
+                now > UINT64_MAX - 5000 ? UINT64_MAX : now + 5000;
+            notice = "Press Triangle again to remove " + display;
+            notice_until = pending_remove_until;
+            ++notice_generation;
+            ++published_generation;
+            SDL_UnlockMutex(mutex);
+            return;
+        }
+        pending_remove_path.clear();
+        pending_remove_until = 0;
+        SDL_UnlockMutex(mutex);
+
+        stop_scan();
+        std::vector<MediaSource> previous_sources;
+        SDL_LockMutex(mutex);
+        previous_sources = sources;
+        sources.erase(
+            std::remove_if(
+                sources.begin(),
+                sources.end(),
+                [&](const MediaSource& source) {
+                    return source.kind == target.kind &&
+                           source.path == target.path;
+                }),
+            sources.end());
+        active_series_root.clear();
+        SDL_UnlockMutex(mutex);
+        if (!persist_sources()) {
+            SDL_LockMutex(mutex);
+            sources = std::move(previous_sources);
+            SDL_UnlockMutex(mutex);
+            set_notice("Unable to save library removal");
+            return;
+        }
+
+        LibraryDatabase database;
+        if (!database.open(database_path) ||
+            !database.remove_root(target.path)) {
+            SDL_LockMutex(mutex);
+            sources = std::move(previous_sources);
+            SDL_UnlockMutex(mutex);
+            (void)persist_sources();
+            set_notice("Unable to remove source from library database");
+            return;
+        }
+        std::vector<MediaEntry> remaining = database.list_media();
+        SDL_LockMutex(mutex);
+        const std::vector<MediaSource> current_sources = sources;
+        SDL_UnlockMutex(mutex);
+        retain_configured_media(remaining, current_sources);
+        annotate_media_sources(remaining, current_sources);
+        publish(std::move(remaining));
+        diagnostics_log(
+            DiagnosticLevel::info,
+            "media-source removed kind=%s path=%s",
+            target.kind == MediaSourceKind::tv_folder
+                ? "tv-folder"
+                : "movie-file",
+            target.path.c_str());
+        set_notice("Removed from library: " + display);
     }
 
     void browser_parent() {
@@ -825,7 +1035,7 @@ struct LibraryUi::Impl {
         current = browser_path;
         SDL_UnlockMutex(mutex);
         if (current == "/") {
-            close_browser(true);
+            close_browser();
             return;
         }
         load_browser_directory(parent_path(current));
@@ -860,14 +1070,14 @@ struct LibraryUi::Impl {
                 }
                 break;
             case SDL_CONTROLLER_BUTTON_X:
-                add_source(MediaSourceKind::tv_folder, current);
+                bulk_import_current_folder(current);
                 break;
             case SDL_CONTROLLER_BUTTON_B:
                 browser_parent();
                 break;
             case kControllerOptionsButton:
             case kControllerTouchpadButton:
-                close_browser(true);
+                close_browser();
                 break;
             case SDL_CONTROLLER_BUTTON_DPAD_UP:
             case SDL_CONTROLLER_BUTTON_DPAD_DOWN:
@@ -1076,7 +1286,142 @@ struct LibraryUi::Impl {
         destroy_label(empty_help_label);
     }
 
+    static int thumbnail_entry(void* userdata) {
+        auto* self = static_cast<Impl*>(userdata);
+        std::string path;
+        SDL_LockMutex(self->mutex);
+        path = self->thumbnail_request_path;
+        SDL_UnlockMutex(self->mutex);
+
+        VideoThumbnail result;
+        std::string error;
+        const bool succeeded = extract_video_thumbnail(
+            path,
+            result,
+            error,
+            &self->thumbnail_cancel);
+
+        SDL_LockMutex(self->mutex);
+        if (!self->thumbnail_cancel.load(std::memory_order_relaxed) &&
+            path == self->thumbnail_request_path) {
+            self->thumbnail_result = succeeded
+                ? std::move(result)
+                : VideoThumbnail{};
+            self->thumbnail_error = std::move(error);
+            self->thumbnail_loading = false;
+            self->thumbnail_ready = true;
+            ++self->published_generation;
+        }
+        SDL_UnlockMutex(self->mutex);
+        return 0;
+    }
+
+    void stop_thumbnail() {
+        thumbnail_cancel.store(true, std::memory_order_relaxed);
+        if (thumbnail_thread) {
+            SDL_WaitThread(thumbnail_thread, nullptr);
+            thumbnail_thread = nullptr;
+        }
+        if (mutex) {
+            SDL_LockMutex(mutex);
+            thumbnail_request_path.clear();
+            thumbnail_error.clear();
+            thumbnail_result = {};
+            thumbnail_loading = false;
+            thumbnail_ready = false;
+            SDL_UnlockMutex(mutex);
+        }
+        thumbnail_cancel.store(false, std::memory_order_relaxed);
+    }
+
+    void start_thumbnail(const std::string& media_path) {
+        stop_thumbnail();
+        thumbnail_cancel.store(false, std::memory_order_relaxed);
+        SDL_LockMutex(mutex);
+        thumbnail_request_path = media_path;
+        thumbnail_error.clear();
+        thumbnail_result = {};
+        thumbnail_loading = true;
+        thumbnail_ready = false;
+        SDL_UnlockMutex(mutex);
+        thumbnail_thread = SDL_CreateThread(
+            thumbnail_entry,
+            "ps5mc-video-preview",
+            this);
+        if (!thumbnail_thread) {
+            SDL_LockMutex(mutex);
+            thumbnail_loading = false;
+            thumbnail_error = SDL_GetError();
+            ++published_generation;
+            SDL_UnlockMutex(mutex);
+            diagnostics_log(
+                DiagnosticLevel::warning,
+                "video-preview thread create failed error=%s",
+                SDL_GetError());
+        }
+    }
+
+    void consume_thumbnail_result() {
+        VideoThumbnail result;
+        std::string path;
+        std::string error;
+        SDL_Thread* completed_thread = nullptr;
+        SDL_LockMutex(mutex);
+        if (thumbnail_ready) {
+            result = std::move(thumbnail_result);
+            path = thumbnail_request_path;
+            error = std::move(thumbnail_error);
+            thumbnail_ready = false;
+            completed_thread = thumbnail_thread;
+            thumbnail_thread = nullptr;
+        }
+        SDL_UnlockMutex(mutex);
+        if (!completed_thread) {
+            return;
+        }
+        SDL_WaitThread(completed_thread, nullptr);
+        if (path != artwork_media_path) {
+            return;
+        }
+        if (result.rgba.empty() || result.width <= 0 || result.height <= 0) {
+            diagnostics_log(
+                DiagnosticLevel::warning,
+                "video-preview unavailable path=%s error=%s",
+                path.c_str(),
+                error.c_str());
+            return;
+        }
+        SDL_Texture* texture = SDL_CreateTexture(
+            renderer,
+            SDL_PIXELFORMAT_RGBA32,
+            SDL_TEXTUREACCESS_STATIC,
+            result.width,
+            result.height);
+        if (!texture ||
+            SDL_UpdateTexture(
+                texture,
+                nullptr,
+                result.rgba.data(),
+                result.width * 4) != 0) {
+            diagnostics_log(
+                DiagnosticLevel::warning,
+                "video-preview texture failed path=%s error=%s",
+                path.c_str(),
+                SDL_GetError());
+            SDL_DestroyTexture(texture);
+            return;
+        }
+        SDL_DestroyTexture(artwork_texture);
+        artwork_texture = texture;
+        artwork_width = result.width;
+        artwork_height = result.height;
+        artwork_position_ms = result.position_ms;
+        artwork_is_video_frame = true;
+        artwork_path.clear();
+    }
+
     void clear_artwork() {
+        stop_thumbnail();
         SDL_DestroyTexture(artwork_texture);
         artwork_texture = nullptr;
         artwork_width = 0;
@@ -1084,12 +1429,14 @@ struct LibraryUi::Impl {
         artwork_generation = -1;
         artwork_media_path.clear();
         artwork_path.clear();
+        artwork_is_video_frame = false;
+        artwork_position_ms = 0;
     }
 
     void update_artwork(
         const std::string& media_path,
         int generation) {
-        if (media_path == artwork_media_path && generation == artwork_generation) {
+        if (media_path == artwork_media_path) {
             return;
         }
         clear_artwork();
@@ -1101,6 +1448,9 @@ struct LibraryUi::Impl {
 
         artwork_path = find_local_artwork(media_path);
         if (artwork_path.empty()) {
+            if (classify_media_path(media_path) == MediaKind::video) {
+                start_thumbnail(media_path);
+            }
             return;
         }
         ArtworkData artwork;
@@ -1112,6 +1462,7 @@ struct LibraryUi::Impl {
                 artwork_path.c_str(),
                 artwork_error.c_str());
             artwork_path.clear();
+            start_thumbnail(media_path);
             return;
         }
         SDL_RWops* source = SDL_RWFromConstMem(
@@ -1123,6 +1474,7 @@ struct LibraryUi::Impl {
                 "library-artwork rwops failed error=%s",
                 SDL_GetError());
             artwork_path.clear();
+            start_thumbnail(media_path);
             return;
         }
         SDL_Surface* surface = artwork.format == ArtworkFormat::png
@@ -1136,6 +1488,7 @@ struct LibraryUi::Impl {
                 artwork_path.c_str(),
                 IMG_GetError());
             artwork_path.clear();
+            start_thumbnail(media_path);
             return;
         }
         if (surface->w <= 0 || surface->h <= 0 ||
@@ -1151,6 +1504,7 @@ struct LibraryUi::Impl {
                 surface->h);
             SDL_FreeSurface(surface);
             artwork_path.clear();
+            start_thumbnail(media_path);
             return;
         }
         artwork_texture = SDL_CreateTextureFromSurface(renderer, surface);
@@ -1165,6 +1519,7 @@ struct LibraryUi::Impl {
             artwork_path.clear();
             artwork_width = 0;
             artwork_height = 0;
+            start_thumbnail(media_path);
         }
     }
 
@@ -1202,19 +1557,19 @@ struct LibraryUi::Impl {
         int fatal_probe_errno = 0;
         std::string fatal_probe_path;
         bool all_scans_complete = true;
-        std::vector<std::string> scan_roots = default_roots();
+        std::vector<std::string> scan_roots;
         for (const MediaSource& source : source_snapshot) {
             if (source.kind != MediaSourceKind::tv_folder ||
                 !is_directory(source.path)) {
                 continue;
             }
-            const bool covered = std::any_of(
+            const bool duplicate = std::any_of(
                 scan_roots.begin(),
                 scan_roots.end(),
                 [&](const std::string& root) {
-                    return path_is_same_or_child(source.path, root);
+                    return source.path == root;
                 });
-            if (!covered) {
+            if (!duplicate) {
                 scan_roots.push_back(source.path);
             }
         }
@@ -1451,6 +1806,7 @@ struct LibraryUi::Impl {
             final_entries = self->entries;
             SDL_UnlockMutex(self->mutex);
         }
+        retain_configured_media(final_entries, source_snapshot);
         annotate_media_sources(final_entries, source_snapshot);
         std::unordered_set<std::string> series_groups;
         std::size_t series_episodes = 0;
@@ -1528,6 +1884,7 @@ struct LibraryUi::Impl {
                 sort_setting_loaded = true;
             }
             entries = database.list_media();
+            retain_configured_media(entries, sources);
             annotate_media_sources(entries, sources);
             overlay_pending_favorites_locked(entries);
             ++published_generation;
@@ -1600,7 +1957,7 @@ struct LibraryUi::Impl {
                 muted);
             add_footer_hint(FooterGlyph::cross, "", "Open / Add Movie");
             add_footer_hint(FooterGlyph::triangle, "", "Add TV Folder");
-            add_footer_hint(FooterGlyph::square, "", "Add Current Folder");
+            add_footer_hint(FooterGlyph::square, "", "Import This Library");
             add_footer_hint(FooterGlyph::circle, "", "Up");
             add_footer_hint(FooterGlyph::options, "", "Close");
             artwork_label = make_label(
@@ -1639,13 +1996,14 @@ struct LibraryUi::Impl {
             add_footer_hint(FooterGlyph::text_button, "L3", "Favorite");
             add_footer_hint(FooterGlyph::touchpad, "", "Add Media");
             add_footer_hint(FooterGlyph::text_button, "R3", "Sort");
-            add_footer_hint(FooterGlyph::square, "", "Rescan");
+            add_footer_hint(FooterGlyph::triangle, "", "Remove");
             add_footer_hint(FooterGlyph::options, "", "Exit");
         } else {
             add_footer_hint(FooterGlyph::cross, "", "Play Episode");
             add_footer_hint(FooterGlyph::circle, "", "Back");
             add_footer_hint(FooterGlyph::text_button, "L1/R1", "Page");
             add_footer_hint(FooterGlyph::touchpad, "", "Add Media");
+            add_footer_hint(FooterGlyph::triangle, "", "Remove Show");
             add_footer_hint(FooterGlyph::options, "", "Exit");
         }
 
@@ -1716,6 +2074,10 @@ struct LibraryUi::Impl {
         SDL_UnlockMutex(mutex);
 
         update_artwork(active_media_path, active_generation);
+        bool is_thumbnail_loading = false;
+        SDL_LockMutex(mutex);
+        is_thumbnail_loading = thumbnail_loading;
+        SDL_UnlockMutex(mutex);
 
         std::string status =
             (active_series_root.empty()
@@ -1733,7 +2095,7 @@ struct LibraryUi::Impl {
             status += "  |  ENTER SEARCH: " + active_search_edit;
         }
         if (is_scanning) {
-            status += "  |  SCANNING STORAGE...";
+            status += "  |  INDEXING SELECTED SOURCES...";
         }
         if (!active_notice.empty()) {
             status += "  |  " + active_notice;
@@ -1753,14 +2115,25 @@ struct LibraryUi::Impl {
                 renderer,
                 row_font,
                 is_scanning
-                    ? "Searching internal storage and connected USB drives..."
+                    ? "Indexing the media sources you selected..."
                     : "Press the touchpad to add a movie or TV-show folder.",
                 muted);
         }
-        const std::string artwork_status = artwork_texture
-            ? "LOCAL ARTWORK  |  " + std::to_string(artwork_width) + "x" +
-                std::to_string(artwork_height)
-            : "NO LOCAL ARTWORK";
+        std::string artwork_status;
+        if (artwork_texture && artwork_is_video_frame) {
+            artwork_status =
+                "VIDEO PREVIEW  |  " + format_duration(artwork_position_ms) +
+                "  |  " + std::to_string(artwork_width) + "x" +
+                std::to_string(artwork_height);
+        } else if (artwork_texture) {
+            artwork_status =
+                "LOCAL ARTWORK  |  " + std::to_string(artwork_width) + "x" +
+                std::to_string(artwork_height);
+        } else if (is_thumbnail_loading) {
+            artwork_status = "GENERATING VIDEO PREVIEW...";
+        } else {
+            artwork_status = "NO PREVIEW AVAILABLE";
+        }
         artwork_label = make_label(
             renderer,
             row_font,
@@ -1928,7 +2301,7 @@ bool LibraryUi::open(
     SDL_LockMutex(impl_->mutex);
     impl_->restore_selected_path_locked(impl_->preferred_selected_path);
     SDL_UnlockMutex(impl_->mutex);
-    if (!impl_->start_scan()) {
+    if (sources_changed && !impl_->start_scan()) {
         return false;
     }
     return true;
@@ -2087,7 +2460,7 @@ LibraryAction LibraryUi::handle_event(const SDL_Event& event, std::string& selec
     bool play = false;
     bool play_queue = false;
     bool leave_series = false;
-    bool rescan = false;
+    bool remove_source = false;
     bool begin_search = false;
     bool clear_search = false;
     bool cycle_sort = false;
@@ -2106,10 +2479,9 @@ LibraryAction LibraryUi::handle_event(const SDL_Event& event, std::string& selec
                 play_queue = !leave_series;
                 break;
             case SDL_CONTROLLER_BUTTON_X:
-                rescan = true;
                 break;
             case SDL_CONTROLLER_BUTTON_Y:
-                filter_delta = 1;
+                remove_source = true;
                 break;
             case SDL_CONTROLLER_BUTTON_DPAD_UP:
                 delta = -1;
@@ -2159,7 +2531,9 @@ LibraryAction LibraryUi::handle_event(const SDL_Event& event, std::string& selec
                 play_queue = true;
                 break;
             case SDLK_F5:
-                rescan = true;
+                break;
+            case SDLK_DELETE:
+                remove_source = true;
                 break;
             case SDLK_SLASH:
                 begin_search = true;
@@ -2222,8 +2596,8 @@ LibraryAction LibraryUi::handle_event(const SDL_Event& event, std::string& selec
     if (toggle_favorite) {
         impl_->toggle_selected_favorite();
     }
-    if (rescan) {
-        impl_->start_scan();
+    if (remove_source) {
+        impl_->remove_selected_source();
     }
     if (delta != 0) {
         SDL_LockMutex(impl_->mutex);
@@ -2306,6 +2680,7 @@ void LibraryUi::show_notice(std::string message, std::uint64_t milliseconds) {
 
 void LibraryUi::render() {
     impl_->update_ime_state();
+    impl_->consume_thumbnail_result();
     SDL_RenderSetLogicalSize(impl_->renderer, kUiWidth, kUiHeight);
     SDL_LockMutex(impl_->mutex);
     const bool notice_expired = !impl_->notice.empty() &&
@@ -2472,12 +2847,6 @@ void LibraryUi::render() {
         SDL_RenderFillRect(impl_->renderer, &empty_art);
         SDL_SetRenderDrawColor(impl_->renderer, 28, 49, 82, 255);
         SDL_RenderDrawRect(impl_->renderer, &empty_art);
-        draw_logo(
-            impl_->renderer,
-            impl_->logo_texture,
-            kArtworkPanelX + kArtworkPanelWidth / 2,
-            kRowsTop + 308,
-            150);
     }
     if (impl_->artwork_label.texture) {
         SDL_Rect target{

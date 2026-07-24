@@ -201,4 +201,32 @@ void annotate_media_sources(
     }
 }
 
+bool media_entry_is_covered_by_sources(
+    const MediaEntry& entry,
+    const std::vector<MediaSource>& sources) {
+    const std::string path = normalize_media_source_path(entry.path);
+    for (const MediaSource& source : sources) {
+        const std::string root = normalize_media_source_path(source.path);
+        if (source.kind == MediaSourceKind::movie_file
+                ? path == root
+                : path_is_within(path, root)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+void retain_configured_media(
+    std::vector<MediaEntry>& entries,
+    const std::vector<MediaSource>& sources) {
+    entries.erase(
+        std::remove_if(
+            entries.begin(),
+            entries.end(),
+            [&](const MediaEntry& entry) {
+                return !media_entry_is_covered_by_sources(entry, sources);
+            }),
+        entries.end());
+}
+
 } // namespace ps5mc

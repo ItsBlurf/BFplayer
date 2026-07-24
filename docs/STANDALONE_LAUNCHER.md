@@ -17,6 +17,10 @@ The payload:
 7. launches the embedded player into the required PS5 BigApp context when the
    tile requests `/launch`.
 
+The loopback response is a dark three-second handoff screen. It attempts
+`window.close()` and browser history return after the countdown; if PS5's
+browser blocks both operations, it tells the user to press the PS button once.
+
 It does not start, link, load, or contact `ps5-payload-websrv`. It does not use
 port 8080, the websrv catalog, `homebrew.js`, or the HBL file picker. The HTTP
 listener is not reachable from the LAN and implements only `GET /launch`.
@@ -24,6 +28,10 @@ listener is not reachable from the LAN and implements only `GET /launch`.
 The SDK wrapper still records `libkernel_web.sprx` as a normal low-level PS5
 runtime stub dependency. That system library is not the `ps5-payload-websrv`
 application and does not create a websrv process or listen on port 8080.
+
+The visible `PSMC00001` registration uses `applicationCategoryType: 65536`, so
+the dashboard lists it in Media. The separate `PSMR00001` registration is the
+native BigApp runtime host and must keep its application category unchanged.
 
 The payload must be injected once after each jailbreak because the minimal
 loopback launcher is a resident process. The installed dashboard tile remains,

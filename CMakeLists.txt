@@ -7,6 +7,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 add_library(ps5mc_core STATIC
     src/core/artwork.cpp
+    src/core/bulk_import.cpp
     src/core/diagnostics.cpp
     src/core/library_scanner.cpp
     src/core/library_view.cpp
@@ -33,6 +34,10 @@ if(BUILD_TESTING)
     add_executable(artwork_tests tests/artwork_tests.cpp)
     target_link_libraries(artwork_tests PRIVATE ps5mc_core)
     add_test(NAME artwork_tests COMMAND artwork_tests)
+
+    add_executable(bulk_import_tests tests/bulk_import_tests.cpp)
+    target_link_libraries(bulk_import_tests PRIVATE ps5mc_core)
+    add_test(NAME bulk_import_tests COMMAND bulk_import_tests)
 
     add_executable(video_layout_tests tests/video_layout_tests.cpp)
     target_link_libraries(video_layout_tests PRIVATE ps5mc_core)

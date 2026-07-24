@@ -57,6 +57,13 @@ function Draw-Hint(
         }
         'O' { $graphics.DrawEllipse($pen, $x + 4, $cy - 11, 22, 22) }
         'SQUARE' { $graphics.DrawRectangle($pen, $x + 4, $cy - 11, 22, 22) }
+        'TRIANGLE' {
+            $points = [Drawing.Point[]]@(
+                [Drawing.Point]::new($x + 15, $cy - 12),
+                [Drawing.Point]::new($x + 27, $cy + 11),
+                [Drawing.Point]::new($x + 3, $cy + 11))
+            $graphics.DrawPolygon($pen, $points)
+        }
         'DPAD' {
             $graphics.DrawRectangle($pen, $x + 11, $cy - 14, 8, 28)
             $graphics.DrawRectangle($pen, $x + 1, $cy - 4, 28, 8)
@@ -123,8 +130,15 @@ try {
     $graphics.DrawString($emptyTitle, $titleFont, $white, 656 - $titleSize.Width / 2, 665)
     $graphics.DrawString($emptyHelp, $rowFont, $muted, 656 - $helpSize.Width / 2, 730)
 
-    Draw-Logo 1586 534 150
-    $artText = 'NO LOCAL ARTWORK'
+    # Representative generated video frame; the runtime decodes this from the
+    # selected title when no local JPEG/PNG cover is available.
+    Fill '#071226' 1360 288 452 254
+    Fill '#16345c' 1360 288 452 62
+    Fill '#285a78' 1360 350 452 104
+    Fill '#d08a35' 1360 454 452 88
+    Fill '#0c1e32' 1428 378 92 76
+    Fill '#18283d' 1554 326 172 128
+    $artText = 'VIDEO PREVIEW  |  00:47:12  |  640x360'
     $artSize = $graphics.MeasureString($artText, $rowFont)
     $graphics.DrawString($artText, $rowFont, $muted, 1586 - $artSize.Width / 2, 897)
 
@@ -137,7 +151,7 @@ try {
     $hintX = Draw-Hint 'L3' 'Favorite' $hintX $footerFont $muted
     $hintX = Draw-Hint 'TOUCH' 'Add Media' $hintX $footerFont $muted
     $hintX = Draw-Hint 'R3' 'Sort' $hintX $footerFont $muted
-    $hintX = Draw-Hint 'SQUARE' 'Rescan' $hintX $footerFont $muted
+    $hintX = Draw-Hint 'TRIANGLE' 'Remove' $hintX $footerFont $muted
     $null = Draw-Hint 'OPTIONS' 'Exit' $hintX $footerFont $muted
 
     $target = [IO.Path]::GetFullPath($OutFile)

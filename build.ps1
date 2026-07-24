@@ -96,6 +96,7 @@ try {
     $sources = @(
         'src\main.cpp',
         'src\core\artwork.cpp',
+        'src\core\bulk_import.cpp',
         'src\core\diagnostics.cpp',
         'src\core\library_scanner.cpp',
         'src\core\library_view.cpp',
@@ -104,6 +105,7 @@ try {
         'src\core\safe_read_file.cpp',
         'src\core\source_uri.cpp',
         'src\core\video_layout.cpp',
+        'src\core\video_thumbnail.cpp',
         'src\core\library_database.cpp',
         'src\core\media_probe.cpp',
         'src\playback\external_subtitles.cpp',
