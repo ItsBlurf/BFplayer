@@ -1,0 +1,8 @@
+/build/
+/diagnostics/
+/dist/
+/assets/icon0-alpha8-legacy.png
+*.log
+*.tmp
+.vs/
+.vscode/

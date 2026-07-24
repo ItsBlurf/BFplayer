@@ -1,0 +1,1843 @@
+#include <SDL.h>
+#include <kitchensink2/kitchensink.h>
+
+extern "C" {
+#include <libavcodec/codec_id.h>
+#include <libavformat/avio.h>
+#include <libavformat/avformat.h>
+#include <libavutil/dict.h>
+#include <libavutil/error.h>
+#include <libavutil/mem.h>
+}
+
+#include "ps5mc/external_subtitles.hpp"
+#include "ps5mc/controller_buttons.hpp"
+#include "ps5mc/diagnostics.hpp"
+#include "ps5mc/library_database.hpp"
+#include "ps5mc/library_scanner.hpp"
+#include "ps5mc/library_ui.hpp"
+#include "ps5mc/playlist.hpp"
+#include "ps5mc/playback_osd.hpp"
+#include "ps5mc/safe_read_file.hpp"
+#include "ps5mc/source_uri.hpp"
+#include "ps5mc/video_layout.hpp"
+
+#include <algorithm>
+#include <array>
+#include <atomic>
+#include <cerrno>
+#include <chrono>
+#include <cmath>
+#include <cstdint>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
+#include <ctime>
+#include <iterator>
+#include <limits>
+#include <optional>
+#include <string>
+#include <utility>
+#include <vector>
+
+namespace {
+
+constexpr int kWindowWidth = 1920;
+constexpr int kWindowHeight = 1080;
+constexpr int kAudioBufferBytes = 64 * 1024;
+constexpr int kSubtitleAtlasSize = 4096;
+constexpr int kSubtitleFragments = 1024;
+
+struct App {
+    SDL_Window* window = nullptr;
+    SDL_Renderer* renderer = nullptr;
+    SDL_GameController* controller = nullptr;
+    Kit_Source* source = nullptr;
+    Kit_Player* player = nullptr;
+    SDL_Texture* video = nullptr;
+    SDL_Texture* subtitles = nullptr;
+    SDL_AudioDeviceID audio = 0;
+    ps5mc::ExternalSubtitles external_subtitles;
+    ps5mc::SafeReadFile local_media;
+    ps5mc::PlaybackOsd osd;
+    std::vector<std::string> subtitle_sidecars;
+    std::string current_media_path;
+    std::string fallback_font;
+    int external_subtitle_index = -1;
+    int volume_percent = 100;
+    int previous_volume_percent = 100;
+    std::int64_t subtitle_delay_ms = 0;
+    bool subtitle_delay_mode = false;
+    ps5mc::VideoScaleMode video_scale_mode = ps5mc::VideoScaleMode::fit;
+    ps5mc::VideoAspectMode video_aspect_mode =
+        ps5mc::VideoAspectMode::default_ratio;
+    ps5mc::VideoCropMode video_crop_mode =
+        ps5mc::VideoCropMode::default_crop;
+    bool running = true;
+    bool playback_running = false;
+    bool paused = false;
+    std::atomic<bool> io_cancel{false};
+    std::atomic<std::int64_t> source_open_deadline_ms{0};
+};
+
+enum class PlaybackOutcome {
+    finished,
+    user_return,
+    error,
+};
+
+void close_media(App& app);
+
+void log_sdl(const char* operation) {
+    ps5mc::diagnostics_log(
+        ps5mc::DiagnosticLevel::error,
+        "sdl operation=%s error=%s",
+        operation ? operation : "<unknown>",
+        SDL_GetError());
+}
+
+void sdl_log_output(
+    void*,
+    int category,
+    SDL_LogPriority priority,
+    const char* message) {
+    const ps5mc::DiagnosticLevel level =
+        priority >= SDL_LOG_PRIORITY_ERROR
+            ? ps5mc::DiagnosticLevel::error
+            : (priority == SDL_LOG_PRIORITY_WARN
+                   ? ps5mc::DiagnosticLevel::warning
+                   : ps5mc::DiagnosticLevel::info);
+    ps5mc::diagnostics_log(
+        level,
+        "sdl-log category=%d priority=%d message=%s",
+        category,
+        static_cast<int>(priority),
+        message ? message : "<null>");
+}
+
+std::string executable_directory(const char* executable_path) {
+    if (!executable_path || executable_path[0] != '/') {
+        return {};
+    }
+    const char* slash = std::strrchr(executable_path, '/');
+    if (!slash) {
+        return {};
+    }
+    if (slash == executable_path) {
+        return "/";
+    }
+    return std::string(executable_path, static_cast<std::size_t>(slash - executable_path));
+}
+
+std::string executable_asset_path(const char* executable_path, const char* relative_path) {
+    const std::string directory = executable_directory(executable_path);
+    if (directory.empty()) {
+        return relative_path ? relative_path : std::string{};
+    }
+    return directory + "/" + (relative_path ? relative_path : "");
+}
+
+void log_installed_manifest(const char* executable_path) {
+    const std::string manifest_path = executable_asset_path(executable_path, "build-manifest.json");
+    FILE* manifest = std::fopen(manifest_path.c_str(), "rb");
+    if (!manifest) {
+        ps5mc::diagnostics_log(
+            ps5mc::DiagnosticLevel::warning,
+            "build-manifest unavailable path=%s errno=%d",
+            manifest_path.c_str(),
+            errno);
+        return;
+    }
+    char contents[4096]{};
+    const std::size_t bytes = std::fread(contents, 1, sizeof(contents) - 1U, manifest);
+    const bool complete = std::feof(manifest) != 0;
+    std::fclose(manifest);
+    contents[bytes] = '\0';
+    ps5mc::diagnostics_log(
+        ps5mc::DiagnosticLevel::info,
+        "build-manifest bytes=%zu complete=%d content=%s",
+        bytes,
+        complete ? 1 : 0,
+        contents);
+}
+
+std::int64_t monotonic_milliseconds() {
+    return std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now().time_since_epoch()).count();
+}
+
+std::string ffmpeg_error(int value) {
+    char buffer[AV_ERROR_MAX_STRING_SIZE]{};
+    return av_strerror(value, buffer, sizeof(buffer)) == 0
+        ? std::string(buffer)
+        : "FFmpeg error " + std::to_string(value);
+}
+
+std::string bounded_metadata(const char* value, std::size_t maximum) {
+    if (!value) {
+        return {};
+    }
+    std::size_t length = 0;
+    while (length < maximum && value[length] != '\0') {
+        ++length;
+    }
+    return std::string(value, length);
+}
+
+std::int64_t seconds_to_milliseconds(double seconds) {
+    if (!std::isfinite(seconds) || seconds <= 0.0) {
+        return 0;
+    }
+    constexpr long double kMaximumSeconds =
+        static_cast<long double>(std::numeric_limits<std::int64_t>::max()) /
+        1000.0L;
+    if (static_cast<long double>(seconds) >= kMaximumSeconds) {
+        return std::numeric_limits<std::int64_t>::max();
+    }
+    return static_cast<std::int64_t>(std::llround(seconds * 1000.0));
+}
+
+bool playback_completed(std::int64_t position_ms, std::int64_t duration_ms) {
+    return position_ms >= 0 && duration_ms > 0 &&
+        static_cast<long double>(position_ms) /
+            static_cast<long double>(duration_ms) >= 0.92L;
+}
+
+int interrupt_source_io(void* opaque) {
+    const auto* app = static_cast<const App*>(opaque);
+    if (!app || app->io_cancel.load(std::memory_order_relaxed)) {
+        return 1;
+    }
+    const std::int64_t deadline =
+        app->source_open_deadline_ms.load(std::memory_order_relaxed);
+    return deadline > 0 && monotonic_milliseconds() >= deadline ? 1 : 0;
+}
+
+int read_local_media(void* opaque, std::uint8_t* buffer, int length) {
+    auto* file = static_cast<ps5mc::SafeReadFile*>(opaque);
+    if (!file) {
+        return AVERROR(EINVAL);
+    }
+    const int result = file->read(buffer, length);
+    return result == 0 ? AVERROR_EOF : result;
+}
+
+std::int64_t seek_local_media(void* opaque, std::int64_t offset, int whence) {
+    auto* file = static_cast<ps5mc::SafeReadFile*>(opaque);
+    if (!file) {
+        return AVERROR(EINVAL);
+    }
+    if ((whence & AVSEEK_SIZE) == AVSEEK_SIZE) {
+        return file->size() >
+                static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max())
+            ? AVERROR(EOVERFLOW)
+            : static_cast<std::int64_t>(file->size());
+    }
+    const int origin = whence & ~AVSEEK_FORCE;
+    if (origin != SEEK_SET && origin != SEEK_CUR && origin != SEEK_END) {
+        return AVERROR(EINVAL);
+    }
+    return file->seek(offset, origin);
+}
+
+void free_custom_avio(AVIOContext*& context) {
+    if (context) {
+        av_freep(&context->buffer);
+        avio_context_free(&context);
+    }
+}
+
+Kit_Source* create_bounded_source(
+    App& app,
+    const char* path,
+    std::string& error) {
+    error.clear();
+    if (!path || !path[0]) {
+        error = "Empty media source";
+        ps5mc::diagnostics_log(ps5mc::DiagnosticLevel::error, "source-open rejected reason=empty");
+        return nullptr;
+    }
+    const bool network = ps5mc::is_network_uri(path);
+    ps5mc::diagnostics_log(
+        ps5mc::DiagnosticLevel::info,
+        "source-open begin kind=%s path=%s",
+        network ? "network" : "local",
+        ps5mc::redact_uri_secrets(path).c_str());
+    if (network && !ps5mc::is_supported_stream_uri(path)) {
+        error = "Unsupported network protocol";
+        ps5mc::diagnostics_log(ps5mc::DiagnosticLevel::error, "source-open rejected reason=unsupported-protocol");
+        return nullptr;
+    }
+    if (network && ps5mc::uri_has_credentials(path)) {
+        error = "Network URLs containing usernames or passwords are rejected";
+        ps5mc::diagnostics_log(ps5mc::DiagnosticLevel::error, "source-open rejected reason=credentials");
+        return nullptr;
+    }
+
+    app.local_media.close();
+    app.io_cancel.store(false, std::memory_order_relaxed);
+    app.source_open_deadline_ms.store(
+        monotonic_milliseconds() + 30000,
+        std::memory_order_relaxed);
+
+    AVFormatContext* format = avformat_alloc_context();
+    AVIOContext* custom_io = nullptr;
+    if (!format) {
+        error = "Unable to allocate FFmpeg source context";
+        app.source_open_deadline_ms.store(0, std::memory_order_relaxed);
+        return nullptr;
+    }
+    format->interrupt_callback.callback = interrupt_source_io;
+    format->interrupt_callback.opaque = &app;
+
+    if (!network) {
+        if (!app.local_media.open(path, error)) {
+            avformat_free_context(format);
+            app.source_open_deadline_ms.store(0, std::memory_order_relaxed);
+            return nullptr;
+        }
+        constexpr int kAvioBufferBytes = 64 * 1024;
+        auto* buffer = static_cast<std::uint8_t*>(av_malloc(kAvioBufferBytes));
+        if (!buffer) {
+            error = "Unable to allocate local media I/O buffer";
+            app.local_media.close();
+            avformat_free_context(format);
+            app.source_open_deadline_ms.store(0, std::memory_order_relaxed);
+            return nullptr;
+        }
+        custom_io = avio_alloc_context(
+            buffer,
+            kAvioBufferBytes,
+            0,
+            &app.local_media,
+            read_local_media,
+            nullptr,
+            seek_local_media);
+        if (!custom_io) {
+            av_free(buffer);
+            error = "Unable to allocate local media AVIO context";
+            app.local_media.close();
+            avformat_free_context(format);
+            app.source_open_deadline_ms.store(0, std::memory_order_relaxed);
+            return nullptr;
+        }
+        custom_io->seekable = AVIO_SEEKABLE_NORMAL;
+        format->pb = custom_io;
+        format->flags |= AVFMT_FLAG_CUSTOM_IO;
+    }
+
+    AVDictionary* options = nullptr;
+    av_dict_set(&options, "probesize", "33554432", 0);
+    av_dict_set(&options, "analyzeduration", "15000000", 0);
+    av_dict_set(&options, "max_probe_packets", "10000", 0);
+    if (network) {
+        av_dict_set(&options, "rw_timeout", "15000000", 0);
+        av_dict_set(
+            &options,
+            "protocol_whitelist",
+            "async,cache,crypto,data,ftp,http,httpproxy,https,mmsh,mmst,"
+            "rtmp,rtmpe,rtmps,rtmpt,rtmpte,rtmpts,rtp,rtsp,sctp,srtp,"
+            "tcp,tls,udp,udplite",
+            0);
+    } else {
+        av_dict_set(&options, "protocol_whitelist", "crypto,data,file", 0);
+    }
+
+    int result = avformat_open_input(&format, path, nullptr, &options);
+    av_dict_free(&options);
+    if (result >= 0) {
+        result = avformat_find_stream_info(format, nullptr);
+    }
+    app.source_open_deadline_ms.store(0, std::memory_order_relaxed);
+    if (result < 0) {
+        error = "Open media source: " + ffmpeg_error(result);
+        ps5mc::diagnostics_log(
+            ps5mc::DiagnosticLevel::error,
+            "source-open failed path=%s ffmpeg=%d error=%s",
+            ps5mc::redact_uri_secrets(path).c_str(),
+            result,
+            error.c_str());
+        avformat_close_input(&format);
+        free_custom_avio(custom_io);
+        app.local_media.close();
+        return nullptr;
+    }
+
+    auto* source = static_cast<Kit_Source*>(std::calloc(1, sizeof(Kit_Source)));
+    if (!source) {
+        error = "Unable to allocate Kitchensink source";
+        avformat_close_input(&format);
+        free_custom_avio(custom_io);
+        app.local_media.close();
+        return nullptr;
+    }
+    source->format_ctx = format;
+    source->avio_ctx = custom_io;
+    ps5mc::diagnostics_log(
+        ps5mc::DiagnosticLevel::info,
+        "source-open success path=%s streams=%u duration_us=%lld format=%s",
+        ps5mc::redact_uri_secrets(path).c_str(),
+        format->nb_streams,
+        static_cast<long long>(format->duration),
+        format->iformat && format->iformat->name ? format->iformat->name : "<unknown>");
+    return source;
+}
+
+std::string track_description(const App& app, int index) {
+    if (!app.source || index < 0) {
+        return "Off";
+    }
+    const auto* format = static_cast<const AVFormatContext*>(app.source->format_ctx);
+    if (!format || index >= static_cast<int>(format->nb_streams)) {
+        return "Track " + std::to_string(index);
+    }
+    const AVStream* stream = format->streams[index];
+    std::string description;
+    if (const AVDictionaryEntry* language =
+            av_dict_get(stream->metadata, "language", nullptr, 0)) {
+        description = bounded_metadata(language->value, 64);
+    }
+    if (const AVDictionaryEntry* title =
+            av_dict_get(stream->metadata, "title", nullptr, 0)) {
+        if (!description.empty()) {
+            description += " - ";
+        }
+        description += bounded_metadata(title->value, 256);
+    }
+    const char* codec = avcodec_get_name(stream->codecpar->codec_id);
+    if (codec && codec[0]) {
+        if (!description.empty()) {
+            description += " - ";
+        }
+        description += codec;
+    }
+    if (stream->codecpar->codec_type == AVMEDIA_TYPE_AUDIO &&
+        stream->codecpar->ch_layout.nb_channels > 0) {
+        description += " - " + std::to_string(stream->codecpar->ch_layout.nb_channels) + "ch";
+    }
+    return description.empty() ? "Track " + std::to_string(index) : description;
+}
+
+const AVStream* source_stream(const App& app, int index) {
+    if (!app.source || index < 0) {
+        return nullptr;
+    }
+    const auto* format = static_cast<const AVFormatContext*>(app.source->format_ctx);
+    if (!format || index >= static_cast<int>(format->nb_streams)) {
+        return nullptr;
+    }
+    return format->streams[index];
+}
+
+std::string stream_language(const App& app, int index) {
+    const AVStream* stream = source_stream(app, index);
+    if (!stream) {
+        return {};
+    }
+    const AVDictionaryEntry* language =
+        av_dict_get(stream->metadata, "language", nullptr, 0);
+    return language && language->value
+        ? bounded_metadata(language->value, 64)
+        : std::string{};
+}
+
+AVMediaType media_type_for(Kit_StreamType type) {
+    switch (type) {
+        case KIT_STREAMTYPE_VIDEO:
+            return AVMEDIA_TYPE_VIDEO;
+        case KIT_STREAMTYPE_AUDIO:
+            return AVMEDIA_TYPE_AUDIO;
+        case KIT_STREAMTYPE_SUBTITLE:
+            return AVMEDIA_TYPE_SUBTITLE;
+        default:
+            return AVMEDIA_TYPE_UNKNOWN;
+    }
+}
+
+int resolve_preferred_stream(
+    const App& app,
+    Kit_StreamType type,
+    int saved_index,
+    const std::string& saved_language) {
+    const AVMediaType wanted_type = media_type_for(type);
+    const AVStream* saved_stream = source_stream(app, saved_index);
+    if (saved_stream && saved_stream->codecpar->codec_type == wanted_type &&
+        (saved_language.empty() || stream_language(app, saved_index) == saved_language)) {
+        return saved_index;
+    }
+    if (saved_language.empty()) {
+        return -1;
+    }
+    int index = Kit_GetNextSourceStream(app.source, type, -1, 0);
+    while (index >= 0) {
+        if (stream_language(app, index) == saved_language) {
+            return index;
+        }
+        index = Kit_GetNextSourceStream(app.source, type, index, 0);
+    }
+    return -1;
+}
+
+SDL_Renderer* create_renderer(SDL_Window* window) {
+    SDL_Renderer* renderer = SDL_CreateRenderer(
+        window, -1, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
+    if (!renderer) {
+        renderer = SDL_CreateRenderer(
+            window, -1, SDL_RENDERER_SOFTWARE | SDL_RENDERER_PRESENTVSYNC);
+    }
+    return renderer;
+}
+
+void close_audio(App& app) {
+    if (app.audio != 0) {
+        SDL_ClearQueuedAudio(app.audio);
+        SDL_CloseAudioDevice(app.audio);
+        app.audio = 0;
+    }
+}
+
+bool open_audio(App& app) {
+    close_audio(app);
+    if (Kit_GetPlayerAudioStream(app.player) < 0) {
+        return true;
+    }
+
+    Kit_PlayerInfo info{};
+    Kit_GetPlayerInfo(app.player, &info);
+    SDL_AudioSpec wanted{};
+    SDL_AudioSpec obtained{};
+    wanted.freq = info.audio_format.sample_rate;
+    wanted.format = static_cast<SDL_AudioFormat>(info.audio_format.format);
+    wanted.channels = static_cast<Uint8>(info.audio_format.channels);
+    wanted.samples = 1024;
+    app.audio = SDL_OpenAudioDevice(nullptr, 0, &wanted, &obtained, 0);
+    if (app.audio == 0) {
+        log_sdl("SDL_OpenAudioDevice");
+        return false;
+    }
+    SDL_PauseAudioDevice(app.audio, 0);
+    return true;
+}
+
+void destroy_video_textures(App& app) {
+    SDL_DestroyTexture(app.subtitles);
+    SDL_DestroyTexture(app.video);
+    app.subtitles = nullptr;
+    app.video = nullptr;
+}
+
+bool create_video_textures(App& app) {
+    destroy_video_textures(app);
+    Kit_PlayerInfo info{};
+    Kit_GetPlayerInfo(app.player, &info);
+
+    if (Kit_GetPlayerVideoStream(app.player) >= 0) {
+        SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "linear");
+        app.video = SDL_CreateTexture(
+            app.renderer,
+            info.video_format.format,
+            SDL_TEXTUREACCESS_STATIC,
+            info.video_format.width,
+            info.video_format.height);
+        if (!app.video) {
+            log_sdl("SDL_CreateTexture(video)");
+            return false;
+        }
+        SDL_RenderSetLogicalSize(app.renderer, kWindowWidth, kWindowHeight);
+    }
+
+    if (Kit_GetPlayerSubtitleStream(app.player) >= 0) {
+        SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "nearest");
+        app.subtitles = SDL_CreateTexture(
+            app.renderer,
+            SDL_PIXELFORMAT_RGBA32,
+            SDL_TEXTUREACCESS_STATIC,
+            kSubtitleAtlasSize,
+            kSubtitleAtlasSize);
+        if (!app.subtitles) {
+            log_sdl("SDL_CreateTexture(subtitle atlas)");
+            return false;
+        }
+        SDL_SetTextureBlendMode(app.subtitles, SDL_BLENDMODE_BLEND);
+    }
+    return true;
+}
+
+double player_display_aspect(App& app) {
+    int numerator = 0;
+    int denominator = 0;
+    if (Kit_GetPlayerAspectRatio(app.player, &numerator, &denominator) == 0 &&
+        numerator > 0 && denominator > 0) {
+        return static_cast<double>(numerator) / static_cast<double>(denominator);
+    }
+    return 0.0;
+}
+
+ps5mc::VideoLayout player_video_layout(App& app) {
+    Kit_PlayerInfo info{};
+    Kit_GetPlayerInfo(app.player, &info);
+    return ps5mc::compute_video_layout(
+        info.video_format.width,
+        info.video_format.height,
+        player_display_aspect(app),
+        kWindowWidth,
+        kWindowHeight,
+        app.video_scale_mode,
+        app.video_aspect_mode,
+        app.video_crop_mode);
+}
+
+bool set_stream(App& app, Kit_StreamType type, int index) {
+    const int previous = Kit_GetPlayerStream(app.player, type);
+    if (previous == index) {
+        return true;
+    }
+    if (Kit_SetPlayerStream(app.player, type, index) != 0) {
+        ps5mc::diagnostics_log(
+            ps5mc::DiagnosticLevel::error,
+            "track-switch failed type=%d previous=%d requested=%d error=%s",
+            type,
+            previous,
+            index,
+            Kit_GetError());
+        return false;
+    }
+    bool resources_ready = true;
+    if (type == KIT_STREAMTYPE_AUDIO) {
+        resources_ready = open_audio(app);
+    } else if (type == KIT_STREAMTYPE_VIDEO || type == KIT_STREAMTYPE_SUBTITLE) {
+        resources_ready = create_video_textures(app);
+    }
+    if (!resources_ready) {
+        ps5mc::diagnostics_log(
+            ps5mc::DiagnosticLevel::error,
+            "track-switch resource-failure type=%d requested=%d restoring=%d",
+            type,
+            index,
+            previous);
+        const bool decoder_restored =
+            Kit_SetPlayerStream(app.player, type, previous) == 0;
+        const bool resources_restored = decoder_restored &&
+            (type == KIT_STREAMTYPE_AUDIO
+                 ? open_audio(app)
+                 : create_video_textures(app));
+        if (!resources_restored) {
+            ps5mc::diagnostics_log(
+                ps5mc::DiagnosticLevel::error,
+                "track-switch rollback-failed type=%d error=%s",
+                type,
+                Kit_GetError());
+            app.osd.show("Track switch failed; returning to library", 5000);
+            app.playback_running = false;
+        } else {
+            app.osd.show("Track switch failed; previous track restored", 4000);
+        }
+        return false;
+    }
+
+    ps5mc::diagnostics_log(
+        ps5mc::DiagnosticLevel::info,
+        "track-switch success type=%d previous=%d current=%d description=%s",
+        type,
+        previous,
+        index,
+        track_description(app, index).c_str());
+    const char* type_name = type == KIT_STREAMTYPE_AUDIO ? "Audio" :
+        (type == KIT_STREAMTYPE_VIDEO ? "Video" : "Subtitles");
+    app.osd.show(std::string(type_name) + ": " + track_description(app, index));
+    return true;
+}
+
+void cycle_stream(App& app, Kit_StreamType type, bool allow_off) {
+    const int current = Kit_GetPlayerStream(app.player, type);
+    int next = Kit_GetNextSourceStream(app.source, type, current, 0);
+    if (next < 0 && allow_off && current >= 0) {
+        set_stream(app, type, -1);
+        return;
+    }
+    if (next < 0) {
+        next = Kit_GetNextSourceStream(app.source, type, -1, 0);
+    }
+    if (next >= 0 && next != current) {
+        set_stream(app, type, next);
+    }
+}
+
+bool open_external_subtitle(App& app, int index) {
+    if (index < 0 || index >= static_cast<int>(app.subtitle_sidecars.size())) {
+        ps5mc::diagnostics_log(
+            ps5mc::DiagnosticLevel::warning,
+            "subtitle-open rejected index=%d count=%zu",
+            index,
+            app.subtitle_sidecars.size());
+        return false;
+    }
+    const int previous_embedded = Kit_GetPlayerSubtitleStream(app.player);
+    if (!app.external_subtitles.open(
+            app.renderer,
+            app.subtitle_sidecars[static_cast<std::size_t>(index)],
+            app.fallback_font,
+            kWindowWidth,
+            kWindowHeight)) {
+        ps5mc::diagnostics_log(
+            ps5mc::DiagnosticLevel::error,
+            "subtitle-open failed path=%s error=%s",
+            ps5mc::redact_uri_secrets(
+                app.subtitle_sidecars[static_cast<std::size_t>(index)]).c_str(),
+            app.external_subtitles.error().c_str());
+        return false;
+    }
+    if (previous_embedded >= 0 &&
+        !set_stream(app, KIT_STREAMTYPE_SUBTITLE, -1)) {
+        app.external_subtitles.close();
+        return false;
+    }
+    app.external_subtitle_index = index;
+    ps5mc::diagnostics_log(
+        ps5mc::DiagnosticLevel::info,
+        "subtitle-open success index=%d path=%s",
+        index,
+        ps5mc::redact_uri_secrets(
+            app.subtitle_sidecars[static_cast<std::size_t>(index)]).c_str());
+    app.osd.show(
+        "Subtitles: " + ps5mc::redact_uri_secrets(
+            app.subtitle_sidecars[static_cast<std::size_t>(index)]));
+    return true;
+}
+
+ps5mc::TrackPreferences current_track_preferences(const App& app) {
+    ps5mc::TrackPreferences preferences{};
+    if (!app.player) {
+        return preferences;
+    }
+    preferences.audio_stream = Kit_GetPlayerAudioStream(app.player);
+    preferences.audio_language = stream_language(app, preferences.audio_stream);
+    if (app.external_subtitles.is_open() && app.external_subtitle_index >= 0 &&
+        app.external_subtitle_index < static_cast<int>(app.subtitle_sidecars.size())) {
+        preferences.external_subtitle = app.subtitle_sidecars[
+            static_cast<std::size_t>(app.external_subtitle_index)];
+    } else {
+        preferences.subtitle_stream = Kit_GetPlayerSubtitleStream(app.player);
+        preferences.subtitle_language = stream_language(app, preferences.subtitle_stream);
+    }
+    preferences.subtitle_delay_ms = app.subtitle_delay_ms;
+    return preferences;
+}
+
+void restore_track_preferences(
+    App& app,
+    const ps5mc::TrackPreferences& preferences,
+    bool explicit_subtitle) {
+    app.subtitle_delay_ms = std::clamp<std::int64_t>(
+        preferences.subtitle_delay_ms, -10000, 10000);
+
+    const int audio_stream = resolve_preferred_stream(
+        app,
+        KIT_STREAMTYPE_AUDIO,
+        preferences.audio_stream,
+        preferences.audio_language);
+    if (audio_stream >= 0 && audio_stream != Kit_GetPlayerAudioStream(app.player)) {
+        set_stream(app, KIT_STREAMTYPE_AUDIO, audio_stream);
+    }
+
+    if (explicit_subtitle) {
+        return;
+    }
+    if (!preferences.external_subtitle.empty()) {
+        auto found = std::find(
+            app.subtitle_sidecars.begin(),
+            app.subtitle_sidecars.end(),
+            preferences.external_subtitle);
+        if (found == app.subtitle_sidecars.end()) {
+            app.subtitle_sidecars.insert(
+                app.subtitle_sidecars.begin(), preferences.external_subtitle);
+            found = app.subtitle_sidecars.begin();
+        }
+        const int index = static_cast<int>(
+            std::distance(app.subtitle_sidecars.begin(), found));
+        if (open_external_subtitle(app, index)) {
+            return;
+        }
+    }
+
+    const int subtitle_stream = resolve_preferred_stream(
+        app,
+        KIT_STREAMTYPE_SUBTITLE,
+        preferences.subtitle_stream,
+        preferences.subtitle_language);
+    if (subtitle_stream >= 0) {
+        if (subtitle_stream != Kit_GetPlayerSubtitleStream(app.player)) {
+            set_stream(app, KIT_STREAMTYPE_SUBTITLE, subtitle_stream);
+        }
+    } else if (Kit_GetPlayerSubtitleStream(app.player) >= 0) {
+        set_stream(app, KIT_STREAMTYPE_SUBTITLE, -1);
+    }
+}
+
+void cycle_subtitles(App& app) {
+    if (app.external_subtitles.is_open()) {
+        const int start = app.external_subtitle_index + 1;
+        for (int index = start; index < static_cast<int>(app.subtitle_sidecars.size()); ++index) {
+            if (open_external_subtitle(app, index)) {
+                return;
+            }
+        }
+        app.external_subtitles.close();
+        app.external_subtitle_index = -1;
+        ps5mc::diagnostics_log(ps5mc::DiagnosticLevel::info, "subtitle-selection off");
+        app.osd.show("Subtitles: Off");
+        return;
+    }
+
+    const int current = Kit_GetPlayerSubtitleStream(app.player);
+    const int next = Kit_GetNextSourceStream(
+        app.source, KIT_STREAMTYPE_SUBTITLE, current, 0);
+    if (next >= 0) {
+        set_stream(app, KIT_STREAMTYPE_SUBTITLE, next);
+        return;
+    }
+
+    if (current >= 0) {
+        set_stream(app, KIT_STREAMTYPE_SUBTITLE, -1);
+    }
+    for (int index = 0; index < static_cast<int>(app.subtitle_sidecars.size()); ++index) {
+        if (open_external_subtitle(app, index)) {
+            return;
+        }
+    }
+
+    if (current < 0) {
+        const int first = Kit_GetNextSourceStream(
+            app.source, KIT_STREAMTYPE_SUBTITLE, -1, 0);
+        if (first >= 0) {
+            set_stream(app, KIT_STREAMTYPE_SUBTITLE, first);
+        }
+    }
+}
+
+void seek_relative(App& app, double seconds) {
+    const double duration = Kit_GetPlayerDuration(app.player);
+    const double position = Kit_GetPlayerPosition(app.player);
+    if (!std::isfinite(duration) || duration <= 0.0 ||
+        !std::isfinite(position)) {
+        app.osd.show("Seeking is unavailable for this live/unknown-duration source");
+        return;
+    }
+    const double target = std::clamp(
+        position + seconds, 0.0, duration);
+    if (Kit_PlayerSeek(app.player, target) != 0) {
+        ps5mc::diagnostics_log(
+            ps5mc::DiagnosticLevel::error,
+            "seek failed from=%.3f delta=%.3f target=%.3f error=%s",
+            position,
+            seconds,
+            target,
+            Kit_GetError());
+    } else if (app.audio != 0) {
+        SDL_ClearQueuedAudio(app.audio);
+        ps5mc::diagnostics_log(
+            ps5mc::DiagnosticLevel::info,
+            "seek success from=%.3f delta=%.3f target=%.3f",
+            position,
+            seconds,
+            target);
+    }
+    app.osd.show(
+        std::string(seconds >= 0.0 ? "Seek +" : "Seek ") +
+        std::to_string(static_cast<int>(seconds)) + " seconds");
+}
+
+void seek_chapter(App& app, int direction) {
+    const auto* format = static_cast<const AVFormatContext*>(app.source->format_ctx);
+    if (!format || format->nb_chapters == 0) {
+        seek_relative(app, direction < 0 ? -600.0 : 600.0);
+        return;
+    }
+    const double position = Kit_GetPlayerPosition(app.player);
+    if (!std::isfinite(position)) {
+        app.osd.show("Chapter navigation is unavailable");
+        return;
+    }
+    int target_index = -1;
+    if (direction > 0) {
+        for (unsigned int index = 0; index < format->nb_chapters; ++index) {
+            const AVChapter* chapter = format->chapters[index];
+            const double start = chapter->start * av_q2d(chapter->time_base);
+            if (start > position + 1.0) {
+                target_index = static_cast<int>(index);
+                break;
+            }
+        }
+    } else {
+        for (unsigned int index = 0; index < format->nb_chapters; ++index) {
+            const AVChapter* chapter = format->chapters[index];
+            const double start = chapter->start * av_q2d(chapter->time_base);
+            if (start < position - 5.0) {
+                target_index = static_cast<int>(index);
+            } else {
+                break;
+            }
+        }
+        if (target_index < 0 && format->nb_chapters > 0) {
+            target_index = 0;
+        }
+    }
+    if (target_index < 0 || target_index >= static_cast<int>(format->nb_chapters)) {
+        app.osd.show(direction > 0 ? "Last chapter" : "First chapter");
+        return;
+    }
+    const AVChapter* chapter = format->chapters[target_index];
+    const double target = chapter->start * av_q2d(chapter->time_base);
+    if (Kit_PlayerSeek(app.player, target) == 0) {
+        if (app.audio != 0) {
+            SDL_ClearQueuedAudio(app.audio);
+        }
+        std::string label = "Chapter " + std::to_string(target_index + 1);
+        if (const AVDictionaryEntry* title =
+                av_dict_get(chapter->metadata, "title", nullptr, 0)) {
+            label += ": ";
+            label += title->value;
+        }
+        app.osd.show(std::move(label));
+        ps5mc::diagnostics_log(
+            ps5mc::DiagnosticLevel::info,
+            "chapter-seek success index=%d target=%.3f",
+            target_index,
+            target);
+    } else {
+        ps5mc::diagnostics_log(
+            ps5mc::DiagnosticLevel::error,
+            "chapter-seek failed index=%d target=%.3f error=%s",
+            target_index,
+            target,
+            Kit_GetError());
+    }
+}
+
+void set_volume(App& app, int percent) {
+    app.volume_percent = std::clamp(percent, 0, 100);
+    if (app.volume_percent > 0) {
+        app.previous_volume_percent = app.volume_percent;
+    }
+    ps5mc::diagnostics_log(
+        ps5mc::DiagnosticLevel::info,
+        "volume percent=%d",
+        app.volume_percent);
+    app.osd.show("Volume: " + std::to_string(app.volume_percent) + "%");
+}
+
+void adjust_subtitle_delay(App& app, std::int64_t delta_ms) {
+    app.subtitle_delay_ms = std::clamp<std::int64_t>(
+        app.subtitle_delay_ms + delta_ms, -10000, 10000);
+    ps5mc::diagnostics_log(
+        ps5mc::DiagnosticLevel::info,
+        "subtitle-delay delta_ms=%lld value_ms=%lld",
+        static_cast<long long>(delta_ms),
+        static_cast<long long>(app.subtitle_delay_ms));
+    app.osd.show(
+        "External subtitle delay: " + std::to_string(app.subtitle_delay_ms) + " ms",
+        5000);
+}
+
+void toggle_pause(App& app) {
+    app.paused = !app.paused;
+    ps5mc::diagnostics_log(
+        ps5mc::DiagnosticLevel::info,
+        "pause state=%s position=%.3f",
+        app.paused ? "paused" : "playing",
+        app.player ? Kit_GetPlayerPosition(app.player) : 0.0);
+    if (app.paused) {
+        Kit_PlayerPause(app.player);
+        if (app.audio != 0) {
+            SDL_PauseAudioDevice(app.audio, 1);
+        }
+    } else {
+        Kit_PlayerPlay(app.player);
+        if (app.audio != 0) {
+            SDL_PauseAudioDevice(app.audio, 0);
+        }
+    }
+    app.osd.show(app.paused ? "Paused" : "Playing");
+}
+
+void cycle_video_scale(App& app) {
+    app.video_scale_mode = ps5mc::next_video_scale_mode(app.video_scale_mode);
+    ps5mc::diagnostics_log(
+        ps5mc::DiagnosticLevel::info,
+        "video-scale mode=%s",
+        ps5mc::video_scale_mode_name(app.video_scale_mode));
+    app.osd.show(
+        std::string("Video scale: ") +
+        ps5mc::video_scale_mode_name(app.video_scale_mode));
+}
+
+void cycle_video_aspect(App& app) {
+    app.video_aspect_mode =
+        ps5mc::next_video_aspect_mode(app.video_aspect_mode);
+    ps5mc::diagnostics_log(
+        ps5mc::DiagnosticLevel::info,
+        "video-aspect mode=%s",
+        ps5mc::video_aspect_mode_name(app.video_aspect_mode));
+    app.osd.show(
+        std::string("Aspect ratio: ") +
+        ps5mc::video_aspect_mode_name(app.video_aspect_mode));
+}
+
+void cycle_video_crop(App& app) {
+    app.video_crop_mode =
+        ps5mc::next_video_crop_mode(app.video_crop_mode);
+    ps5mc::diagnostics_log(
+        ps5mc::DiagnosticLevel::info,
+        "video-crop mode=%s",
+        ps5mc::video_crop_mode_name(app.video_crop_mode));
+    app.osd.show(
+        std::string("Crop ratio: ") +
+        ps5mc::video_crop_mode_name(app.video_crop_mode));
+}
+
+void on_controller_button(App& app, SDL_GameControllerButton button) {
+    switch (button) {
+        case SDL_CONTROLLER_BUTTON_A:
+            toggle_pause(app);
+            break;
+        case SDL_CONTROLLER_BUTTON_B:
+            cycle_subtitles(app);
+            break;
+        case SDL_CONTROLLER_BUTTON_X:
+            cycle_stream(app, KIT_STREAMTYPE_AUDIO, false);
+            break;
+        case SDL_CONTROLLER_BUTTON_Y:
+            if (app.controller) {
+                const bool left_trigger =
+                    SDL_GameControllerGetAxis(
+                        app.controller,
+                        SDL_CONTROLLER_AXIS_TRIGGERLEFT) > 16000;
+                const bool right_trigger =
+                    SDL_GameControllerGetAxis(
+                        app.controller,
+                        SDL_CONTROLLER_AXIS_TRIGGERRIGHT) > 16000;
+                if (left_trigger && right_trigger) {
+                    cycle_video_scale(app);
+                } else if (right_trigger) {
+                    cycle_video_aspect(app);
+                } else if (left_trigger) {
+                    cycle_video_crop(app);
+                } else {
+                    cycle_stream(app, KIT_STREAMTYPE_VIDEO, false);
+                }
+            } else {
+                cycle_stream(app, KIT_STREAMTYPE_VIDEO, false);
+            }
+            break;
+        case SDL_CONTROLLER_BUTTON_DPAD_LEFT:
+            if (app.subtitle_delay_mode) {
+                adjust_subtitle_delay(app, -100);
+            } else {
+                seek_relative(app, -10.0);
+            }
+            break;
+        case SDL_CONTROLLER_BUTTON_DPAD_RIGHT:
+            if (app.subtitle_delay_mode) {
+                adjust_subtitle_delay(app, 100);
+            } else {
+                seek_relative(app, 10.0);
+            }
+            break;
+        case SDL_CONTROLLER_BUTTON_DPAD_DOWN:
+            if (app.subtitle_delay_mode) {
+                adjust_subtitle_delay(app, -500);
+            } else {
+                seek_relative(app, -60.0);
+            }
+            break;
+        case SDL_CONTROLLER_BUTTON_DPAD_UP:
+            if (app.subtitle_delay_mode) {
+                adjust_subtitle_delay(app, 500);
+            } else {
+                seek_relative(app, 60.0);
+            }
+            break;
+        case SDL_CONTROLLER_BUTTON_LEFTSHOULDER:
+            seek_chapter(app, -1);
+            break;
+        case SDL_CONTROLLER_BUTTON_RIGHTSHOULDER:
+            seek_chapter(app, 1);
+            break;
+        case SDL_CONTROLLER_BUTTON_LEFTSTICK:
+            set_volume(app, app.volume_percent - 5);
+            break;
+        case SDL_CONTROLLER_BUTTON_RIGHTSTICK:
+            set_volume(app, app.volume_percent + 5);
+            break;
+        case ps5mc::kControllerTouchpadButton:
+            app.subtitle_delay_mode = !app.subtitle_delay_mode;
+            ps5mc::diagnostics_log(
+                ps5mc::DiagnosticLevel::info,
+                "subtitle-delay-mode enabled=%d",
+                app.subtitle_delay_mode ? 1 : 0);
+            app.osd.show(
+                app.subtitle_delay_mode
+                    ? "Subtitle-delay mode: D-pad adjusts timing"
+                    : "Subtitle-delay mode: Off",
+                5000);
+            break;
+#if !defined(PS5MC_PS5)
+        case SDL_CONTROLLER_BUTTON_BACK:
+            if (app.volume_percent == 0) {
+                set_volume(app, app.previous_volume_percent);
+            } else {
+                app.previous_volume_percent = app.volume_percent;
+                set_volume(app, 0);
+            }
+            break;
+#endif
+        case ps5mc::kControllerOptionsButton:
+            app.playback_running = false;
+            ps5mc::diagnostics_log(
+                ps5mc::DiagnosticLevel::info,
+                "playback-stop requested=options");
+            break;
+        default:
+            break;
+    }
+}
+
+void pump_events(App& app) {
+    SDL_Event event{};
+    while (SDL_PollEvent(&event)) {
+        switch (event.type) {
+            case SDL_QUIT:
+                app.running = false;
+                app.playback_running = false;
+                break;
+            case SDL_CONTROLLERDEVICEADDED:
+                if (!app.controller && SDL_IsGameController(event.cdevice.which)) {
+                    app.controller = SDL_GameControllerOpen(event.cdevice.which);
+                }
+                break;
+            case SDL_CONTROLLERDEVICEREMOVED:
+                if (app.controller &&
+                    SDL_JoystickInstanceID(SDL_GameControllerGetJoystick(app.controller)) ==
+                        event.cdevice.which) {
+                    SDL_GameControllerClose(app.controller);
+                    app.controller = nullptr;
+                }
+                break;
+            case SDL_CONTROLLERBUTTONDOWN:
+                on_controller_button(
+                    app, static_cast<SDL_GameControllerButton>(event.cbutton.button));
+                break;
+            case SDL_KEYDOWN:
+                if (event.key.keysym.sym == SDLK_ESCAPE) {
+                    app.playback_running = false;
+                } else if (event.key.keysym.sym == SDLK_SPACE) {
+                    toggle_pause(app);
+                } else if (event.key.keysym.sym == SDLK_LEFT) {
+                    seek_relative(app, -10.0);
+                } else if (event.key.keysym.sym == SDLK_RIGHT) {
+                    seek_relative(app, 10.0);
+                } else if (event.key.keysym.sym == SDLK_z) {
+                    cycle_video_scale(app);
+                } else if (event.key.keysym.sym == SDLK_a) {
+                    cycle_video_aspect(app);
+                } else if (event.key.keysym.sym == SDLK_c) {
+                    cycle_video_crop(app);
+                }
+                break;
+            default:
+                break;
+        }
+    }
+}
+
+PlaybackOutcome run_player(
+    App& app,
+    const char* path,
+    const char* explicit_subtitle = nullptr) {
+    app.current_media_path = path ? ps5mc::redact_uri_secrets(path) : std::string{};
+    ps5mc::diagnostics_log(
+        ps5mc::DiagnosticLevel::info,
+        "playback-start path=%s explicit_subtitle=%s",
+        app.current_media_path.c_str(),
+        explicit_subtitle && explicit_subtitle[0]
+            ? ps5mc::redact_uri_secrets(explicit_subtitle).c_str()
+            : "<none>");
+    app.playback_running = true;
+    app.paused = false;
+    app.subtitle_delay_mode = false;
+    app.subtitle_delay_ms = 0;
+    const bool opening_osd_ready =
+        app.osd.open(app.renderer, app.fallback_font);
+    if (opening_osd_ready) {
+        SDL_SetRenderDrawColor(app.renderer, 8, 13, 25, 255);
+        SDL_RenderClear(app.renderer);
+        app.osd.show("Opening media...", 60000);
+        app.osd.render(0.0, 0.0, false);
+        SDL_RenderPresent(app.renderer);
+    }
+    const auto show_open_error = [&](const std::string& message) {
+        if (!opening_osd_ready) {
+            return;
+        }
+        const Uint64 end = SDL_GetTicks64() + 2200;
+        app.osd.show("Unable to play: " + message, 2200);
+        while (SDL_GetTicks64() < end) {
+            SDL_Event event{};
+            while (SDL_PollEvent(&event)) {
+                if (event.type == SDL_QUIT ||
+                    (event.type == SDL_CONTROLLERBUTTONDOWN &&
+                     event.cbutton.button ==
+                         ps5mc::kControllerOptionsButton)) {
+                    return;
+                }
+            }
+            SDL_SetRenderDrawColor(app.renderer, 8, 13, 25, 255);
+            SDL_RenderClear(app.renderer);
+            app.osd.render(0.0, 0.0, false);
+            SDL_RenderPresent(app.renderer);
+            SDL_Delay(16);
+        }
+    };
+    std::string source_error;
+    app.source = create_bounded_source(app, path, source_error);
+    if (!app.source) {
+        ps5mc::diagnostics_log(
+            ps5mc::DiagnosticLevel::error,
+            "playback-start failed path=%s error=%s",
+            app.current_media_path.c_str(),
+            source_error.c_str());
+        show_open_error(source_error);
+        return PlaybackOutcome::error;
+    }
+    app.subtitle_sidecars = ps5mc::is_network_uri(path)
+        ? std::vector<std::string>{}
+        : ps5mc::find_subtitle_sidecars(path);
+    if (explicit_subtitle && explicit_subtitle[0]) {
+        app.subtitle_sidecars.insert(app.subtitle_sidecars.begin(), explicit_subtitle);
+    }
+    ps5mc::diagnostics_log(
+        ps5mc::DiagnosticLevel::info,
+        "subtitle-sidecars count=%zu",
+        app.subtitle_sidecars.size());
+    if (const auto* format = static_cast<const AVFormatContext*>(app.source->format_ctx)) {
+        for (unsigned int index = 0; index < format->nb_streams; ++index) {
+            const AVMediaType type = format->streams[index]->codecpar->codec_type;
+            if (type == AVMEDIA_TYPE_VIDEO || type == AVMEDIA_TYPE_AUDIO ||
+                type == AVMEDIA_TYPE_SUBTITLE) {
+                ps5mc::diagnostics_log(
+                    ps5mc::DiagnosticLevel::info,
+                    "track index=%u type=%d description=%s",
+                    index,
+                    type,
+                    track_description(app, static_cast<int>(index)).c_str());
+            }
+        }
+    }
+
+    Kit_AudioFormatRequest audio_request{};
+    Kit_ResetAudioFormatRequest(&audio_request);
+    // SDL_kitchensink 2.0 only maps U8/S16/S32 SDL formats to FFmpeg.
+    // Requesting F32 produces AV_SAMPLE_FMT_NONE and makes swr_init fail.
+    audio_request.format = AUDIO_S16SYS;
+    audio_request.is_signed = 1;
+    audio_request.bytes = 2;
+    audio_request.sample_rate = 48000;
+    audio_request.channels = 2;
+
+    const int initial_video =
+        Kit_GetBestSourceStream(app.source, KIT_STREAMTYPE_VIDEO);
+    const int initial_audio =
+        Kit_GetBestSourceStream(app.source, KIT_STREAMTYPE_AUDIO);
+    // Kitchensink requires a video decoder for subtitle layout. Audio-only
+    // files with timed lyrics must still open instead of failing creation.
+    const int initial_subtitle = initial_video >= 0
+        ? Kit_GetBestSourceStream(app.source, KIT_STREAMTYPE_SUBTITLE)
+        : -1;
+    app.player = Kit_CreatePlayer(
+        app.source,
+        initial_video,
+        initial_audio,
+        initial_subtitle,
+        nullptr,
+        &audio_request,
+        kWindowWidth,
+        kWindowHeight);
+    if (!app.player) {
+        ps5mc::diagnostics_log(
+            ps5mc::DiagnosticLevel::error,
+            "player-create failed error=%s",
+            Kit_GetError());
+        show_open_error(Kit_GetError());
+        return PlaybackOutcome::error;
+    }
+    if (Kit_GetPlayerVideoStream(app.player) < 0 &&
+        Kit_GetPlayerAudioStream(app.player) < 0) {
+        ps5mc::diagnostics_log(
+            ps5mc::DiagnosticLevel::error,
+            "player-create failed reason=no-decodable-audio-video");
+        return PlaybackOutcome::error;
+    }
+
+    if (!open_audio(app) || !create_video_textures(app)) {
+        show_open_error(SDL_GetError());
+        return PlaybackOutcome::error;
+    }
+    if (!opening_osd_ready) {
+        ps5mc::diagnostics_log(
+            ps5mc::DiagnosticLevel::warning,
+            "osd-open failed error=%s",
+            app.osd.error().c_str());
+    }
+
+    ps5mc::LibraryDatabase resume_database;
+    const bool database_available =
+        resume_database.open("/data/PS5-MediaCenter/library.db");
+    const bool source_persistence_allowed =
+        !ps5mc::uri_has_sensitive_components(path);
+    ps5mc::ResumeState saved_resume{};
+    if (database_available && source_persistence_allowed &&
+        resume_database.load_resume(path, saved_resume)) {
+        const double resume_seconds = static_cast<double>(saved_resume.position_ms) / 1000.0;
+        const double duration = Kit_GetPlayerDuration(app.player);
+        if (std::isfinite(duration) && !saved_resume.completed &&
+            resume_seconds >= 10.0 &&
+            resume_seconds < duration - 30.0) {
+            if (Kit_PlayerSeek(app.player, resume_seconds) == 0) {
+                ps5mc::diagnostics_log(
+                    ps5mc::DiagnosticLevel::info,
+                    "resume-applied seconds=%.3f",
+                    resume_seconds);
+            }
+        }
+    }
+    std::string saved_volume;
+    if (database_available && resume_database.get_setting("volume_percent", saved_volume)) {
+        char* end = nullptr;
+        errno = 0;
+        const long parsed = std::strtol(saved_volume.c_str(), &end, 10);
+        if (errno != ERANGE && end && *end == '\0' &&
+            parsed >= 0 && parsed <= 100) {
+            app.volume_percent = static_cast<int>(parsed);
+        }
+    }
+    std::string saved_video_scale;
+    if (database_available &&
+        resume_database.get_setting("video_scale_mode", saved_video_scale)) {
+        const std::optional<ps5mc::VideoScaleMode> parsed =
+            ps5mc::parse_video_scale_mode(saved_video_scale);
+        if (parsed.has_value()) {
+            app.video_scale_mode = *parsed;
+        }
+    }
+    std::string saved_video_aspect;
+    if (database_available &&
+        resume_database.get_setting("video_aspect_mode", saved_video_aspect)) {
+        const std::optional<ps5mc::VideoAspectMode> parsed =
+            ps5mc::parse_video_aspect_mode(saved_video_aspect);
+        if (parsed.has_value()) {
+            app.video_aspect_mode = *parsed;
+        }
+    }
+    std::string saved_video_crop;
+    if (database_available &&
+        resume_database.get_setting("video_crop_mode", saved_video_crop)) {
+        const std::optional<ps5mc::VideoCropMode> parsed =
+            ps5mc::parse_video_crop_mode(saved_video_crop);
+        if (parsed.has_value()) {
+            app.video_crop_mode = *parsed;
+        }
+    }
+    ps5mc::TrackPreferences saved_preferences{};
+    if (database_available && source_persistence_allowed &&
+        resume_database.load_track_preferences(path, saved_preferences)) {
+        restore_track_preferences(
+            app,
+            saved_preferences,
+            explicit_subtitle && explicit_subtitle[0]);
+        ps5mc::diagnostics_log(
+            ps5mc::DiagnosticLevel::info,
+            "preferences-restored audio=%d subtitle=%d external=%s delay_ms=%lld",
+            saved_preferences.audio_stream,
+            saved_preferences.subtitle_stream,
+            ps5mc::redact_uri_secrets(saved_preferences.external_subtitle).c_str(),
+            static_cast<long long>(app.subtitle_delay_ms));
+    }
+    if (explicit_subtitle && explicit_subtitle[0]) {
+        open_external_subtitle(app, 0);
+    }
+
+    Kit_PlayerInfo info{};
+    Kit_GetPlayerInfo(app.player, &info);
+    ps5mc::diagnostics_log(
+        ps5mc::DiagnosticLevel::info,
+        "playback-format video=%s %dx%d audio=%s %dHz/%dch duration_s=%.3f",
+        info.video_codec.name,
+        info.video_format.width,
+        info.video_format.height,
+        info.audio_codec.name,
+        info.audio_format.sample_rate,
+        info.audio_format.channels,
+        Kit_GetPlayerDuration(app.player));
+
+    Kit_PlayerPlay(app.player);
+    app.osd.show(
+        "Cross Pause  Circle Subtitles  Square Audio  R2+Triangle Scale",
+        6000);
+    Uint64 last_resume_save = SDL_GetTicks64();
+    Uint64 last_diagnostics = last_resume_save;
+    static_assert(kAudioBufferBytes % sizeof(std::int16_t) == 0);
+    std::array<std::int16_t, kAudioBufferBytes / sizeof(std::int16_t)> audio_buffer{};
+    std::array<SDL_Rect, kSubtitleFragments> subtitle_sources{};
+    std::array<SDL_Rect, kSubtitleFragments> subtitle_targets{};
+
+    while (app.running && app.playback_running &&
+           Kit_GetPlayerState(app.player) != KIT_STOPPED) {
+        pump_events(app);
+
+        if (!app.paused && app.audio != 0) {
+            const Uint32 queued = SDL_GetQueuedAudioSize(app.audio);
+            if (queued < kAudioBufferBytes) {
+                const std::size_t available =
+                    static_cast<std::size_t>(kAudioBufferBytes - queued);
+                const int got = Kit_GetPlayerAudioData(
+                    app.player,
+                    queued,
+                    reinterpret_cast<unsigned char*>(audio_buffer.data()),
+                    available);
+                if (got > 0) {
+                    if (static_cast<std::size_t>(got) > available ||
+                        got % static_cast<int>(sizeof(std::int16_t)) != 0) {
+                        ps5mc::diagnostics_log(
+                            ps5mc::DiagnosticLevel::error,
+                            "audio-pull invalid-bytes got=%d available=%zu",
+                            got,
+                            available);
+                        app.playback_running = false;
+                        continue;
+                    }
+                    if (app.volume_percent < 100) {
+                        const std::size_t sample_count =
+                            static_cast<std::size_t>(got) / sizeof(std::int16_t);
+                        for (std::size_t index = 0; index < sample_count; ++index) {
+                            const std::int32_t scaled =
+                                static_cast<std::int32_t>(audio_buffer[index]) *
+                                app.volume_percent / 100;
+                            audio_buffer[index] = static_cast<std::int16_t>(scaled);
+                        }
+                    }
+                    if (SDL_QueueAudio(
+                            app.audio,
+                            audio_buffer.data(),
+                            static_cast<Uint32>(got)) != 0) {
+                        log_sdl("SDL_QueueAudio");
+                        app.playback_running = false;
+                    }
+                }
+            }
+        }
+
+        SDL_SetRenderDrawColor(app.renderer, 0, 0, 0, 255);
+        SDL_RenderClear(app.renderer);
+        if (app.video) {
+            Kit_GetPlayerVideoSDLTexture(app.player, app.video, nullptr);
+            const ps5mc::VideoLayout layout = player_video_layout(app);
+            const SDL_Rect source{
+                layout.source.x,
+                layout.source.y,
+                layout.source.width,
+                layout.source.height};
+            const SDL_Rect destination{
+                layout.destination.x,
+                layout.destination.y,
+                layout.destination.width,
+                layout.destination.height};
+            SDL_RenderCopy(
+                app.renderer,
+                app.video,
+                layout.crop_source ? &source : nullptr,
+                &destination);
+        }
+        if (app.subtitles) {
+            const int fragments = Kit_GetPlayerSubtitleSDLTexture(
+                app.player,
+                app.subtitles,
+                subtitle_sources.data(),
+                subtitle_targets.data(),
+                static_cast<int>(subtitle_sources.size()));
+            const int safe_fragments = std::clamp(
+                fragments,
+                0,
+                static_cast<int>(subtitle_sources.size()));
+            for (int i = 0; i < safe_fragments; ++i) {
+                SDL_RenderCopy(
+                    app.renderer,
+                    app.subtitles,
+                    &subtitle_sources[static_cast<std::size_t>(i)],
+                    &subtitle_targets[static_cast<std::size_t>(i)]);
+            }
+        }
+        if (app.external_subtitles.is_open()) {
+            const auto position_ms = seconds_to_milliseconds(
+                Kit_GetPlayerPosition(app.player));
+            if (!app.external_subtitles.render(position_ms, app.subtitle_delay_ms)) {
+                std::fprintf(
+                    stderr, "External subtitle render: %s\n",
+                    app.external_subtitles.error().c_str());
+                ps5mc::diagnostics_log(
+                    ps5mc::DiagnosticLevel::error,
+                    "subtitle-render failed error=%s",
+                    app.external_subtitles.error().c_str());
+                app.external_subtitles.close();
+                app.external_subtitle_index = -1;
+            }
+        }
+        app.osd.render(
+            Kit_GetPlayerPosition(app.player),
+            Kit_GetPlayerDuration(app.player),
+            app.paused);
+        SDL_RenderPresent(app.renderer);
+
+        const Uint64 now = SDL_GetTicks64();
+        if (now - last_diagnostics >= 5000) {
+            ps5mc::diagnostics_log(
+                ps5mc::DiagnosticLevel::info,
+                "playback-heartbeat path=%s position_s=%.3f duration_s=%.3f paused=%d state=%d audio_queued=%u external_subtitle=%d delay_ms=%lld scale=%s aspect=%s crop=%s",
+                app.current_media_path.c_str(),
+                Kit_GetPlayerPosition(app.player),
+                Kit_GetPlayerDuration(app.player),
+                app.paused ? 1 : 0,
+                Kit_GetPlayerState(app.player),
+                app.audio != 0 ? SDL_GetQueuedAudioSize(app.audio) : 0U,
+                app.external_subtitle_index,
+                static_cast<long long>(app.subtitle_delay_ms),
+                ps5mc::video_scale_mode_name(app.video_scale_mode),
+                ps5mc::video_aspect_mode_name(app.video_aspect_mode),
+                ps5mc::video_crop_mode_name(app.video_crop_mode));
+            last_diagnostics = now;
+        }
+        if (database_available && source_persistence_allowed &&
+            now - last_resume_save >= 10000) {
+            ps5mc::ResumeState current{};
+            current.position_ms = seconds_to_milliseconds(
+                Kit_GetPlayerPosition(app.player));
+            current.duration_ms = seconds_to_milliseconds(
+                Kit_GetPlayerDuration(app.player));
+            current.last_played_unix = static_cast<std::int64_t>(std::time(nullptr));
+            current.completed = playback_completed(
+                current.position_ms, current.duration_ms);
+            if (!resume_database.save_resume(path, current)) {
+                ps5mc::diagnostics_log(
+                    ps5mc::DiagnosticLevel::error,
+                    "resume-save failed error=%s",
+                    resume_database.error().c_str());
+            }
+            const ps5mc::TrackPreferences preferences = current_track_preferences(app);
+            if (!ps5mc::uri_has_sensitive_components(preferences.external_subtitle) &&
+                !resume_database.save_track_preferences(path, preferences)) {
+                ps5mc::diagnostics_log(
+                    ps5mc::DiagnosticLevel::error,
+                    "track-preference-save failed error=%s",
+                    resume_database.error().c_str());
+            }
+            last_resume_save = now;
+        }
+    }
+    const double final_position = Kit_GetPlayerPosition(app.player);
+    const double final_duration = Kit_GetPlayerDuration(app.player);
+    const bool reached_end =
+        std::isfinite(final_position) && std::isfinite(final_duration) &&
+        final_duration > 0.0 &&
+        final_position / final_duration >= 0.92;
+    const bool finished = app.running && app.playback_running && reached_end &&
+                          Kit_GetPlayerState(app.player) == KIT_STOPPED;
+    if (database_available) {
+        if (source_persistence_allowed) {
+            ps5mc::ResumeState current{};
+            current.position_ms = seconds_to_milliseconds(
+                Kit_GetPlayerPosition(app.player));
+            current.duration_ms = seconds_to_milliseconds(
+                Kit_GetPlayerDuration(app.player));
+            current.last_played_unix = static_cast<std::int64_t>(std::time(nullptr));
+            current.completed = playback_completed(
+                current.position_ms, current.duration_ms);
+            resume_database.save_resume(path, current);
+            const ps5mc::TrackPreferences preferences = current_track_preferences(app);
+            if (!ps5mc::uri_has_sensitive_components(preferences.external_subtitle)) {
+                resume_database.save_track_preferences(path, preferences);
+            }
+        }
+        resume_database.set_setting("volume_percent", std::to_string(app.volume_percent));
+        resume_database.set_setting(
+            "video_scale_mode",
+            ps5mc::video_scale_mode_key(app.video_scale_mode));
+        resume_database.set_setting(
+            "video_aspect_mode",
+            ps5mc::video_aspect_mode_key(app.video_aspect_mode));
+        resume_database.set_setting(
+            "video_crop_mode",
+            ps5mc::video_crop_mode_key(app.video_crop_mode));
+    }
+    ps5mc::diagnostics_log(
+        ps5mc::DiagnosticLevel::info,
+        "playback-end path=%s outcome=%s position_s=%.3f duration_s=%.3f reached_end=%d",
+        app.current_media_path.c_str(),
+        finished ? "finished" : (app.playback_running ? "user-return" : "stopped"),
+        final_position,
+        final_duration,
+        reached_end ? 1 : 0);
+    return finished ? PlaybackOutcome::finished : PlaybackOutcome::user_return;
+}
+
+void close_media(App& app) {
+    if (!app.current_media_path.empty()) {
+        ps5mc::diagnostics_log(
+            ps5mc::DiagnosticLevel::info,
+            "media-close path=%s",
+            app.current_media_path.c_str());
+    }
+    app.io_cancel.store(true, std::memory_order_relaxed);
+    app.source_open_deadline_ms.store(0, std::memory_order_relaxed);
+    if (app.player) {
+        Kit_PlayerStop(app.player);
+    }
+    close_audio(app);
+    app.osd.close();
+    app.external_subtitles.close();
+    destroy_video_textures(app);
+    Kit_ClosePlayer(app.player);
+    if (app.source) {
+        Kit_CloseSource(app.source);
+    }
+    app.local_media.close();
+    app.player = nullptr;
+    app.source = nullptr;
+    app.subtitle_sidecars.clear();
+    app.current_media_path.clear();
+    app.external_subtitle_index = -1;
+    app.playback_running = false;
+    app.paused = false;
+    app.subtitle_delay_mode = false;
+}
+
+int run_library(
+    App& app,
+    const std::vector<ps5mc::MediaSource>& initial_sources = {}) {
+    ps5mc::diagnostics_log(ps5mc::DiagnosticLevel::info, "library-start");
+    ps5mc::LibraryUi library;
+    if (!library.open(app.renderer, app.fallback_font, initial_sources)) {
+        ps5mc::diagnostics_log(
+            ps5mc::DiagnosticLevel::error,
+            "library-open failed error=%s",
+            library.error().c_str());
+        return 1;
+    }
+
+    while (app.running) {
+        SDL_Event event{};
+        bool play_selected = false;
+        bool play_queue = false;
+        std::string selected_path;
+        while (SDL_PollEvent(&event)) {
+            const ps5mc::LibraryAction action = library.handle_event(event, selected_path);
+            if (action == ps5mc::LibraryAction::exit) {
+                app.running = false;
+                break;
+            }
+            if (action == ps5mc::LibraryAction::play) {
+                play_selected = true;
+                break;
+            }
+            if (action == ps5mc::LibraryAction::play_queue) {
+                play_selected = true;
+                play_queue = true;
+                break;
+            }
+        }
+        if (!app.running) {
+            break;
+        }
+        if (play_selected) {
+            std::vector<std::string> queue;
+            if (ps5mc::is_generic_playlist_path(selected_path)) {
+                ps5mc::PlaylistLoadResult playlist =
+                    ps5mc::load_generic_playlist(selected_path);
+                if (playlist.items.empty()) {
+                    const std::string error = playlist.error.empty()
+                        ? "Unsupported playlist"
+                        : playlist.error;
+                    ps5mc::diagnostics_log(
+                        ps5mc::DiagnosticLevel::error,
+                        "playlist-load failed path=%s error=%s",
+                        selected_path.c_str(),
+                        error.c_str());
+                    library.show_notice("PLAYLIST: " + error);
+                    continue;
+                }
+                if (playlist.truncated) {
+                    ps5mc::diagnostics_log(
+                        ps5mc::DiagnosticLevel::warning,
+                        "playlist-load truncated path=%s items=%zu",
+                        selected_path.c_str(),
+                        playlist.items.size());
+                }
+                queue = std::move(playlist.items);
+            } else {
+                queue = play_queue
+                    ? library.playback_queue(selected_path)
+                    : std::vector<std::string>{selected_path};
+            }
+            ps5mc::diagnostics_log(
+                ps5mc::DiagnosticLevel::info,
+                "library-play-request queue_mode=%d items=%zu selected=%s",
+                play_queue ? 1 : 0,
+                queue.size(),
+                selected_path.c_str());
+            // Do not let metadata scanning compete with software video decode.
+            library.close();
+            for (const std::string& queued_path : queue) {
+                const PlaybackOutcome outcome = run_player(app, queued_path.c_str());
+                close_media(app);
+                if (!app.running || outcome != PlaybackOutcome::finished) {
+                    break;
+                }
+            }
+            if (app.running && !library.open(app.renderer, app.fallback_font)) {
+                ps5mc::diagnostics_log(
+                    ps5mc::DiagnosticLevel::error,
+                    "library-reopen failed error=%s",
+                    library.error().c_str());
+                app.running = false;
+                break;
+            }
+            continue;
+        }
+        library.render();
+        SDL_Delay(8);
+    }
+    library.close();
+    ps5mc::diagnostics_log(ps5mc::DiagnosticLevel::info, "library-end running=%d", app.running ? 1 : 0);
+    return 0;
+}
+
+void cleanup(App& app) {
+    close_media(app);
+    if (app.controller) {
+        SDL_GameControllerClose(app.controller);
+    }
+    SDL_DestroyRenderer(app.renderer);
+    SDL_DestroyWindow(app.window);
+    Kit_Quit();
+    SDL_Quit();
+}
+
+} // namespace
+
+int main(int argc, char** argv) {
+    ps5mc::diagnostics_init(argc, argv);
+    ps5mc::diagnostics_install_ffmpeg();
+    SDL_LogSetOutputFunction(sdl_log_output, nullptr);
+    log_installed_manifest(argc > 0 ? argv[0] : nullptr);
+    ps5mc::diagnostics_log(
+        ps5mc::DiagnosticLevel::info,
+        "application-start build=%s %s %s",
+        "0.1.0-alpha.8",
+        __DATE__,
+        __TIME__);
+    App app{};
+    app.fallback_font = executable_asset_path(
+        argc > 0 ? argv[0] : nullptr,
+        "assets/fonts/NotoSans-Regular.ttf");
+    if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_GAMECONTROLLER) != 0) {
+        log_sdl("SDL_Init");
+        ps5mc::diagnostics_shutdown();
+        return 1;
+    }
+    if (Kit_Init(KIT_INIT_NETWORK | KIT_INIT_ASS) != 0) {
+        ps5mc::diagnostics_log(
+            ps5mc::DiagnosticLevel::error,
+            "kitchensink-init failed error=%s",
+            Kit_GetError());
+        SDL_Quit();
+        ps5mc::diagnostics_shutdown();
+        return 1;
+    }
+    Kit_Version kitchensink_version{};
+    Kit_GetVersion(&kitchensink_version);
+    SDL_version sdl_version{};
+    SDL_GetVersion(&sdl_version);
+    ps5mc::diagnostics_log(
+        ps5mc::DiagnosticLevel::info,
+        "libraries sdl=%u.%u.%u kitchensink=%u.%u.%u",
+        sdl_version.major,
+        sdl_version.minor,
+        sdl_version.patch,
+        kitchensink_version.major,
+        kitchensink_version.minor,
+        kitchensink_version.patch);
+
+    app.window = SDL_CreateWindow(
+        "PS5 Media Center",
+        SDL_WINDOWPOS_UNDEFINED,
+        SDL_WINDOWPOS_UNDEFINED,
+        kWindowWidth,
+        kWindowHeight,
+        SDL_WINDOW_FULLSCREEN_DESKTOP);
+    if (!app.window) {
+        log_sdl("SDL_CreateWindow");
+        cleanup(app);
+        ps5mc::diagnostics_shutdown();
+        return 1;
+    }
+    app.renderer = create_renderer(app.window);
+    if (!app.renderer) {
+        log_sdl("SDL_CreateRenderer");
+        cleanup(app);
+        ps5mc::diagnostics_shutdown();
+        return 1;
+    }
+    for (int i = 0; i < SDL_NumJoysticks(); ++i) {
+        if (SDL_IsGameController(i)) {
+            app.controller = SDL_GameControllerOpen(i);
+            break;
+        }
+    }
+
+    int result = 0;
+    const char* media_path = nullptr;
+    const char* subtitle_path = nullptr;
+    std::vector<ps5mc::MediaSource> initial_sources;
+    for (int index = 1; index < argc; ++index) {
+        if (std::strcmp(argv[index], "--subtitle") == 0 && index + 1 < argc) {
+            subtitle_path = argv[++index];
+        } else if (std::strcmp(argv[index], "--add-movie") == 0 &&
+                   index + 1 < argc) {
+            const char* source_path = argv[++index];
+            initial_sources.push_back({
+                ps5mc::MediaSourceKind::movie_file,
+                source_path ? source_path : "",
+                {}});
+        } else if (std::strcmp(argv[index], "--add-tv-folder") == 0 &&
+                   index + 1 < argc) {
+            const char* source_path = argv[++index];
+            initial_sources.push_back({
+                ps5mc::MediaSourceKind::tv_folder,
+                source_path ? source_path : "",
+                {}});
+        } else if (!media_path && argv[index][0]) {
+            media_path = argv[index];
+        }
+    }
+    if (media_path) {
+        result = run_player(app, media_path, subtitle_path) == PlaybackOutcome::error ? 1 : 0;
+    } else {
+        result = run_library(app, initial_sources);
+    }
+
+    cleanup(app);
+    ps5mc::diagnostics_log(
+        ps5mc::DiagnosticLevel::info,
+        "application-end result=%d",
+        result);
+    ps5mc::diagnostics_shutdown();
+    return result;
+}

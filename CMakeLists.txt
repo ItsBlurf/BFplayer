@@ -1,0 +1,93 @@
+cmake_minimum_required(VERSION 3.20)
+project(ps5_media_center_core LANGUAGES C CXX)
+
+set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
+
+add_library(ps5mc_core STATIC
+    src/core/artwork.cpp
+    src/core/diagnostics.cpp
+    src/core/library_scanner.cpp
+    src/core/library_view.cpp
+    src/core/media_sources.cpp
+    src/core/playlist.cpp
+    src/core/safe_read_file.cpp
+    src/core/source_uri.cpp
+    src/core/video_layout.cpp
+)
+target_include_directories(ps5mc_core PUBLIC include)
+
+if(MSVC)
+    target_compile_options(ps5mc_core PRIVATE /W4 /permissive-)
+else()
+    target_compile_options(ps5mc_core PRIVATE -Wall -Wextra -Wpedantic)
+endif()
+
+include(CTest)
+if(BUILD_TESTING)
+    add_executable(library_scanner_tests tests/library_scanner_tests.cpp)
+    target_link_libraries(library_scanner_tests PRIVATE ps5mc_core)
+    add_test(NAME library_scanner_tests COMMAND library_scanner_tests)
+
+    add_executable(artwork_tests tests/artwork_tests.cpp)
+    target_link_libraries(artwork_tests PRIVATE ps5mc_core)
+    add_test(NAME artwork_tests COMMAND artwork_tests)
+
+    add_executable(video_layout_tests tests/video_layout_tests.cpp)
+    target_link_libraries(video_layout_tests PRIVATE ps5mc_core)
+    add_test(NAME video_layout_tests COMMAND video_layout_tests)
+
+    add_executable(library_view_tests tests/library_view_tests.cpp)
+    target_link_libraries(library_view_tests PRIVATE ps5mc_core)
+    add_test(NAME library_view_tests COMMAND library_view_tests)
+
+    add_executable(media_sources_tests tests/media_sources_tests.cpp)
+    target_link_libraries(media_sources_tests PRIVATE ps5mc_core)
+    add_test(NAME media_sources_tests COMMAND media_sources_tests)
+
+    add_executable(source_uri_tests tests/source_uri_tests.cpp)
+    target_link_libraries(source_uri_tests PRIVATE ps5mc_core)
+    add_test(NAME source_uri_tests COMMAND source_uri_tests)
+
+    add_executable(playlist_tests tests/playlist_tests.cpp)
+    target_link_libraries(playlist_tests PRIVATE ps5mc_core)
+    add_test(NAME playlist_tests COMMAND playlist_tests)
+
+    add_executable(safe_read_file_tests tests/safe_read_file_tests.cpp)
+    target_link_libraries(safe_read_file_tests PRIVATE ps5mc_core)
+    add_test(NAME safe_read_file_tests COMMAND safe_read_file_tests)
+
+    find_program(PS5MC_NODE_EXECUTABLE node)
+    if(PS5MC_NODE_EXECUTABLE)
+        add_test(
+            NAME homebrew_launcher_tests
+            COMMAND "${PS5MC_NODE_EXECUTABLE}"
+                    "${CMAKE_CURRENT_SOURCE_DIR}/tests/homebrew_launcher_tests.js"
+        )
+        add_test(
+            NAME direct_tile_tests
+            COMMAND "${PS5MC_NODE_EXECUTABLE}"
+                    "${CMAKE_CURRENT_SOURCE_DIR}/tests/direct_tile_tests.js"
+        )
+    endif()
+
+    set(PS5MC_SQLITE_AMALGAMATION
+        "${CMAKE_CURRENT_SOURCE_DIR}/build/host-deps/sqlite-amalgamation-3530300"
+        CACHE PATH "Path containing sqlite3.c and sqlite3.h for host tests")
+    if(EXISTS "${PS5MC_SQLITE_AMALGAMATION}/sqlite3.c")
+        add_library(sqlite3_host STATIC "${PS5MC_SQLITE_AMALGAMATION}/sqlite3.c")
+        target_include_directories(sqlite3_host PUBLIC "${PS5MC_SQLITE_AMALGAMATION}")
+        target_compile_definitions(sqlite3_host PRIVATE
+            SQLITE_THREADSAFE=1
+            SQLITE_OMIT_LOAD_EXTENSION=1
+        )
+        add_executable(library_database_tests
+            tests/library_database_tests.cpp
+            src/core/library_database.cpp
+        )
+        target_include_directories(library_database_tests PRIVATE include)
+        target_link_libraries(library_database_tests PRIVATE sqlite3_host)
+        add_test(NAME library_database_tests COMMAND library_database_tests)
+    endif()
+endif()

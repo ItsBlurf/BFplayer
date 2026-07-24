@@ -1,0 +1,20 @@
+;FFMETADATA1
+title=PS5 Media Center Multitrack Test
+
+[CHAPTER]
+TIMEBASE=1/1000
+START=0
+END=4000
+title=Intro
+
+[CHAPTER]
+TIMEBASE=1/1000
+START=4000
+END=7000
+title=Track Switching
+
+[CHAPTER]
+TIMEBASE=1/1000
+START=7000
+END=10000
+title=Resume and Exit
