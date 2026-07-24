@@ -1,7 +1,7 @@
 {
   "applicationCategoryType": 65536,
   "titleId": "PSMC00001",
-  "deeplinkUri": "http://127.0.0.1:8080/hbldr?path=%2Fdata%2Fhomebrew%2FPS5-MediaCenter%2Fps5-media-center.elf&cwd=%2Fdata%2Fhomebrew%2FPS5-MediaCenter&pipe=0",
+  "deeplinkUri": "http://127.0.0.1:9040/launch",
   "localizedParameters": {
     "defaultLanguage": "en-US",
     "en-US": {

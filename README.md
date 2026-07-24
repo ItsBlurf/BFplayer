@@ -9,8 +9,10 @@ evidence and references.
 
 ## Current foundation
 
-- One BigApp-owned ELF with a direct dashboard tile that bypasses the websrv
-  catalog and file picker.
+- One standalone resident payload containing the player, dashboard-tile
+  installer, runtime assets, minimal loopback launcher, and BigApp transition.
+- No websrv runtime dependency, no port 8080, no catalog, and no file picker:
+  the English-only tile calls a private `127.0.0.1:9040/launch` route.
 - FFmpeg 7.0.1 demuxing and software decoding from PacBrew v0.37.
 - SDL2 PS5 VideoOut, AudioOut, and controller backends.
 - libass text/ASS subtitle rendering plus FFmpeg bitmap subtitles.
@@ -34,8 +36,8 @@ evidence and references.
   one TV show with a naturally ordered episode view.
 - Broad indexing for the confirmed PacBrew FFmpeg demuxers, including common
   media plus raw AV1/VVC, IVF, NUT, WTV, Bink/Smacker, R3D, HCA, QOA, and more.
-- Direct HTTP(S)/HLS, FTP, RTSP, RTMP, RTP, TCP/UDP, SCTP, and MMST/MMSh URL
-  launch from websrv, with a strict protocol allowlist and secret-safe logging.
+- FFmpeg support for HTTP(S)/HLS, FTP, RTSP, RTMP, RTP, TCP/UDP, SCTP, and
+  MMST/MMSh sources, with a strict protocol allowlist and secret-safe logging.
 - Cached background metadata probing for title, duration, resolution, container,
   and audio/video codecs; modified files are automatically re-probed.
 - Selected-title local artwork with deterministic JPEG/PNG sidecar discovery,
@@ -56,8 +58,8 @@ evidence and references.
   /data/PS5-MediaCenter/logs, including FFmpeg/SDL/libass messages,
   source/track/scan events, five-second playback heartbeats, and fatal-signal
   markers; see docs/DIAGNOSTICS.md.
-- No background launcher daemon, process sweeps, or SystemService calls made
-  by application code.
+- The player itself has no AppInst privileges. Privileged tile registration
+  and the BigApp transition stay isolated in the resident launcher payload.
 
 The PS5 SDL backend currently renders and decodes in software. Format support
 is broad, but high-bitrate 4K HEVC/AV1 performance must be measured on hardware
@@ -80,28 +82,17 @@ are required. From this folder:
 ```
 
 Override that location with `PS5_PACBREW_HOME` if needed. The build output is
-`dist\ps5-media-center.elf`; the primary ready-to-copy package is
-`dist\PS5-MediaCenter-direct-tile.zip`. The compatibility-only catalog package
-remains `dist\PS5-MediaCenter-websrv.zip`.
+`dist\ps5-media-center-standalone.elf`; the ready-to-copy archive is
+`dist\PS5-MediaCenter-standalone.zip`. The standalone ELF already embeds the
+player ELF, font, icon, tile data, and launch core.
 
 ## Install
 
-If PS5 FTP is running on port 2121:
-
-```powershell
-.\deploy.ps1
-.\stage-test-media.ps1
-```
-
-The script only uploads this product's seven package files and writes a deploy
-log under `logs/deploy`. The second script verifies and uploads the deterministic
-multitrack/subtitle corpus to `/data/media/PS5MC-Test` for the hardware ladder;
-neither script deletes remote files. For a manual install, extract the
-direct-tile package so the final layout is
-`/data/homebrew/PS5-MediaCenter/...`, start websrv on port 8080, and inject the
-included `ps5mc-tile-installer.elf` once. After that, the **PS5 Media Center**
-dashboard tile calls the exact player ELF directly; the HBL catalog and picker
-are never displayed. See [docs/DIRECT_TILE.md](docs/DIRECT_TILE.md).
+Inject `dist\ps5-media-center-standalone.elf` once after each jailbreak. That
+single payload installs or refreshes the **PS5 Media Center** dashboard tile,
+materializes its small runtime assets, and remains resident to service the
+tile. No Media Center folder transfer and no websrv payload are required.
+See [docs/STANDALONE_LAUNCHER.md](docs/STANDALONE_LAUNCHER.md).
 
 After any test, run collect-logs.ps1 with the PS5 IP before launching another
 run. It downloads latest.log and previous.log into a timestamped folder. See
@@ -110,10 +101,9 @@ docs/DIAGNOSTICS.md for the collection procedure.
 ## Optional future console validation
 
 No console connection, upload, deployment, or runtime test is part of the
-current verification scope. If the owner later chooses to validate it, use the
-direct tile so websrv creates the required BigApp without showing its catalog.
-Do not send this ELF to a background elfldr process and do not run it alongside
-an older media-player launcher.
+current verification scope. Hardware validation should inject only the
+standalone payload, confirm its ready log, then select its dashboard tile. Do
+not stack an older Media Center launcher during the same test.
 
 Controller mappings during direct-file playback:
 
@@ -156,7 +146,8 @@ file as a standalone movie. Triangle adds the highlighted folder as one TV
 show, Square adds the current folder as one TV show, Circle goes to the parent
 folder, and Options closes the browser.
 
-See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md),
+See [docs/STANDALONE_LAUNCHER.md](docs/STANDALONE_LAUNCHER.md),
+[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md),
 [docs/VLC_DISPLAY_MODES.md](docs/VLC_DISPLAY_MODES.md), and
 [docs/HARDWARE_TEST_LADDER.md](docs/HARDWARE_TEST_LADDER.md) before deployment.
 The exact static-library evidence is recorded in
@@ -164,6 +155,7 @@ The exact static-library evidence is recorded in
 acceptance gates are tracked in
 [docs/COMPLETION_MATRIX.md](docs/COMPLETION_MATRIX.md).
 The current alpha is exhaustively offline-verified but cannot claim console
-runtime behavior; the owner explicitly required that the PS5 remain untouched.
-See [docs/FULL_VERIFICATION_AUDIT.md](docs/FULL_VERIFICATION_AUDIT.md) and
+runtime behavior. See
+[docs/ALPHA10_OFFLINE_VERIFICATION.md](docs/ALPHA10_OFFLINE_VERIFICATION.md),
+[docs/FULL_VERIFICATION_AUDIT.md](docs/FULL_VERIFICATION_AUDIT.md), and
 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

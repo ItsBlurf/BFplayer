@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.1.0-alpha.10 — standalone test build
+
+### Self-contained dashboard launch
+
+- Replaced the websrv/port-8080 launch path with one resident
+  `ps5-media-center-standalone.elf`.
+- Embedded the complete player ELF, Noto Sans runtime font, icon, tile data,
+  AppInst setup, and minimal BigApp/ELF-loader core into that single payload.
+- Added a loopback-only listener on `127.0.0.1:9040` with exactly one
+  `GET /launch` route.
+- Removed the separate tile-installer ELF, `homebrew.js`, websrv package, HBL
+  catalog path, and file-picker dependency.
+- Added standalone launcher/player logs and an embedded runtime manifest.
+- Added GPL-3.0-or-later source attribution and license text for the retained
+  upstream BigApp loader core.
+
 ## 0.1.0-alpha.9 — offline test build
 
 ### Display controls

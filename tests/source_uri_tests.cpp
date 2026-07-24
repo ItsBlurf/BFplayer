@@ -32,7 +32,7 @@ int main() {
           "supported scheme check is case insensitive");
     check(is_supported_stream_uri("udp://239.1.2.3:5000"), "UDP stream supported");
     check(!is_supported_stream_uri("smb://server/share/Movie.mkv"),
-          "direct SMB must use the websrv proxy");
+          "direct SMB is not supported");
     check(!is_supported_stream_uri("file:///data/media/Movie.mkv"),
           "file URI is not a direct network stream");
     check(!uri_has_sensitive_components("https://media.test/Movie.mkv"),

@@ -14,15 +14,14 @@ Confirmed demuxer/protocol symbols in the actual static archive:
 | Streaming | HLS, HTTP, HTTPS/TLS, FTP, RTSP, RTMP family, RTP/SRTP, MMST/MMSh, TCP/UDP, SCTP |
 | Subtitle files | ASS/SSA, SRT/SubRip, WebVTT, MicroDVD, SubViewer |
 | Local storage | Safe custom AVIO for primary files on `/data`, `/mnt/usbN`, `/mnt/extN`; restricted FFmpeg file access only for format-declared companions |
-| Network shares | websrv SMB-to-HTTP proxy; direct SMB is not linked |
+| Network shares | Direct SMB is not linked; use a supported HTTP(S), FTP, or streaming URL exposed by the source |
 
-The websrv entry has a **Play a network URL** option. It accepts only the
-network schemes confirmed in the linked archive and useful for media input:
+Network entries inside local M3U, PLS, and XSPF playlists accept only the
+schemes confirmed in the linked archive and useful for media input:
 HTTP(S), FTP, RTSP, RTMP/RTMPE/RTMPS/RTMPT variants, RTP/SRTP, TCP, UDP,
-UDPLite, SCTP, MMST, and MMSh. HLS uses an HTTP(S) URL. Direct SMB remains
-intentionally routed through websrv's HTTP proxy.
+UDPLite, SCTP, MMST, and MMSh. HLS uses an HTTP(S) URL. Direct SMB is rejected.
 
-Credentials in URL authority fields are rejected by the launcher. Query or
+Credentials in URL authority fields are rejected by the player. Query or
 fragment-bearing URLs can still be played (for signed stream URLs), but the
 player redacts those values from logs and does not store that complete URI in
 the resume/preferences database.

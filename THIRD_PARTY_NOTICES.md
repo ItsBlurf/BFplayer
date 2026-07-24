@@ -27,12 +27,21 @@ license texts and source.
 | SQLite | Public domain | <https://sqlite.org/> |
 | libc++, libc++abi, libunwind | Apache-2.0 WITH LLVM-exception | <https://libcxx.llvm.org/> |
 | Noto Sans | SIL Open Font License 1.1 | `assets/fonts/OFL.txt` in this package |
+| PS5 BigApp/ELF loader core | GPL-3.0-or-later | <https://github.com/ps5-payload-dev/websrv> |
 
 The exact FFmpeg configure string embedded in PacBrew's `libavcodec.a` includes
 `--enable-static`, `--disable-shared`, `--enable-openssl`, and
 `--enable-version3`. It does not include `--enable-gpl` or
 `--enable-nonfree`. Corresponding FFmpeg source for version 7.0.1 is available
 from <https://ffmpeg.org/releases/>.
+
+## Standalone BigApp loader
+
+`src/launcher/core/hbldr.c`, `elfldr.c`, and `pt.c` originate from John
+Törnblom's ps5-payload-websrv project. The local hbldr copy is modified to
+remove websrv-specific headers and to accept the Media Center ELF directly
+from the standalone payload image. Those files and the combined standalone
+launcher are GPL-3.0-or-later. The complete license is in `LICENSE`.
 
 ## Modified SDL_kitchensink image-subtitle renderer
 

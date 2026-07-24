@@ -45,17 +45,21 @@ equivalent: it uses the PS4 compatibility process and CRT/ABI, while the
 player is an `x86_64-sie-ps5` Prospero DYN payload linked against PacBrew's PS5
 SDL/FFmpeg stack.
 
-The selected launch design therefore:
+Alpha.10 retains the proven BigApp transition without retaining the websrv
+application:
 
-1. Installs a thin Media-category dashboard tile with `AppInstallTitleDir`.
-2. Deeplinks to localhost websrv `/hbldr` with the exact Media Center path.
-3. Skips the websrv index, homebrew catalog, `homebrew.js`, and file picker.
-4. Keeps privileged tile registration in a separate installer ELF.
-5. Requires websrv to be active in the post-jailbreak payload stack.
+1. One resident ELF embeds the complete player and required small assets.
+2. The same ELF registers the Media-category tile with `AppInstallTitleDir`.
+3. A raw-socket listener binds only `127.0.0.1:9040` and accepts only
+   `GET /launch`.
+4. The launch route passes the embedded player bytes directly to the retained
+   `hbldr`/ptrace/ELF-replacement core.
+5. No libmicrohttpd, websrv process, port 8080, catalog, `homebrew.js`, or HBL
+   picker participates in normal startup.
 
-This is not represented as a standalone signed PS5 title. It is the safest
-evidenced way to provide a direct dashboard experience without repeating the
-quarantined compatibility-FPKG experiment.
+This remains a resident payload plus dashboard tile, not a signed standalone
+PS5 title. The public BigApp loader core is GPL-3.0-or-later and is retained
+with source, modification notes, and the complete license.
 
 ## Visual direction
 

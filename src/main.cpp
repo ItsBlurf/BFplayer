@@ -42,6 +42,10 @@ extern "C" {
 
 namespace {
 
+#ifndef PS5MC_VERSION
+#define PS5MC_VERSION "development"
+#endif
+
 constexpr int kWindowWidth = 1920;
 constexpr int kWindowHeight = 1080;
 constexpr int kAudioBufferBytes = 64 * 1024;
@@ -1739,10 +1743,8 @@ int main(int argc, char** argv) {
     log_installed_manifest(argc > 0 ? argv[0] : nullptr);
     ps5mc::diagnostics_log(
         ps5mc::DiagnosticLevel::info,
-        "application-start build=%s %s %s",
-        "0.1.0-alpha.8",
-        __DATE__,
-        __TIME__);
+        "application-start build=%s",
+        PS5MC_VERSION);
     App app{};
     app.fallback_font = executable_asset_path(
         argc > 0 ? argv[0] : nullptr,

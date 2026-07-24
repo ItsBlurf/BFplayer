@@ -41,8 +41,37 @@ $linker = Join-Path $workspaceRoot 'tools\bin\ps5-clang.cmd'
 $buildDir = Join-Path $projectRoot 'build\ps5'
 $distDir = Join-Path $projectRoot 'dist'
 $packageRoot = Join-Path $projectRoot 'build\package'
-$packageDir = Join-Path $packageRoot 'PS5-MediaCenter'
+$packageDir = Join-Path $packageRoot 'PS5-MediaCenter-standalone'
 New-Item -ItemType Directory -Force -Path $buildDir, $distDir | Out-Null
+$obsoleteDistEntries = @(
+    'homebrew.js',
+    'PS5-MediaCenter-direct-tile.zip',
+    'PS5-MediaCenter-direct-tile.zip.sha256',
+    'PS5-MediaCenter-websrv.zip',
+    'PS5-MediaCenter-websrv.zip.sha256',
+    'ps5mc-tile-installer.elf',
+    'ps5mc-tile-installer.sha256',
+    'THIRD_PARTY_NOTICES.md',
+    'assets',
+    'sce_sys',
+    'PS5-MediaCenter-websrv'
+)
+$distPrefix = [IO.Path]::GetFullPath($distDir) + [IO.Path]::DirectorySeparatorChar
+foreach ($entry in $obsoleteDistEntries) {
+    $obsoletePath = [IO.Path]::GetFullPath((Join-Path $distDir $entry))
+    if (-not $obsoletePath.StartsWith($distPrefix, [StringComparison]::OrdinalIgnoreCase)) {
+        throw "Refusing to remove obsolete output outside $distDir"
+    }
+    if (Test-Path -LiteralPath $obsoletePath) {
+        Remove-Item -LiteralPath $obsoletePath -Recurse -Force
+    }
+}
+$version = (Get-Content -Raw (Join-Path $projectRoot 'VERSION')).Trim()
+$versionHeader = Join-Path $buildDir 'ps5mc_version.h'
+$versionHeaderRelative = 'build\ps5\ps5mc_version.h'
+[IO.File]::WriteAllText(
+    $versionHeader,
+    "#pragma once`n#define PS5MC_VERSION `"$version`"`n")
 
 $common = @(
     '-std=c++20',
@@ -52,7 +81,9 @@ $common = @(
     '-DPS5MC_PS5=1',
     "-I$($pacbrewHome)\include",
     "-I$($pacbrewHome)\include\SDL2",
-    '-Iinclude'
+    '-Iinclude',
+    '-include',
+    $versionHeaderRelative
 )
 if ($Configuration -eq 'Release') {
     $common += @('-O2', '-DNDEBUG')
@@ -99,7 +130,9 @@ try {
         '-DPS5MC_PS5=1',
         "-I$($pacbrewHome)\include",
         "-I$($pacbrewHome)\include\SDL2",
-        '-Iinclude'
+        '-Iinclude',
+        '-include',
+        $versionHeaderRelative
     )
     if ($Configuration -eq 'Release') {
         $cCommon += @('-O2', '-DNDEBUG')
@@ -166,51 +199,58 @@ try {
     }
 
     $elf = Join-Path $distDir 'ps5-media-center.elf'
-    $tileInstallerObject = 'build\ps5\tile_installer.o'
-    $tileInstallerCommon = @(
+    $standaloneCommon = @(
         '-std=c17',
         '-Wall',
         '-Wextra',
         '-Wpedantic',
         '-O2',
         '-DNDEBUG',
-        '-Iinclude'
+        '-Iinclude',
+        '-Isrc\launcher',
+        '-Isrc\launcher\core',
+        '-include',
+        $versionHeaderRelative
     )
-    & $linker @tileInstallerCommon -c 'src\launcher\tile_installer.c' -o $tileInstallerObject
-    if ($LASTEXITCODE -ne 0) {
-        throw 'Compilation failed: src\launcher\tile_installer.c'
+    $standaloneSources = @(
+        'src\launcher\standalone_launcher.c',
+        'src\launcher\standalone_route.c',
+        'src\launcher\core\pt.c',
+        'src\launcher\core\elfldr.c',
+        'src\launcher\core\hbldr.c'
+    )
+    $standaloneObjects = @()
+    foreach ($source in $standaloneSources) {
+        $objectName = ($source -replace '^src\\launcher\\', '') -replace '[\\/.]', '_'
+        $object = "build\ps5\$objectName.o"
+        & $linker @standaloneCommon -c $source -o $object
+        if ($LASTEXITCODE -ne 0) {
+            throw "Compilation failed: $source"
+        }
+        $standaloneObjects += $object
     }
-    $tileInstaller = Join-Path $distDir 'ps5mc-tile-installer.elf'
-    $tileLinkArgs = @(
-        '-o', 'dist\ps5mc-tile-installer.elf',
-        $tileInstallerObject,
+    $standalone = Join-Path $distDir 'ps5-media-center-standalone.elf'
+    $standaloneLinkArgs = @(
+        '-o', 'dist\ps5-media-center-standalone.elf'
+    ) + $standaloneObjects + @(
         '-lkernel_sys',
         '-lSceSystemService',
         '-lSceUserService',
         '-lSceAppInstUtil'
     )
-    & $linker @tileLinkArgs
+    & $linker @standaloneLinkArgs
     if ($LASTEXITCODE -ne 0) {
-        throw 'Link failed: ps5mc-tile-installer.elf'
+        throw 'Link failed: ps5-media-center-standalone.elf'
     }
 
     $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $elf).Hash.ToLowerInvariant()
-    $tileHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $tileInstaller).Hash.ToLowerInvariant()
+    $standaloneHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $standalone).Hash.ToLowerInvariant()
     [IO.File]::WriteAllText(
         (Join-Path $distDir 'ps5-media-center.sha256'),
         "$hash  ps5-media-center.elf`n")
     [IO.File]::WriteAllText(
-        (Join-Path $distDir 'ps5mc-tile-installer.sha256'),
-        "$tileHash  ps5mc-tile-installer.elf`n")
-    $fontDist = Join-Path $distDir 'assets\fonts'
-    New-Item -ItemType Directory -Force -Path $fontDist | Out-Null
-    Copy-Item -LiteralPath (Join-Path $projectRoot 'assets\fonts\NotoSans-Regular.ttf') -Destination $fontDist -Force
-    Copy-Item -LiteralPath (Join-Path $projectRoot 'assets\fonts\OFL.txt') -Destination $fontDist -Force
-    Copy-Item -LiteralPath (Join-Path $projectRoot 'homebrew.js') -Destination $distDir -Force
-    Copy-Item -LiteralPath (Join-Path $projectRoot 'THIRD_PARTY_NOTICES.md') -Destination $distDir -Force
-    $iconDist = Join-Path $distDir 'sce_sys'
-    New-Item -ItemType Directory -Force -Path $iconDist | Out-Null
-    Copy-Item -LiteralPath (Join-Path $projectRoot 'assets\icon0.png') -Destination $iconDist -Force
+        (Join-Path $distDir 'ps5-media-center-standalone.sha256'),
+        "$standaloneHash  ps5-media-center-standalone.elf`n")
 
     $expectedPackagePrefix = [IO.Path]::GetFullPath($packageRoot) + [IO.Path]::DirectorySeparatorChar
     $resolvedPackageDir = [IO.Path]::GetFullPath($packageDir)
@@ -220,21 +260,17 @@ try {
     if (Test-Path -LiteralPath $resolvedPackageDir) {
         Remove-Item -LiteralPath $resolvedPackageDir -Recurse -Force
     }
-    New-Item -ItemType Directory -Force -Path (Join-Path $packageDir 'assets\fonts'), (Join-Path $packageDir 'sce_sys') | Out-Null
-    Copy-Item -LiteralPath $elf -Destination $packageDir -Force
-    Copy-Item -LiteralPath (Join-Path $distDir 'homebrew.js') -Destination $packageDir -Force
-    Copy-Item -LiteralPath (Join-Path $distDir 'THIRD_PARTY_NOTICES.md') -Destination $packageDir -Force
-    Copy-Item -LiteralPath (Join-Path $fontDist 'NotoSans-Regular.ttf') -Destination (Join-Path $packageDir 'assets\fonts') -Force
-    Copy-Item -LiteralPath (Join-Path $fontDist 'OFL.txt') -Destination (Join-Path $packageDir 'assets\fonts') -Force
-    Copy-Item -LiteralPath (Join-Path $iconDist 'icon0.png') -Destination (Join-Path $packageDir 'sce_sys') -Force
+    New-Item -ItemType Directory -Force -Path $packageDir | Out-Null
+    Copy-Item -LiteralPath $standalone -Destination $packageDir -Force
+    Copy-Item -LiteralPath (Join-Path $projectRoot 'LICENSE') -Destination $packageDir -Force
+    Copy-Item -LiteralPath (Join-Path $projectRoot 'THIRD_PARTY_NOTICES.md') -Destination $packageDir -Force
+    Copy-Item -LiteralPath (Join-Path $projectRoot 'docs\STANDALONE_LAUNCHER.md') -Destination (Join-Path $packageDir 'INSTALL.md') -Force
 
     $payloadFiles = @(
-        'ps5-media-center.elf',
-        'homebrew.js',
-        'THIRD_PARTY_NOTICES.md',
-        'assets\fonts\NotoSans-Regular.ttf',
-        'assets\fonts\OFL.txt',
-        'sce_sys\icon0.png'
+        'ps5-media-center-standalone.elf',
+        'INSTALL.md',
+        'LICENSE',
+        'THIRD_PARTY_NOTICES.md'
     )
     $fileManifest = @(
         foreach ($relativePath in $payloadFiles) {
@@ -247,17 +283,18 @@ try {
             }
         }
     )
-    $version = (Get-Content -Raw (Join-Path $projectRoot 'VERSION')).Trim()
     $manifest = [ordered]@{
         name = 'PS5 Media Center'
         version = $version
         target = 'x86_64-sie-ps5'
-        package = 'direct dashboard tile + websrv BigApp transition'
-        direct_tile = 'PSMC00001 via localhost:8080/hbldr'
+        package = 'single standalone payload'
+        direct_tile = 'PSMC00001 via loopback-only localhost:9040/launch'
+        websrv_required = $false
+        embedded_player = $true
         pacbrew = 'v0.37'
         ffmpeg = '7.0.1'
-        sha256 = $hash
-        tile_installer_sha256 = $tileHash
+        player_sha256 = $hash
+        standalone_sha256 = $standaloneHash
         built_utc = [DateTime]::UtcNow.ToString('o')
         files = $fileManifest
     }
@@ -283,32 +320,12 @@ try {
         throw "Package staging contains a missing or unexpected file: $($packageDifference | Out-String)"
     }
 
-    $zip = Join-Path $distDir 'PS5-MediaCenter-websrv.zip'
+    $zip = Join-Path $distDir 'PS5-MediaCenter-standalone.zip'
     Compress-Archive -Path $packageDir -DestinationPath $zip -CompressionLevel Optimal -Force
     $zipHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $zip).Hash.ToLowerInvariant()
     [IO.File]::WriteAllText(
-        (Join-Path $distDir 'PS5-MediaCenter-websrv.zip.sha256'),
-        "$zipHash  PS5-MediaCenter-websrv.zip`n")
-
-    $directStage = Join-Path $packageRoot 'PS5-MediaCenter-direct-tile'
-    $expectedDirectPrefix = [IO.Path]::GetFullPath($packageRoot) + [IO.Path]::DirectorySeparatorChar
-    $resolvedDirectStage = [IO.Path]::GetFullPath($directStage)
-    if (-not $resolvedDirectStage.StartsWith($expectedDirectPrefix, [StringComparison]::OrdinalIgnoreCase)) {
-        throw "Refusing to clean direct-tile staging outside $packageRoot"
-    }
-    if (Test-Path -LiteralPath $resolvedDirectStage) {
-        Remove-Item -LiteralPath $resolvedDirectStage -Recurse -Force
-    }
-    New-Item -ItemType Directory -Force -Path $resolvedDirectStage | Out-Null
-    Copy-Item -LiteralPath $packageDir -Destination $resolvedDirectStage -Recurse -Force
-    Copy-Item -LiteralPath $tileInstaller -Destination $resolvedDirectStage -Force
-    Copy-Item -LiteralPath (Join-Path $projectRoot 'docs\DIRECT_TILE.md') -Destination (Join-Path $resolvedDirectStage 'INSTALL-DIRECT-TILE.md') -Force
-    $directZip = Join-Path $distDir 'PS5-MediaCenter-direct-tile.zip'
-    Compress-Archive -Path (Join-Path $resolvedDirectStage '*') -DestinationPath $directZip -CompressionLevel Optimal -Force
-    $directZipHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $directZip).Hash.ToLowerInvariant()
-    [IO.File]::WriteAllText(
-        (Join-Path $distDir 'PS5-MediaCenter-direct-tile.zip.sha256'),
-        "$directZipHash  PS5-MediaCenter-direct-tile.zip`n")
+        (Join-Path $distDir 'PS5-MediaCenter-standalone.zip.sha256'),
+        "$zipHash  PS5-MediaCenter-standalone.zip`n")
 
     $logDir = Join-Path $workspaceRoot 'logs\build'
     New-Item -ItemType Directory -Force -Path $logDir | Out-Null
@@ -322,16 +339,15 @@ try {
             "elf=$elf",
             "elf_bytes=$((Get-Item -LiteralPath $elf).Length)",
             "elf_sha256=$hash",
+            "standalone=$standalone",
+            "standalone_bytes=$((Get-Item -LiteralPath $standalone).Length)",
+            "standalone_sha256=$standaloneHash",
             "package=$zip",
             "package_sha256=$zipHash",
-            "tile_installer=$tileInstaller",
-            "tile_installer_sha256=$tileHash",
-            "direct_tile_package=$directZip",
-            "direct_tile_package_sha256=$directZipHash",
             "built_utc=$($manifest.built_utc)"
         ))
-    Get-Item -LiteralPath $elf | Select-Object FullName, Length
-    Write-Host "SHA256 $hash"
+    Get-Item -LiteralPath $standalone | Select-Object FullName, Length
+    Write-Host "SHA256 $standaloneHash"
 }
 finally {
     Pop-Location

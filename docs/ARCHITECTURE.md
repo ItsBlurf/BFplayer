@@ -2,17 +2,23 @@
 
 ## Decision
 
-The application is a single Prospero ELF injected into a BigApp process by
-`ps5-payload-websrv`. The `PSMC00001` dashboard tile calls `/hbldr` with the
-exact ELF path, so the web catalog and picker are skipped. This is the only
-locally evidenced route that
-provides the PS5 SDL VideoOut/AudioOut environment without the compatibility
-FPKG panics and process-management hazards found in the old attempts.
+The release is one resident Prospero payload. It embeds the complete player
+ELF, installs the `PSMC00001` tile, and binds a one-route HTTP listener only to
+`127.0.0.1:9040`. The tile calls `/launch`; the resident payload creates the
+BigApp context and replaces it with the embedded player directly.
+
+The implementation retains only the proven GPL BigApp/ptrace/ELF-loader core.
+It does not embed or depend on the websrv application, libmicrohttpd, port
+8080, the catalog, `homebrew.js`, or the HBL picker.
 
 ```text
-PS5 Media Center tile -> websrv /hbldr -> BigApp -> ps5-media-center.elf
-                               |
-              +----------------+----------------+
+standalone payload -> loopback :9040 <- PS5 Media Center tile
+        |                 |
+  embedded player    BigApp transition
+        |                 |
+        +---------> BigApp player
+                          |
+              +-----------+---------------------+
               |                |                |
           Library UI      Playback engine    Persistence
           SDL2/TTF        Kitchensink/FFmpeg SQLite
@@ -36,6 +42,7 @@ restarting unrelated PS5 processes.
 | SDL_kitchensink | 2.0.0-a2 + PS5 PTS patch | Decode queues, sync, seeking, track switching |
 | libass | 0.17.3 | Styled text subtitles and embedded fonts |
 | SQLite | PacBrew v0.37 | Library index, resume position, preferences |
+| BigApp/ELF loader core | ps5-payload-websrv, GPL-3.0-or-later | Minimal in-memory BigApp transition |
 
 The project links these statically. SCE system libraries remain dynamic stubs,
 matching the official PacBrew FFplay binary.
@@ -132,20 +139,15 @@ decoder objects are pulled from the static SDL_image archive.
 
 ## Packaging
 
-The first supported package is a websrv homebrew folder:
+The supported release is one injectable payload:
 
 ```text
-/data/homebrew/PS5-MediaCenter/
-  ps5-media-center.elf
-  homebrew.js
-  build-manifest.json
-  THIRD_PARTY_NOTICES.md
-  assets/fonts/NotoSans-Regular.ttf
-  assets/fonts/OFL.txt
-  sce_sys/icon0.png
+ps5-media-center-standalone.elf
 ```
 
-The direct bundle also contains `ps5mc-tile-installer.elf`. That separate
-AppInst helper registers `/user/app/PSMC00001/sce_sys` as a Media-category
-localhost deeplink. It does not place `libSceAppInstUtil` or `libkernel_sys`
-imports in the player. See `docs/DIRECT_TILE.md`.
+At startup it writes only the small font, icon, and runtime manifest required
+by the embedded player, then registers `/user/app/PSMC00001/sce_sys`. The
+player is launched from its embedded bytes, so no separate player ELF transfer
+is required. AppInst and kernel-system imports belong to the outer resident
+launcher; the embedded player ELF retains its narrower import boundary. See
+`docs/STANDALONE_LAUNCHER.md`.

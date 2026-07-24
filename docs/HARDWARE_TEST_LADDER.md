@@ -6,9 +6,9 @@ episode entry/playback, and local/direct playback; see
 [ALPHA8_HARDWARE_VERIFICATION.md](ALPHA8_HARDWARE_VERIFICATION.md). Continue
 from the first still-unverified behavior instead of repeating successful tests.
 
-Run exactly one new variable per step and collect websrv/HBL stdout. Stop on a
-console disconnect, black screen that does not recover, or a fatal filesystem
-error.
+Run exactly one new variable per step and collect the standalone launcher and
+player logs. Stop on a console disconnect, black screen that does not recover,
+or a fatal filesystem error.
 
 1. Launch with no media argument; verify window creation and clean Options exit.
 2. Play a local 720p H.264/AAC MP4 with no subtitles for ten minutes.
@@ -39,13 +39,13 @@ error.
    advance, unsupported-entry filtering, and visible malformed-list errors.
    Add title-specific and folder-level JPEG/PNG artwork, confirm priority and
    aspect ratio, then replace an artwork file and verify Rescan refreshes it.
-10. Use **Play a network URL** for HTTP/HLS, HTTPS, RTSP, RTMP, and UDP/RTP
+10. Use local playlists containing HTTP/HLS, HTTPS, RTSP, RTMP, and UDP/RTP
     samples, including clean connection failure. Confirm a URL containing
-    `user:password@` is rejected before launch and a signed query value never
-    appears in stdout/stderr. Then test SMB only through websrv's HTTP proxy.
+    `user:password@` is rejected and a signed query value never appears in
+    logs. Direct SMB is outside the standalone build's supported protocols.
 11. Measure 1080p HEVC/VP9, then 4K samples. Treat frame drops as a performance
     limit, not a reason to stack privileged/debug payloads.
 
-Never mass-kill processes, restart the BigApp in a loop, or launch through a
-background elfldr context. Older firmware must follow websrv's own BigApp
-budget guard.
+Never mass-kill processes or restart the BigApp in a loop. Inject only the
+standalone launcher for this test and do not stack websrv or an older Media
+Center launcher.

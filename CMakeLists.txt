@@ -58,17 +58,20 @@ if(BUILD_TESTING)
     target_link_libraries(safe_read_file_tests PRIVATE ps5mc_core)
     add_test(NAME safe_read_file_tests COMMAND safe_read_file_tests)
 
+    add_executable(
+        standalone_route_tests
+        tests/standalone_route_tests.cpp
+        src/launcher/standalone_route.c
+    )
+    target_include_directories(standalone_route_tests PRIVATE include)
+    add_test(NAME standalone_route_tests COMMAND standalone_route_tests)
+
     find_program(PS5MC_NODE_EXECUTABLE node)
     if(PS5MC_NODE_EXECUTABLE)
         add_test(
-            NAME homebrew_launcher_tests
+            NAME standalone_launcher_tests
             COMMAND "${PS5MC_NODE_EXECUTABLE}"
-                    "${CMAKE_CURRENT_SOURCE_DIR}/tests/homebrew_launcher_tests.js"
-        )
-        add_test(
-            NAME direct_tile_tests
-            COMMAND "${PS5MC_NODE_EXECUTABLE}"
-                    "${CMAKE_CURRENT_SOURCE_DIR}/tests/direct_tile_tests.js"
+                    "${CMAKE_CURRENT_SOURCE_DIR}/tests/standalone_launcher_tests.js"
         )
     endif()
 
