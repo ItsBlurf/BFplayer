@@ -17,6 +17,7 @@
 #include <array>
 #include <cerrno>
 #include <cctype>
+#include <cmath>
 #include <cstdio>
 #include <cstring>
 #include <dirent.h>
@@ -51,6 +52,23 @@ struct Label {
     int height = 0;
 };
 
+enum class FooterGlyph {
+    cross,
+    circle,
+    square,
+    triangle,
+    dpad,
+    touchpad,
+    options,
+    text_button,
+};
+
+struct FooterHint {
+    FooterGlyph glyph = FooterGlyph::cross;
+    Label button_label;
+    Label action_label;
+};
+
 void destroy_label(Label& label) {
     SDL_DestroyTexture(label.texture);
     label = {};
@@ -69,60 +87,111 @@ Label make_label(SDL_Renderer* renderer, TTF_Font* font, const std::string& text
     return label;
 }
 
-void draw_pixel_play_mark(
+void draw_logo(
     SDL_Renderer* renderer,
+    SDL_Texture* texture,
     int center_x,
     int center_y,
-    int size,
-    bool compact = false) {
-    if (!renderer || size < 12) {
+    int size) {
+    if (!renderer || !texture || size < 1) {
         return;
     }
-    const int half = size / 2;
-    const int left = center_x - half;
-    const int top = center_y - half;
-    const int right = center_x + half;
+    SDL_Rect target{
+        center_x - size / 2,
+        center_y - size / 2,
+        size,
+        size};
+    SDL_RenderCopy(renderer, texture, nullptr, &target);
+}
 
-    // A hard-edged gold play triangle built from scan lines.
-    for (int x = left; x <= right; ++x) {
-        const double progress =
-            static_cast<double>(x - left) / static_cast<double>(size);
-        const int spread = std::max(1, static_cast<int>(half * progress));
-        SDL_SetRenderDrawColor(renderer, 244, 178, 42, 255);
-        SDL_RenderDrawLine(renderer, x, center_y - spread, x, center_y + spread);
+int footer_glyph_width(const FooterHint& hint) {
+    if (hint.glyph == FooterGlyph::touchpad) {
+        return 43;
     }
-    SDL_SetRenderDrawColor(renderer, 255, 222, 113, 255);
-    SDL_RenderDrawLine(renderer, left, center_y, right, center_y);
+    if (hint.glyph == FooterGlyph::options) {
+        return 36;
+    }
+    if (hint.glyph == FooterGlyph::text_button) {
+        return std::max(38, hint.button_label.width + 14);
+    }
+    return 30;
+}
 
-    // Pixel blade: dark outline, silver body, cyan core, and a tiny crossguard.
-    const int blade_width = compact ? 8 : std::max(10, size / 8);
-    SDL_SetRenderDrawColor(renderer, 13, 30, 77, 255);
-    SDL_Rect outline{
-        center_x - blade_width / 2 - 3,
-        top - size / 3,
-        blade_width + 6,
-        size + (size * 2) / 3};
-    SDL_RenderFillRect(renderer, &outline);
-    SDL_SetRenderDrawColor(renderer, 194, 232, 255, 255);
-    SDL_Rect blade{
-        center_x - blade_width / 2,
-        top - size / 3,
-        blade_width,
-        size + size / 2};
-    SDL_RenderFillRect(renderer, &blade);
-    SDL_SetRenderDrawColor(renderer, 38, 184, 255, 255);
-    SDL_Rect core{center_x - 2, blade.y + 3, 4, blade.h - 6};
-    SDL_RenderFillRect(renderer, &core);
-    SDL_SetRenderDrawColor(renderer, 71, 133, 255, 255);
-    SDL_Rect guard{
-        center_x - blade_width * 2,
-        top - size / 4,
-        blade_width * 4,
-        compact ? 5 : 8};
-    SDL_RenderFillRect(renderer, &guard);
-    SDL_SetRenderDrawColor(renderer, 231, 249, 255, 255);
-    SDL_Rect glint{center_x - 3, center_y - 3, 7, 7};
-    SDL_RenderFillRect(renderer, &glint);
+void draw_footer_glyph(
+    SDL_Renderer* renderer,
+    const FooterHint& hint,
+    int x,
+    int center_y) {
+    const int width = footer_glyph_width(hint);
+    const int center_x = x + width / 2;
+    SDL_SetRenderDrawColor(renderer, 226, 235, 251, 255);
+    switch (hint.glyph) {
+    case FooterGlyph::cross:
+        SDL_RenderDrawLine(renderer, center_x - 10, center_y - 10,
+                          center_x + 10, center_y + 10);
+        SDL_RenderDrawLine(renderer, center_x + 10, center_y - 10,
+                          center_x - 10, center_y + 10);
+        break;
+    case FooterGlyph::circle:
+        for (int radius = 11; radius <= 12; ++radius) {
+            for (int degree = 0; degree < 360; degree += 4) {
+                const double angle = degree * 3.14159265358979323846 / 180.0;
+                SDL_RenderDrawPoint(
+                    renderer,
+                    center_x + static_cast<int>(radius * std::cos(angle)),
+                    center_y + static_cast<int>(radius * std::sin(angle)));
+            }
+        }
+        break;
+    case FooterGlyph::square: {
+        SDL_Rect square{center_x - 11, center_y - 11, 23, 23};
+        SDL_RenderDrawRect(renderer, &square);
+        break;
+    }
+    case FooterGlyph::triangle:
+        SDL_RenderDrawLine(renderer, center_x, center_y - 13,
+                          center_x - 13, center_y + 11);
+        SDL_RenderDrawLine(renderer, center_x - 13, center_y + 11,
+                          center_x + 13, center_y + 11);
+        SDL_RenderDrawLine(renderer, center_x + 13, center_y + 11,
+                          center_x, center_y - 13);
+        break;
+    case FooterGlyph::dpad: {
+        SDL_Rect vertical{center_x - 4, center_y - 14, 9, 29};
+        SDL_Rect horizontal{center_x - 14, center_y - 4, 29, 9};
+        SDL_RenderDrawRect(renderer, &vertical);
+        SDL_RenderDrawRect(renderer, &horizontal);
+        break;
+    }
+    case FooterGlyph::touchpad: {
+        SDL_Rect touchpad{x, center_y - 12, width, 25};
+        SDL_RenderDrawRect(renderer, &touchpad);
+        SDL_RenderDrawLine(renderer, center_x, center_y - 9,
+                          center_x, center_y + 9);
+        break;
+    }
+    case FooterGlyph::options: {
+        for (int offset = -7; offset <= 7; offset += 7) {
+            SDL_RenderDrawLine(
+                renderer, x + 4, center_y + offset,
+                x + width - 4, center_y + offset);
+        }
+        break;
+    }
+    case FooterGlyph::text_button: {
+        SDL_Rect button{x, center_y - 14, width, 29};
+        SDL_RenderDrawRect(renderer, &button);
+        if (hint.button_label.texture) {
+            SDL_Rect target{
+                x + (width - hint.button_label.width) / 2,
+                center_y - hint.button_label.height / 2,
+                hint.button_label.width,
+                hint.button_label.height};
+            SDL_RenderCopy(renderer, hint.button_label.texture, nullptr, &target);
+        }
+        break;
+    }
+    }
 }
 
 std::string fit_text_to_width(TTF_Font* font, std::string text, int max_width) {
@@ -384,11 +453,12 @@ struct LibraryUi::Impl {
     std::vector<Label> row_labels;
     Label title_label;
     Label status_label;
-    Label help_label;
+    std::vector<FooterHint> footer_hints;
     Label artwork_label;
     Label empty_title_label;
     Label empty_help_label;
     SDL_Texture* artwork_texture = nullptr;
+    SDL_Texture* logo_texture = nullptr;
     int artwork_width = 0;
     int artwork_height = 0;
     int artwork_generation = -1;
@@ -996,7 +1066,11 @@ struct LibraryUi::Impl {
         row_labels.clear();
         destroy_label(title_label);
         destroy_label(status_label);
-        destroy_label(help_label);
+        for (FooterHint& hint : footer_hints) {
+            destroy_label(hint.button_label);
+            destroy_label(hint.action_label);
+        }
+        footer_hints.clear();
         destroy_label(artwork_label);
         destroy_label(empty_title_label);
         destroy_label(empty_help_label);
@@ -1465,6 +1539,19 @@ struct LibraryUi::Impl {
         SDL_RenderSetLogicalSize(renderer, kUiWidth, kUiHeight);
         const SDL_Color white{240, 244, 255, 255};
         const SDL_Color muted{157, 170, 196, 255};
+        const auto add_footer_hint = [&](FooterGlyph glyph,
+                                         const char* button,
+                                         const char* action) {
+            FooterHint hint{};
+            hint.glyph = glyph;
+            if (glyph == FooterGlyph::text_button && button && button[0]) {
+                hint.button_label = make_label(
+                    renderer, footer_font, button, white);
+            }
+            hint.action_label = make_label(
+                renderer, footer_font, action ? action : "", muted);
+            footer_hints.push_back(std::move(hint));
+        };
 
         SDL_LockMutex(mutex);
         const bool browsing = browser_mode;
@@ -1511,14 +1598,11 @@ struct LibraryUi::Impl {
                     current_path + "  |  " + std::to_string(total) + " ITEMS",
                     kUiWidth - 112),
                 muted);
-            help_label = make_label(
-                renderer,
-                footer_font,
-                fit_text_to_width(
-                    row_font,
-                    "Cross Open / Add File as Movie  Triangle Add Folder as TV Show  Square Add Current Folder as TV Show  Circle Up  Options Close",
-                    kUiWidth - 108),
-                muted);
+            add_footer_hint(FooterGlyph::cross, "", "Open / Add Movie");
+            add_footer_hint(FooterGlyph::triangle, "", "Add TV Folder");
+            add_footer_hint(FooterGlyph::square, "", "Add Current Folder");
+            add_footer_hint(FooterGlyph::circle, "", "Up");
+            add_footer_hint(FooterGlyph::options, "", "Close");
             artwork_label = make_label(
                 renderer,
                 row_font,
@@ -1548,16 +1632,22 @@ struct LibraryUi::Impl {
                 ? "PS5 Media Center"
                 : "TV Show  |  " + media_source_default_title(series_root),
             white);
-        help_label = make_label(
-            renderer,
-            footer_font,
-            fit_text_to_width(
-                row_font,
-                series_root.empty()
-                    ? "Cross Open/Play  Circle Queue  Left/Right Category  L3 Favorite  Touchpad Add Media  R3 Sort  Square Rescan  Options Exit"
-                    : "Cross Play Episode  Circle Back  L1/R1 Page  Touchpad Add Media  Options Exit",
-                kUiWidth - 108),
-            muted);
+        if (series_root.empty()) {
+            add_footer_hint(FooterGlyph::cross, "", "Play");
+            add_footer_hint(FooterGlyph::circle, "", "Queue");
+            add_footer_hint(FooterGlyph::dpad, "", "Category");
+            add_footer_hint(FooterGlyph::text_button, "L3", "Favorite");
+            add_footer_hint(FooterGlyph::touchpad, "", "Add Media");
+            add_footer_hint(FooterGlyph::text_button, "R3", "Sort");
+            add_footer_hint(FooterGlyph::square, "", "Rescan");
+            add_footer_hint(FooterGlyph::options, "", "Exit");
+        } else {
+            add_footer_hint(FooterGlyph::cross, "", "Play Episode");
+            add_footer_hint(FooterGlyph::circle, "", "Back");
+            add_footer_hint(FooterGlyph::text_button, "L1/R1", "Page");
+            add_footer_hint(FooterGlyph::touchpad, "", "Add Media");
+            add_footer_hint(FooterGlyph::options, "", "Exit");
+        }
 
         std::vector<MediaEntry> visible;
         std::vector<int> visible_episode_counts;
@@ -1727,10 +1817,11 @@ LibraryUi::~LibraryUi() {
 bool LibraryUi::open(
     SDL_Renderer* renderer,
     const std::string& font_path,
+    const std::string& logo_path,
     const std::vector<MediaSource>& initial_sources) {
     close();
     impl_->renderer = renderer;
-    if (!renderer || font_path.empty()) {
+    if (!renderer || font_path.empty() || logo_path.empty()) {
         impl_->last_error = "LibraryUi::open: invalid argument";
         return false;
     }
@@ -1743,6 +1834,26 @@ bool LibraryUi::open(
     impl_->footer_font = TTF_OpenFont(font_path.c_str(), 22);
     if (!impl_->title_font || !impl_->row_font || !impl_->footer_font) {
         impl_->last_error = std::string("TTF_OpenFont: ") + TTF_GetError();
+        close();
+        return false;
+    }
+    SDL_RWops* logo_source = SDL_RWFromFile(logo_path.c_str(), "rb");
+    SDL_Surface* logo_surface =
+        logo_source ? IMG_LoadPNG_RW(logo_source) : nullptr;
+    if (logo_source) {
+        SDL_RWclose(logo_source);
+    }
+    if (!logo_surface) {
+        impl_->last_error = std::string("Logo load: ") + IMG_GetError();
+        close();
+        return false;
+    }
+    impl_->logo_texture =
+        SDL_CreateTextureFromSurface(renderer, logo_surface);
+    SDL_FreeSurface(logo_surface);
+    if (!impl_->logo_texture) {
+        impl_->last_error =
+            std::string("Logo texture: ") + SDL_GetError();
         close();
         return false;
     }
@@ -1853,6 +1964,8 @@ void LibraryUi::close() {
     }
     impl_->clear_labels();
     impl_->clear_artwork();
+    SDL_DestroyTexture(impl_->logo_texture);
+    impl_->logo_texture = nullptr;
     if (impl_->title_font) {
         TTF_CloseFont(impl_->title_font);
         impl_->title_font = nullptr;
@@ -2215,9 +2328,8 @@ void LibraryUi::render() {
     SDL_SetRenderDrawColor(impl_->renderer, 5, 9, 19, 255);
     SDL_RenderClear(impl_->renderer);
 
-    // Header rail: compact branding, one information line, and a precise
-    // electric-blue divider. The procedural mark mirrors the dashboard icon
-    // without requiring another runtime asset.
+    // Header rail uses the exact installed dashboard artwork so branding stays
+    // identical in the tile, switcher, and player.
     SDL_SetRenderDrawColor(impl_->renderer, 12, 20, 38, 255);
     SDL_Rect header{0, 0, kUiWidth, 202};
     SDL_RenderFillRect(impl_->renderer, &header);
@@ -2227,7 +2339,7 @@ void LibraryUi::render() {
     SDL_SetRenderDrawColor(impl_->renderer, 47, 137, 255, 255);
     SDL_Rect header_accent{0, 202, kUiWidth, 2};
     SDL_RenderFillRect(impl_->renderer, &header_accent);
-    draw_pixel_play_mark(impl_->renderer, 82, 92, 54, true);
+    draw_logo(impl_->renderer, impl_->logo_texture, 82, 92, 112);
 
     if (impl_->title_label.texture) {
         SDL_Rect target{146, 40, impl_->title_label.width, impl_->title_label.height};
@@ -2297,7 +2409,7 @@ void LibraryUi::render() {
     }
 
     if (impl_->row_labels.empty()) {
-        draw_pixel_play_mark(impl_->renderer, 656, 522, 116);
+        draw_logo(impl_->renderer, impl_->logo_texture, 656, 522, 174);
         if (impl_->empty_title_label.texture) {
             SDL_Rect target{
                 656 - impl_->empty_title_label.width / 2,
@@ -2360,11 +2472,12 @@ void LibraryUi::render() {
         SDL_RenderFillRect(impl_->renderer, &empty_art);
         SDL_SetRenderDrawColor(impl_->renderer, 28, 49, 82, 255);
         SDL_RenderDrawRect(impl_->renderer, &empty_art);
-        draw_pixel_play_mark(
+        draw_logo(
             impl_->renderer,
+            impl_->logo_texture,
             kArtworkPanelX + kArtworkPanelWidth / 2,
             kRowsTop + 308,
-            88);
+            150);
     }
     if (impl_->artwork_label.texture) {
         SDL_Rect target{
@@ -2381,13 +2494,30 @@ void LibraryUi::render() {
     SDL_SetRenderDrawColor(impl_->renderer, 28, 48, 80, 255);
     SDL_Rect footer_line{0, 990, kUiWidth, 2};
     SDL_RenderFillRect(impl_->renderer, &footer_line);
-    if (impl_->help_label.texture) {
-        SDL_Rect target{
-            58,
-            990 + (90 - impl_->help_label.height) / 2,
-            impl_->help_label.width,
-            impl_->help_label.height};
-        SDL_RenderCopy(impl_->renderer, impl_->help_label.texture, nullptr, &target);
+    int footer_x = 48;
+    const int footer_center_y = 1035;
+    for (const FooterHint& hint : impl_->footer_hints) {
+        const int glyph_width = footer_glyph_width(hint);
+        draw_footer_glyph(
+            impl_->renderer,
+            hint,
+            footer_x,
+            footer_center_y);
+        footer_x += glyph_width + 9;
+        if (hint.action_label.texture) {
+            SDL_Rect target{
+                footer_x,
+                footer_center_y - hint.action_label.height / 2,
+                hint.action_label.width,
+                hint.action_label.height};
+            SDL_RenderCopy(
+                impl_->renderer,
+                hint.action_label.texture,
+                nullptr,
+                &target);
+            footer_x += hint.action_label.width;
+        }
+        footer_x += 27;
     }
     SDL_RenderPresent(impl_->renderer);
 }

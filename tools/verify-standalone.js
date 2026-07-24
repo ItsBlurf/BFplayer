@@ -4,15 +4,19 @@ const assert = require('assert');
 const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
+const zlib = require('zlib');
 
 const root = path.join(__dirname, '..');
 const dist = path.join(root, 'dist');
 const standalone = fs.readFileSync(
     path.join(dist, 'ps5-media-center-standalone.elf'));
 const player = fs.readFileSync(path.join(dist, 'ps5-media-center.elf'));
+const compressedPlayer = fs.readFileSync(
+    path.join(root, 'build', 'ps5', 'ps5-media-center.elf.gz'));
 const assets = [
-    ['player ELF', player],
+    ['compressed player ELF', compressedPlayer],
     ['tile param', fs.readFileSync(path.join(root, 'assets', 'tile', 'param.json'))],
+    ['host param', fs.readFileSync(path.join(root, 'assets', 'fakeapp', 'param.json'))],
     ['icon', fs.readFileSync(path.join(root, 'assets', 'icon0.png'))],
     ['font', fs.readFileSync(
         path.join(root, 'assets', 'fonts', 'NotoSans-Regular.ttf'))],
@@ -24,6 +28,12 @@ assert.strictEqual(standalone[4], 2, 'standalone must be ELF64');
 assert.strictEqual(standalone[7], 9, 'standalone OS/ABI must be FreeBSD');
 assert.strictEqual(standalone.readUInt16LE(16), 3, 'standalone must be ET_DYN');
 assert.strictEqual(player.subarray(0, 4).toString('hex'), '7f454c46');
+assert(zlib.gunzipSync(compressedPlayer).equals(player),
+    'embedded gzip must expand to the exact stripped player ELF');
+assert.strictEqual(
+    standalone.indexOf(player),
+    -1,
+    'uncompressed player ELF must not also be embedded');
 
 for (const [label, bytes] of assets) {
     const first = standalone.indexOf(bytes);

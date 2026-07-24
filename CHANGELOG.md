@@ -1,5 +1,34 @@
 # Changelog
 
+## 0.1.0-alpha.11 — independent runtime-host test build
+
+### HBL-independent startup
+
+- Replaced HBL's shared `FAKE00000` dependency with the project-owned
+  `PSMR00001` BigApp host.
+- Added automatic AppInst registration plus `/system_ex` host creation and
+  repair before the dashboard tile is published.
+- Rewrites missing, zero-length, partial, symlinked, or invalid host artifacts
+  safely instead of treating any existing path as usable.
+- Recreates all required `/data/homebrew/PS5-MediaCenter` runtime assets; the
+  folder is not required to remain on the console.
+- Uses the Media Center icon and title for the active BigApp host so the PS
+  switcher can identify the running app correctly.
+
+### Payload size and integrity
+
+- Strips the player ELF and embeds it as gzip instead of embedding the raw
+  link output.
+- Expands the player in memory on demand, validates the exact decompressed size
+  and ELF64 header, and logs compression/launch diagnostics.
+
+### Interface
+
+- Replaced the procedural in-app play/blade mark with the exact dashboard-tile
+  artwork.
+- Replaced footer button names with rendered PlayStation-style Cross, Circle,
+  Square, Triangle, D-pad, touchpad, stick, and Options prompts.
+
 ## 0.1.0-alpha.10 — standalone test build
 
 ### Self-contained dashboard launch

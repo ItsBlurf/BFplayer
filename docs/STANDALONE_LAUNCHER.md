@@ -5,12 +5,16 @@ file required for installation and normal startup.
 
 The payload:
 
-1. contains the complete Media Center player ELF;
+1. contains the complete stripped Media Center player ELF in gzip-compressed
+   form and verifies it while expanding it in memory for launch;
 2. writes its small runtime font, icon, and manifest assets under
    `/data/homebrew/PS5-MediaCenter`;
-3. registers the English-only `PSMC00001` dashboard tile;
-4. keeps a minimal HTTP listener bound only to `127.0.0.1:9040`;
-5. launches the embedded player into the required PS5 BigApp context when the
+3. installs and registers its own English-only `PSMR00001` BigApp runtime host,
+   including the same Media Center icon used by the dashboard;
+4. creates or repairs the matching `/system_ex/app/PSMR00001` host files;
+5. registers the English-only `PSMC00001` dashboard tile;
+6. keeps a minimal HTTP listener bound only to `127.0.0.1:9040`;
+7. launches the embedded player into the required PS5 BigApp context when the
    tile requests `/launch`.
 
 It does not start, link, load, or contact `ps5-payload-websrv`. It does not use
@@ -24,6 +28,13 @@ application and does not create a websrv process or listen on port 8080.
 The payload must be injected once after each jailbreak because the minimal
 loopback launcher is a resident process. The installed dashboard tile remains,
 but selecting it while the payload is not resident cannot start the player.
+
+`/data/homebrew/PS5-MediaCenter` does not need to exist before injection and
+does not need to be retained between jailbreaks. The payload recreates its
+font, icon, and manifest there. Older builds appeared to require HBL because
+they launched through HBL's registered `FAKE00000` host; removing HBL removed
+that registration. This build owns the distinct `PSMR00001` host and no longer
+shares HBL state.
 
 Logs are written to:
 

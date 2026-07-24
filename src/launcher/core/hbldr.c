@@ -29,6 +29,7 @@ along with this program; see the file COPYING. If not, see
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #include <unistd.h>
 #include <libgen.h>
 
@@ -49,7 +50,8 @@ along with this program; see the file COPYING. If not, see
 
 
 #define PSNOW_EBOOT "/system_ex/app/NPXS40106/eboot.bin"
-#define FAKE_PATH "/system_ex/app/FAKE00000"
+#define HOST_TITLE_ID "PSMR00001"
+#define FAKE_PATH "/system_ex/app/" HOST_TITLE_ID
 
 #define IOVEC_ENTRY(x) {x ? x : 0, \
 			x ? strlen(x)+1 : 0}
@@ -61,12 +63,12 @@ static const char param_json[] = "{\n"
   "  \"attribute\": 1,\n"
   "  \"attribute2\": 0,\n"
   "  \"attribute3\": 4,\n"
-  "  \"titleId\": \"FAKE00000\",\n"
-  "  \"contentId\": \"IV9999-FAKE00000_00-HOMEBREWLOADER00\",\n"
+  "  \"titleId\": \"" HOST_TITLE_ID "\",\n"
+  "  \"contentId\": \"IV9999-PSMR00001_00-PS5MEDIARUNTIME0\",\n"
   "  \"localizedParameters\": {\n"
   "    \"defaultLanguage\": \"en-US\",\n"
   "    \"en-US\": {\n"
-  "      \"titleName\": \"Homebrew Loader\"\n"
+  "      \"titleName\": \"PS5 Media Center\"\n"
   "    }\n"
   "  }\n"
   "}\n";
@@ -130,53 +132,101 @@ write_all(int fd, const uint8_t* data, size_t size) {
   return 0;
 }
 
+static int
+regular_file_has_exact_size(const char* path, off_t expected_size) {
+  struct stat info;
+
+  return !lstat(path, &info) && S_ISREG(info.st_mode) &&
+         !S_ISLNK(info.st_mode) && info.st_size == expected_size;
+}
+
+static int
+write_file_replace(const char* path, const uint8_t* data, size_t size,
+                   mode_t mode) {
+  int fd;
+
+  if((fd=open(path, O_CREAT|O_WRONLY|O_TRUNC, mode)) < 0) {
+    return -1;
+  }
+  if(write_all(fd, data, size) || fsync(fd)) {
+    int error = errno;
+    close(fd);
+    errno = error;
+    return -1;
+  }
+  if(close(fd)) {
+    return -1;
+  }
+  return chmod(path, mode);
+}
 
 
 static int
 fakeapp_create_if_missing(void) {
   struct stat info;
+  struct stat source_info;
   uint8_t* buf;
   size_t size;
-  int fd;
 
-  if(stat(FAKE_PATH, &info)) {
-    if(mkdir(FAKE_PATH, 0755)) {
+  if(lstat(FAKE_PATH, &info)) {
+    if(mkdir(FAKE_PATH, 0755) && errno != EEXIST) {
+      return -1;
+    }
+  } else if(!S_ISDIR(info.st_mode) || S_ISLNK(info.st_mode)) {
+    errno = ENOTDIR;
+    return -1;
+  }
+
+  if(lstat(FAKE_PATH "/sce_sys", &info)) {
+    if(mkdir(FAKE_PATH "/sce_sys", 0755) && errno != EEXIST) {
+      return -1;
+    }
+  } else if(!S_ISDIR(info.st_mode) || S_ISLNK(info.st_mode)) {
+    errno = ENOTDIR;
+    return -1;
+  }
+
+  if(!regular_file_has_exact_size(FAKE_PATH "/sce_sys/param.json",
+                                  (off_t)(sizeof(param_json)-1))) {
+    if(write_file_replace(FAKE_PATH "/sce_sys/param.json",
+                          (const uint8_t*)param_json,
+                          sizeof(param_json)-1, 0644)) {
       return -1;
     }
   }
 
-  if(stat(FAKE_PATH "/sce_sys", &info)) {
-    if(mkdir(FAKE_PATH "/sce_sys", 0755)) {
-      return -1;
-    }
+  if(lstat(PSNOW_EBOOT, &source_info) || !S_ISREG(source_info.st_mode) ||
+     S_ISLNK(source_info.st_mode) || source_info.st_size < 4096) {
+    errno = ENOEXEC;
+    return -1;
   }
-
-  if(stat(FAKE_PATH "/sce_sys/param.json", &info)) {
-    if((fd=open(FAKE_PATH "/sce_sys/param.json", O_CREAT|O_WRONLY, 0644)) < 0) {
-      return -1;
-    }
-    if(write_all(fd, (const uint8_t*)param_json, sizeof(param_json)-1)) {
-      close(fd);
-      return -1;
-    }
-    close(fd);
-  }
-
-  if(stat(FAKE_PATH "/eboot.bin", &info)) {
+  if(!regular_file_has_exact_size(FAKE_PATH "/eboot.bin",
+                                  source_info.st_size)) {
     if(!(buf=fs_readfile(PSNOW_EBOOT, &size))) {
       return -1;
     }
-    if((fd=open(FAKE_PATH "/eboot.bin", O_CREAT|O_WRONLY, 0755)) < 0) {
+    if(write_file_replace(FAKE_PATH "/eboot.bin", buf, size, 0755)) {
       free(buf);
-      return -1;
-    }
-    if(write_all(fd, buf, size)) {
-      free(buf);
-      close(fd);
       return -1;
     }
     free(buf);
-    close(fd);
+  }
+  return 0;
+}
+
+
+int
+hbldr_prepare_host(void) {
+  if(!fakeapp_create_if_missing()) {
+    return 0;
+  }
+  if(remount_system_ex()) {
+    perror("remount_system_ex");
+    return -1;
+  }
+  if(fakeapp_create_if_missing()) {
+    perror("fakeapp_create_if_missing");
+    return -1;
   }
   return 0;
 }
@@ -232,12 +282,18 @@ static void*
 bigapp_launch_thread(void* arg) {
   char** argv = (char**)arg;
   app_launch_ctx_t ctx = {0};
+  int result;
 
   if(sceUserServiceGetForegroundUser(&ctx.user_id)) {
+    perror("sceUserServiceGetForegroundUser");
     return 0;
   }
 
-  sceSystemServiceLaunchApp("FAKE00000", argv, &ctx);
+  result = sceSystemServiceLaunchApp(HOST_TITLE_ID, argv, &ctx);
+  if(result) {
+    fprintf(stderr, "sceSystemServiceLaunchApp(%s) failed: 0x%08x\n",
+            HOST_TITLE_ID, result);
+  }
 
   return 0;
 }
@@ -253,6 +309,7 @@ bigapp_launch(char** argv) {
   pid_t child = -1;
   pthread_t trd;
   int kq = -1;
+  struct timespec timeout = {30, 0};
 
   if((parent=find_pid("SceSysCore.elf")) < 0) {
     perror("findpid");
@@ -272,11 +329,22 @@ bigapp_launch(char** argv) {
     return -1;
   }
 
-  pthread_create(&trd, 0, &bigapp_launch_thread, (void*)argv);
+  if(pthread_create(&trd, 0, &bigapp_launch_thread, (void*)argv)) {
+    perror("pthread_create");
+    close(kq);
+    return -1;
+  }
   pthread_detach(trd);
 
-  if(kevent(kq, 0, 0, &evt, 1, 0) < 0) {
+  int event_count = kevent(kq, 0, 0, &evt, 1, &timeout);
+  if(event_count < 0) {
     perror("kevent");
+    close(kq);
+    return -1;
+  }
+  if(!event_count) {
+    errno = ETIMEDOUT;
+    perror("BigApp launch event");
     close(kq);
     return -1;
   }
@@ -431,21 +499,15 @@ static pid_t
 hbldr_launch_elf(const char* cwd, const char* path, int stdio, char** argv,
                  char** envp, uint8_t* elf) {
   int app_id;
+  int wait_attempt;
   pid_t pid;
 
   if(!cwd || !path || !elf) {
     return -1;
   }
 
-  if(fakeapp_create_if_missing()) {
-    if(remount_system_ex()) {
-      perror("remount_system_ex");
-      return -1;
-    }
-    if(fakeapp_create_if_missing()) {
-      perror("fakeapp_create_if_missing");
-      return -1;
-    }
+  if(hbldr_prepare_host()) {
+    return -1;
   }
 
   if((app_id=sceSystemServiceGetAppIdOfRunningBigApp()) > 0) {
@@ -454,9 +516,16 @@ hbldr_launch_elf(const char* cwd, const char* path, int stdio, char** argv,
       return -1;
     }
 
-    while(!sceKernelGetAppState(app_id, 0, 0)) {
+    for(wait_attempt=0;
+        wait_attempt<30 && !sceKernelGetAppState(app_id, 0, 0);
+        wait_attempt++) {
       printf("Waiting for App with id 0x%x to terminate\n", app_id);
       sleep(1);
+    }
+    if(wait_attempt == 30 && !sceKernelGetAppState(app_id, 0, 0)) {
+      errno = ETIMEDOUT;
+      perror("BigApp termination");
+      return -1;
     }
   }
 

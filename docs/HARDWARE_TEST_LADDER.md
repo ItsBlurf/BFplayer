@@ -10,7 +10,10 @@ Run exactly one new variable per step and collect the standalone launcher and
 player logs. Stop on a console disconnect, black screen that does not recover,
 or a fatal filesystem error.
 
-1. Launch with no media argument; verify window creation and clean Options exit.
+1. With HBL uninstalled and `/data/homebrew/PS5-MediaCenter` absent, inject only
+   the alpha.11 standalone payload. Verify it recreates its files, shows the
+   Media Center icon in the active-app switcher, launches with no media
+   argument, and exits cleanly with Options.
 2. Play a local 720p H.264/AAC MP4 with no subtitles for ten minutes.
 3. Pause/resume and seek repeatedly; verify A/V sync and clean return.
    Use R2+Triangle for every display-aspect override, L2+Triangle for every

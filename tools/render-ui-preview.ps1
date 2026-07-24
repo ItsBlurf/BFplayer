@@ -25,29 +25,76 @@ function Fill([string]$hex, [int]$x, [int]$y, [int]$w, [int]$h) {
     $brush.Dispose()
 }
 
-function Draw-PlayMark([int]$cx, [int]$cy, [int]$size) {
-    $half = [int]($size / 2)
-    $points = [Drawing.Point[]]@(
-        [Drawing.Point]::new($cx - $half, $cy - $half),
-        [Drawing.Point]::new($cx + $half, $cy),
-        [Drawing.Point]::new($cx - $half, $cy + $half)
-    )
-    $gold = Brush '#f4b22a'
-    $graphics.FillPolygon($gold, $points)
-    $gold.Dispose()
-    Fill '#0d1e4d' ($cx - 9) ($cy - $half - [int]($size / 3)) 18 ([int]($size * 1.67))
-    Fill '#c2e8ff' ($cx - 6) ($cy - $half - [int]($size / 3)) 12 ([int]($size * 1.5))
-    Fill '#26b8ff' ($cx - 2) ($cy - $half - [int]($size / 3) + 3) 4 ([int]($size * 1.45))
-    Fill '#4785ff' ($cx - 24) ($cy - $half - [int]($size / 4)) 48 7
-    Fill '#e7f9ff' ($cx - 3) ($cy - 3) 7 7
+function Draw-Logo([int]$cx, [int]$cy, [int]$size) {
+    $graphics.DrawImage(
+        $logo,
+        [Drawing.Rectangle]::new(
+            $cx - [int]($size / 2),
+            $cy - [int]($size / 2),
+            $size,
+            $size))
+}
+
+function Draw-Hint(
+    [string]$button,
+    [string]$action,
+    [int]$x,
+    [Drawing.Font]$font,
+    [Drawing.Brush]$textBrush) {
+    $pen = [Drawing.Pen]::new([Drawing.ColorTranslator]::FromHtml('#e2ebfb'), 2)
+    $buttonWidth = switch ($button) {
+        'TOUCH' { 43 }
+        'OPTIONS' { 36 }
+        'L3' { 38 }
+        'R3' { 38 }
+        default { 30 }
+    }
+    $cy = 1035
+    switch ($button) {
+        'X' {
+            $graphics.DrawLine($pen, $x + 5, $cy - 10, $x + 25, $cy + 10)
+            $graphics.DrawLine($pen, $x + 25, $cy - 10, $x + 5, $cy + 10)
+        }
+        'O' { $graphics.DrawEllipse($pen, $x + 4, $cy - 11, 22, 22) }
+        'SQUARE' { $graphics.DrawRectangle($pen, $x + 4, $cy - 11, 22, 22) }
+        'DPAD' {
+            $graphics.DrawRectangle($pen, $x + 11, $cy - 14, 8, 28)
+            $graphics.DrawRectangle($pen, $x + 1, $cy - 4, 28, 8)
+        }
+        'TOUCH' {
+            $graphics.DrawRectangle($pen, $x, $cy - 12, 43, 24)
+            $graphics.DrawLine($pen, $x + 21, $cy - 9, $x + 21, $cy + 9)
+        }
+        'OPTIONS' {
+            $graphics.DrawLine($pen, $x + 4, $cy - 7, $x + 32, $cy - 7)
+            $graphics.DrawLine($pen, $x + 4, $cy, $x + 32, $cy)
+            $graphics.DrawLine($pen, $x + 4, $cy + 7, $x + 32, $cy + 7)
+        }
+        default {
+            $graphics.DrawRectangle($pen, $x, $cy - 14, $buttonWidth, 28)
+            $buttonSize = $graphics.MeasureString($button, $font)
+            $graphics.DrawString(
+                $button,
+                $font,
+                $textBrush,
+                $x + ($buttonWidth - $buttonSize.Width) / 2,
+                $cy - $buttonSize.Height / 2)
+        }
+    }
+    $actionX = $x + $buttonWidth + 9
+    $graphics.DrawString($action, $font, $textBrush, $actionX, 1021)
+    $width = [int]$graphics.MeasureString($action, $font).Width
+    $pen.Dispose()
+    return $actionX + $width + 27
 }
 
 try {
+    $logo = [Drawing.Image]::FromFile((Join-Path $root 'assets\icon0.png'))
     Fill '#050913' 0 0 1920 1080
     Fill '#0c1426' 0 0 1920 202
     Fill '#192c4e' 0 202 1920 8
     Fill '#2f89ff' 0 202 1920 2
-    Draw-PlayMark 82 92 54
+    Draw-Logo 82 92 112
 
     $titleFont = [Drawing.Font]::new($family, 48, [Drawing.FontStyle]::Regular, [Drawing.GraphicsUnit]::Pixel)
     $rowFont = [Drawing.Font]::new($family, 27, [Drawing.FontStyle]::Regular, [Drawing.GraphicsUnit]::Pixel)
@@ -68,7 +115,7 @@ try {
     Fill '#0f1c33' 1344 248 484 602
     $graphics.DrawRectangle($border, 1344, 248, 484, 602)
 
-    Draw-PlayMark 656 522 116
+    Draw-Logo 656 522 174
     $emptyTitle = 'Your library is empty'
     $emptyHelp = 'Press the touchpad to add a movie or TV-show folder.'
     $titleSize = $graphics.MeasureString($emptyTitle, $titleFont)
@@ -76,19 +123,22 @@ try {
     $graphics.DrawString($emptyTitle, $titleFont, $white, 656 - $titleSize.Width / 2, 665)
     $graphics.DrawString($emptyHelp, $rowFont, $muted, 656 - $helpSize.Width / 2, 730)
 
-    Draw-PlayMark 1586 534 88
+    Draw-Logo 1586 534 150
     $artText = 'NO LOCAL ARTWORK'
     $artSize = $graphics.MeasureString($artText, $rowFont)
     $graphics.DrawString($artText, $rowFont, $muted, 1586 - $artSize.Width / 2, 897)
 
     Fill '#0a1221' 0 990 1920 90
     Fill '#1c3050' 0 990 1920 2
-    $graphics.DrawString(
-        'CROSS  PLAY     CIRCLE  QUEUE     D-PAD  CATEGORY     L3  FAVORITE     TOUCHPAD  ADD MEDIA     OPTIONS  EXIT',
-        $footerFont,
-        $muted,
-        58,
-        1021)
+    $hintX = 48
+    $hintX = Draw-Hint 'X' 'Play' $hintX $footerFont $muted
+    $hintX = Draw-Hint 'O' 'Queue' $hintX $footerFont $muted
+    $hintX = Draw-Hint 'DPAD' 'Category' $hintX $footerFont $muted
+    $hintX = Draw-Hint 'L3' 'Favorite' $hintX $footerFont $muted
+    $hintX = Draw-Hint 'TOUCH' 'Add Media' $hintX $footerFont $muted
+    $hintX = Draw-Hint 'R3' 'Sort' $hintX $footerFont $muted
+    $hintX = Draw-Hint 'SQUARE' 'Rescan' $hintX $footerFont $muted
+    $null = Draw-Hint 'OPTIONS' 'Exit' $hintX $footerFont $muted
 
     $target = [IO.Path]::GetFullPath($OutFile)
     $directory = Split-Path -Parent $target
@@ -103,6 +153,7 @@ finally {
     if ($titleFont) { $titleFont.Dispose() }
     if ($rowFont) { $rowFont.Dispose() }
     if ($footerFont) { $footerFont.Dispose() }
+    if ($logo) { $logo.Dispose() }
     $graphics.Dispose()
     $bitmap.Dispose()
     $fontCollection.Dispose()

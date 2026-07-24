@@ -148,8 +148,9 @@ try {
         $objects += $object
     }
 
+    $unstrippedElf = Join-Path $buildDir 'ps5-media-center.unstripped.elf'
     $linkArgs = @(
-        '-o', 'dist\ps5-media-center.elf'
+        '-o', 'build\ps5\ps5-media-center.unstripped.elf'
     ) + $objects + @(
         "-L$($pacbrewHome)\lib",
         '-Wl,--start-group',
@@ -199,6 +200,38 @@ try {
     }
 
     $elf = Join-Path $distDir 'ps5-media-center.elf'
+    $strip = (Get-Command llvm-strip -ErrorAction Stop).Source
+    & $strip '--strip-all' '-o' $elf $unstrippedElf
+    if ($LASTEXITCODE -ne 0) {
+        throw 'Strip failed: ps5-media-center.elf'
+    }
+    $playerSize = (Get-Item -LiteralPath $elf).Length
+    [IO.File]::AppendAllText(
+        $versionHeader,
+        "#define PS5MC_PLAYER_UNCOMPRESSED_SIZE $($playerSize)UL`n")
+    $compressedPlayer = Join-Path $buildDir 'ps5-media-center.elf.gz'
+    $inputStream = [IO.File]::OpenRead($elf)
+    try {
+        $outputStream = [IO.File]::Create($compressedPlayer)
+        try {
+            $gzipStream = [IO.Compression.GZipStream]::new(
+                $outputStream,
+                [IO.Compression.CompressionLevel]::Optimal,
+                $true)
+            try {
+                $inputStream.CopyTo($gzipStream)
+            }
+            finally {
+                $gzipStream.Dispose()
+            }
+        }
+        finally {
+            $outputStream.Dispose()
+        }
+    }
+    finally {
+        $inputStream.Dispose()
+    }
     $standaloneCommon = @(
         '-std=c17',
         '-Wall',
@@ -209,6 +242,7 @@ try {
         '-Iinclude',
         '-Isrc\launcher',
         '-Isrc\launcher\core',
+        "-I$($pacbrewHome)\include",
         '-include',
         $versionHeaderRelative
     )
@@ -236,7 +270,9 @@ try {
         '-lkernel_sys',
         '-lSceSystemService',
         '-lSceUserService',
-        '-lSceAppInstUtil'
+        '-lSceAppInstUtil',
+        "-L$($pacbrewHome)\lib",
+        '-lz'
     )
     & $linker @standaloneLinkArgs
     if ($LASTEXITCODE -ne 0) {
@@ -291,6 +327,9 @@ try {
         direct_tile = 'PSMC00001 via loopback-only localhost:9040/launch'
         websrv_required = $false
         embedded_player = $true
+        embedded_player_compression = 'gzip'
+        embedded_player_bytes = $playerSize
+        embedded_player_compressed_bytes = (Get-Item -LiteralPath $compressedPlayer).Length
         pacbrew = 'v0.37'
         ffmpeg = '7.0.1'
         player_sha256 = $hash
@@ -338,6 +377,7 @@ try {
             "pacbrew=$pacbrewHome",
             "elf=$elf",
             "elf_bytes=$((Get-Item -LiteralPath $elf).Length)",
+            "elf_compressed_bytes=$((Get-Item -LiteralPath $compressedPlayer).Length)",
             "elf_sha256=$hash",
             "standalone=$standalone",
             "standalone_bytes=$((Get-Item -LiteralPath $standalone).Length)",

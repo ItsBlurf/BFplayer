@@ -67,6 +67,7 @@ struct App {
     std::vector<std::string> subtitle_sidecars;
     std::string current_media_path;
     std::string fallback_font;
+    std::string ui_logo;
     int external_subtitle_index = -1;
     int volume_percent = 100;
     int previous_volume_percent = 100;
@@ -1628,7 +1629,11 @@ int run_library(
     const std::vector<ps5mc::MediaSource>& initial_sources = {}) {
     ps5mc::diagnostics_log(ps5mc::DiagnosticLevel::info, "library-start");
     ps5mc::LibraryUi library;
-    if (!library.open(app.renderer, app.fallback_font, initial_sources)) {
+    if (!library.open(
+            app.renderer,
+            app.fallback_font,
+            app.ui_logo,
+            initial_sources)) {
         ps5mc::diagnostics_log(
             ps5mc::DiagnosticLevel::error,
             "library-open failed error=%s",
@@ -1705,7 +1710,10 @@ int run_library(
                     break;
                 }
             }
-            if (app.running && !library.open(app.renderer, app.fallback_font)) {
+            if (app.running && !library.open(
+                    app.renderer,
+                    app.fallback_font,
+                    app.ui_logo)) {
                 ps5mc::diagnostics_log(
                     ps5mc::DiagnosticLevel::error,
                     "library-reopen failed error=%s",
@@ -1749,6 +1757,9 @@ int main(int argc, char** argv) {
     app.fallback_font = executable_asset_path(
         argc > 0 ? argv[0] : nullptr,
         "assets/fonts/NotoSans-Regular.ttf");
+    app.ui_logo = executable_asset_path(
+        argc > 0 ? argv[0] : nullptr,
+        "sce_sys/icon0.png");
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_GAMECONTROLLER) != 0) {
         log_sdl("SDL_Init");
         ps5mc::diagnostics_shutdown();

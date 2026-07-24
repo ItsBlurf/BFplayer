@@ -24,6 +24,12 @@ pid_t hbldr_launch(const char* cwd, const char* path, int stdio, char** argv,
 		   char** envp);
 
 /*
+ * Create and validate the system BigApp host used by hbldr. This is exposed so
+ * the standalone launcher can fail early instead of publishing a dead tile.
+ */
+int hbldr_prepare_host(void);
+
+/*
  * Launch an ELF already resident in the payload image. The buffer remains
  * owned by the caller and only needs to remain valid until this returns.
  */

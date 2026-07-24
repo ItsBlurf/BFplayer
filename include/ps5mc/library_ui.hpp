@@ -31,6 +31,7 @@ public:
     bool open(
         SDL_Renderer* renderer,
         const std::string& font_path,
+        const std::string& logo_path,
         const std::vector<MediaSource>& initial_sources = {});
     void close();
     LibraryAction handle_event(const SDL_Event& event, std::string& selected_path);

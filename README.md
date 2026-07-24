@@ -11,6 +11,10 @@ evidence and references.
 
 - One standalone resident payload containing the player, dashboard-tile
   installer, runtime assets, minimal loopback launcher, and BigApp transition.
+- Independent `PSMR00001` runtime-host installation and repair, so uninstalling
+  HBL or deleting `/data/homebrew` cannot remove a hidden launch dependency.
+- Stripped, gzip-compressed embedded player for a much smaller LAN-injected
+  payload, expanded and ELF-validated in memory only when launched.
 - No websrv runtime dependency, no port 8080, no catalog, and no file picker:
   the English-only tile calls a private `127.0.0.1:9040/launch` route.
 - FFmpeg 7.0.1 demuxing and software decoding from PacBrew v0.37.
@@ -84,7 +88,8 @@ are required. From this folder:
 Override that location with `PS5_PACBREW_HOME` if needed. The build output is
 `dist\ps5-media-center-standalone.elf`; the ready-to-copy archive is
 `dist\PS5-MediaCenter-standalone.zip`. The standalone ELF already embeds the
-player ELF, font, icon, tile data, and launch core.
+compressed player ELF, font, icon, visible-tile data, private runtime-host
+registration, and launch core.
 
 ## Install
 
@@ -92,6 +97,8 @@ Inject `dist\ps5-media-center-standalone.elf` once after each jailbreak. That
 single payload installs or refreshes the **PS5 Media Center** dashboard tile,
 materializes its small runtime assets, and remains resident to service the
 tile. No Media Center folder transfer and no websrv payload are required.
+The payload recreates `/data/homebrew/PS5-MediaCenter`; that folder is runtime
+material, not a prerequisite.
 See [docs/STANDALONE_LAUNCHER.md](docs/STANDALONE_LAUNCHER.md).
 
 After any test, run collect-logs.ps1 with the PS5 IP before launching another
@@ -156,6 +163,6 @@ acceptance gates are tracked in
 [docs/COMPLETION_MATRIX.md](docs/COMPLETION_MATRIX.md).
 The current alpha is exhaustively offline-verified but cannot claim console
 runtime behavior. See
-[docs/ALPHA10_OFFLINE_VERIFICATION.md](docs/ALPHA10_OFFLINE_VERIFICATION.md),
+[docs/ALPHA11_OFFLINE_VERIFICATION.md](docs/ALPHA11_OFFLINE_VERIFICATION.md),
 [docs/FULL_VERIFICATION_AUDIT.md](docs/FULL_VERIFICATION_AUDIT.md), and
 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
