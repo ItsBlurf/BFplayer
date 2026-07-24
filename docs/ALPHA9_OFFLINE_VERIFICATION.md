@@ -17,7 +17,7 @@ Scope: host and PS5-target checks only; the PS5 was not contacted.
 | Player privilege boundary | Player has no `libSceAppInstUtil` or `libkernel_sys`; installer has both | Pass |
 | UI redesign | SDL source compiled; deterministic 1920×1080 preview inspected | Offline pass |
 | Pixel-art icon | PNG integrity/dimensions inspected; package hash matches source | Pass |
-| Private repository/release | Verified after GitHub publication | Pending at this document revision |
+| Private repository/release | Private `ItsBlurf/PS5-Media-Center`, prerelease `v0.1.0-alpha.9`, uploaded assets, and two successful GitHub Actions runs | Pass |
 
 ## Host tests
 
@@ -77,9 +77,9 @@ The dashboard tile does not execute it.
 
 | Artifact | Bytes | SHA-256 |
 | --- | ---: | --- |
-| `ps5-media-center.elf` | 56,268,760 | `af32bbb022a38a349406562b5d9ef8457139098ab7a05228e488ff3581fd4059` |
-| `ps5mc-tile-installer.elf` | 1,519,880 | `af9754fb1a12401db25c79e99c22f4fd221c8b74e6148dae1b2ddcff94912820` |
-| `PS5-MediaCenter-direct-tile.zip` | 25,896,583 | `f9f929828cd12e5c80f263c231b3b5e813015bcddcb82b2d4e77ada3ccd87f33` |
+| `ps5-media-center.elf` | 56,268,760 | `33ee6b9bd8de1eed709d056a9c817aef0dd6940a289de84620ce58c7d0897b20` |
+| `ps5mc-tile-installer.elf` | 1,519,880 | `6e9ca682c57c9589c780743d3536f144006fb8b4d293babcac39e9073dcdb318` |
+| `PS5-MediaCenter-direct-tile.zip` | 25,896,387 | `f6421e2a05ff2733f88eecd40b194f3d7aa741982dcc681a77ddde4d7ae79bd9` |
 | `assets/icon0.png` | 1,412,512 | `8c46982a3ee41c21ffce3b71fa52dcd50e61475a619bae58accee06603f5449b` |
 | `docs/ui-preview.png` | 48,416 | `317ffd30bcbde70ac5d4ecbf4df0a57e32f9545926ee6b9fae2f7dfc11243cad` |
 
