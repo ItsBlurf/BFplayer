@@ -1,5 +1,35 @@
 # Changelog
 
+## 0.1.0-alpha.17 - playback-resume and season-navigation test build
+
+### Playback corrections
+
+- Apply saved resume positions only after SDL_kitchensink enters its playing
+  state; the previous stopped-state seek could be ignored even though the
+  database record loaded correctly.
+- Save the final resume record from the playback clock captured before decoder
+  shutdown, with explicit diagnostics for missing, skipped, applied, and
+  failed resume attempts.
+- Route embedded subtitle rendering through SDL_kitchensink's existing
+  explicit synchronization timestamp so the signed subtitle timing value now
+  affects embedded text tracks as well as external subtitle sidecars.
+- Clarify subtitle timing direction in the player: a positive value displays
+  subtitles later, and Cross resets the value to zero.
+- Rename the unclear On-screen display setting to Pop-up message duration and
+  explain that it controls temporary seek, pause, volume, and status messages.
+
+### TV-library hierarchy
+
+- Group every first-level folder below a configured TV-show root as a season,
+  including episodes stored in deeper folders such as
+  `Season 1/Disc 1/Episode.mkv`.
+- Add Show -> Season -> Episode controller navigation with natural season
+  ordering, episode counts, correct back navigation, and season-scoped queues.
+- Keep media files directly inside the show folder playable alongside its
+  season folders instead of hiding or incorrectly grouping specials.
+- Add host regression coverage for nested seasons, direct episodes, sibling
+  path boundaries, and Windows-path normalization.
+
 ## 0.1.0-alpha.16 - full offline-audit test build
 
 ### Add Media reliability

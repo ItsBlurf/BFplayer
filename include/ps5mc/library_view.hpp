@@ -45,6 +45,13 @@ void sort_media_indices(
     LibrarySortMode mode,
     bool smart_prefers_recent);
 
+// Returns the first directory below series_root that contains the media item.
+// A direct child file has no season. Deeper layouts remain grouped by their
+// top-level season directory (Show/Season 1/Disc 1/Episode.mkv -> Season 1).
+[[nodiscard]] std::string media_season_root(
+    const MediaEntry& entry,
+    std::string_view series_root);
+
 // Removes exactly one UTF-8 code point from the end of text. SDL text input is
 // valid UTF-8, so malformed trailing bytes are treated as one best-effort unit.
 bool erase_last_utf8_codepoint(std::string& text) noexcept;

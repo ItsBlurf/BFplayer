@@ -431,6 +431,7 @@ struct LibraryUi::Impl {
     std::vector<MediaEntry> entries;
     std::vector<MediaSource> sources;
     std::string active_series_root;
+    std::string active_season_root;
     bool browser_mode = false;
     std::string browser_path;
     std::vector<BrowserEntry> browser_entries;
@@ -513,6 +514,7 @@ struct LibraryUi::Impl {
     mutable int filtered_cache_sort_mode = -1;
     mutable std::string filtered_cache_query;
     mutable std::string filtered_cache_series_root;
+    mutable std::string filtered_cache_season_root;
 
     void load_player_settings() {
         PlayerSettings loaded{};
@@ -768,7 +770,8 @@ struct LibraryUi::Impl {
             filtered_cache_filter == filter &&
             filtered_cache_sort_mode == static_cast<int>(sort_mode) &&
             filtered_cache_query == search_query &&
-            filtered_cache_series_root == active_series_root) {
+            filtered_cache_series_root == active_series_root &&
+            filtered_cache_season_root == active_season_root) {
             return filtered_cache;
         }
 
@@ -779,9 +782,13 @@ struct LibraryUi::Impl {
             const bool in_series =
                 !active_series_root.empty() &&
                 series_group_key(entry) == active_series_root;
+            const bool in_season =
+                active_season_root.empty() ||
+                media_season_root(entry, active_series_root) ==
+                    active_season_root;
             if ((active_series_root.empty()
                      ? matches_filter(entry, filter)
-                     : in_series) &&
+                     : in_series && in_season) &&
                 media_matches_normalized_query(entry, search_query)) {
                 filtered_cache.push_back(index);
             }
@@ -802,12 +809,27 @@ struct LibraryUi::Impl {
                         return !group.empty() && !seen_series.insert(group).second;
                     }),
                 filtered_cache.end());
+        } else if (active_season_root.empty()) {
+            std::unordered_set<std::string> seen_seasons;
+            filtered_cache.erase(
+                std::remove_if(
+                    filtered_cache.begin(),
+                    filtered_cache.end(),
+                    [&](std::size_t index) {
+                        const std::string season =
+                            media_season_root(
+                                entries[index], active_series_root);
+                        return !season.empty() &&
+                            !seen_seasons.insert(season).second;
+                    }),
+                filtered_cache.end());
         }
         filtered_cache_generation = published_generation;
         filtered_cache_filter = filter;
         filtered_cache_sort_mode = static_cast<int>(sort_mode);
         filtered_cache_query = search_query;
         filtered_cache_series_root = active_series_root;
+        filtered_cache_season_root = active_season_root;
         return filtered_cache;
     }
 
@@ -909,21 +931,26 @@ struct LibraryUi::Impl {
             return false;
         }
         struct stat opened_status {};
-        if (fstat(descriptor, &opened_status) != 0 ||
+        errno = 0;
+        const int stat_result = fstat(descriptor, &opened_status);
+        const int stat_errno = stat_result != 0 && errno != 0
+            ? errno
+            : ESTALE;
+        if (stat_result != 0 ||
             opened_status.st_dev != root_status.st_dev ||
             opened_status.st_ino != root_status.st_ino ||
             !S_ISDIR(opened_status.st_mode)) {
-            const int value = errno != 0 ? errno : ESTALE;
             ::close(descriptor);
             last_error = "Folder changed while opening: " + path +
-                " (errno " + std::to_string(value) + ")";
+                " (errno " + std::to_string(stat_errno) + ")";
             return false;
         }
         DIR* directory = fdopendir(descriptor);
         if (!directory) {
+            const int value = errno;
             ::close(descriptor);
             last_error = "Unable to open folder: " + path +
-                " (errno " + std::to_string(errno) + ")";
+                " (errno " + std::to_string(value) + ")";
             return false;
         }
 
@@ -1563,6 +1590,7 @@ struct LibraryUi::Impl {
                 }),
             sources.end());
         active_series_root.clear();
+        active_season_root.clear();
         SDL_UnlockMutex(mutex);
         if (!persist_sources()) {
             SDL_LockMutex(mutex);
@@ -2693,7 +2721,10 @@ struct LibraryUi::Impl {
                     break;
                 case LibraryOverlay::settings:
                     title = "Playback settings";
-                    subtitle = "Changes are saved automatically";
+                    subtitle =
+                        active_overlay_selected == 3
+                            ? "Sets how long temporary seek, pause, volume, and status messages remain visible"
+                            : "Changes are saved automatically";
                     rows = {
                         "Default volume                                      " +
                             std::to_string(active_player_settings.volume_percent) +
@@ -2704,7 +2735,7 @@ struct LibraryUi::Impl {
                         "Long seek step                                     " +
                             std::to_string(active_player_settings.long_seek_seconds) +
                             " seconds",
-                        "On-screen display                                  " +
+                        "Pop-up message duration                            " +
                             std::to_string(
                                 active_player_settings.osd_duration_ms / 1000) +
                             " seconds",
@@ -2789,18 +2820,23 @@ struct LibraryUi::Impl {
         }
 
         std::string series_root;
+        std::string season_root;
         SDL_LockMutex(mutex);
         series_root = active_series_root;
+        season_root = active_season_root;
         SDL_UnlockMutex(mutex);
         title_label = make_label(
             renderer,
             title_font,
-            series_root.empty()
-                ? "Library"
-                : media_source_default_title(series_root),
+            !season_root.empty()
+                ? media_source_default_title(season_root)
+                : (series_root.empty()
+                       ? "Library"
+                       : media_source_default_title(series_root)),
             white);
         std::vector<MediaEntry> visible;
         std::vector<int> visible_episode_counts;
+        std::vector<std::string> visible_season_roots;
         bool is_scanning = false;
         bool library_has_entries = false;
         bool is_search_editing = false;
@@ -2834,6 +2870,10 @@ struct LibraryUi::Impl {
                 entries[filtered[static_cast<std::size_t>(index)]];
             visible.push_back(entry);
             const std::string group = series_group_key(entry);
+            const std::string season =
+                series_root.empty()
+                    ? std::string{}
+                    : media_season_root(entry, series_root);
             int episode_count = 0;
             if (active_series_root.empty() && !group.empty()) {
                 episode_count = static_cast<int>(std::count_if(
@@ -2842,8 +2882,19 @@ struct LibraryUi::Impl {
                     [&](const MediaEntry& candidate) {
                         return series_group_key(candidate) == group;
                     }));
+            } else if (!series_root.empty() && season_root.empty() &&
+                       !season.empty()) {
+                episode_count = static_cast<int>(std::count_if(
+                    entries.begin(),
+                    entries.end(),
+                    [&](const MediaEntry& candidate) {
+                        return series_group_key(candidate) == series_root &&
+                            media_season_root(candidate, series_root) ==
+                                season;
+                    }));
             }
             visible_episode_counts.push_back(episode_count);
+            visible_season_roots.push_back(season);
         }
         is_scanning = scanning;
         library_has_entries = !entries.empty();
@@ -2884,7 +2935,10 @@ struct LibraryUi::Impl {
             add_footer_hint(FooterGlyph::touchpad, "", "Add Media");
             add_footer_hint(FooterGlyph::options, "", "Menu");
         } else {
-            add_footer_hint(FooterGlyph::cross, "", "Play Episode");
+            add_footer_hint(
+                FooterGlyph::cross,
+                "",
+                season_root.empty() ? "Open / Play" : "Play Episode");
             add_footer_hint(FooterGlyph::circle, "", "Back");
             add_footer_hint(FooterGlyph::touchpad, "", "Add Media");
             add_footer_hint(FooterGlyph::options, "", "Menu");
@@ -2899,7 +2953,9 @@ struct LibraryUi::Impl {
         std::string status =
             (active_series_root.empty()
                  ? std::string(filter_name(active_filter))
-                 : "EPISODES") +
+                 : (season_root.empty()
+                        ? "SEASONS & EPISODES"
+                        : "EPISODES")) +
             "  |  " +
             std::to_string(total) + " ITEMS  |  SORT: " +
             (active_series_root.empty()
@@ -2990,9 +3046,17 @@ struct LibraryUi::Impl {
              ++visible_index) {
             const MediaEntry& entry = visible[visible_index];
             const std::string group = series_group_key(entry);
+            const std::string& season =
+                visible_season_roots[visible_index];
             std::string text;
             if (active_series_root.empty() && !group.empty()) {
                 text = "TV SHOW   " + series_display_name(entry) + "   -   " +
+                    std::to_string(visible_episode_counts[visible_index]) +
+                    " EPISODES";
+            } else if (!series_root.empty() && season_root.empty() &&
+                       !season.empty()) {
+                text = "SEASON    " + media_source_default_title(season) +
+                    "   -   " +
                     std::to_string(visible_episode_counts[visible_index]) +
                     " EPISODES";
             } else if (!active_series_root.empty()) {
@@ -3003,7 +3067,9 @@ struct LibraryUi::Impl {
             }
             const std::string details = row_details(entry);
             if (!details.empty() &&
-                (active_series_root.empty() ? group.empty() : true)) {
+                (active_series_root.empty()
+                     ? group.empty()
+                     : !season_root.empty() || season.empty())) {
                 text += "   -   " + details;
             }
             row_labels.push_back(make_label(renderer, row_font, text, white));
@@ -3394,6 +3460,7 @@ LibraryAction LibraryUi::handle_event(const SDL_Event& event, std::string& selec
     bool play = false;
     bool play_queue = false;
     bool leave_series = false;
+    bool leave_season = false;
     bool remove_source = false;
     bool begin_search = false;
     bool clear_search = false;
@@ -3411,9 +3478,11 @@ LibraryAction LibraryUi::handle_event(const SDL_Event& event, std::string& selec
                 break;
             case SDL_CONTROLLER_BUTTON_B:
                 SDL_LockMutex(impl_->mutex);
-                leave_series = !impl_->active_series_root.empty();
+                leave_season = !impl_->active_season_root.empty();
+                leave_series =
+                    !leave_season && !impl_->active_series_root.empty();
                 SDL_UnlockMutex(impl_->mutex);
-                play_queue = !leave_series;
+                play_queue = !leave_season && !leave_series;
                 break;
             case SDL_CONTROLLER_BUTTON_X:
                 break;
@@ -3522,9 +3591,14 @@ LibraryAction LibraryUi::handle_event(const SDL_Event& event, std::string& selec
     if (begin_search) {
         impl_->begin_search();
     }
-    if (leave_series) {
+    if (leave_season || leave_series) {
         SDL_LockMutex(impl_->mutex);
-        impl_->active_series_root.clear();
+        if (leave_season) {
+            impl_->active_season_root.clear();
+        } else {
+            impl_->active_series_root.clear();
+            impl_->active_season_root.clear();
+        }
         impl_->selected = 0;
         impl_->first_visible = 0;
         ++impl_->published_generation;
@@ -3562,9 +3636,23 @@ LibraryAction LibraryUi::handle_event(const SDL_Event& event, std::string& selec
             const std::string group = series_group_key(entry);
             if (play && impl_->active_series_root.empty() && !group.empty()) {
                 impl_->active_series_root = group;
+                impl_->active_season_root.clear();
                 impl_->selected = 0;
                 impl_->first_visible = 0;
                 ++impl_->published_generation;
+            } else if (
+                play && !impl_->active_series_root.empty() &&
+                impl_->active_season_root.empty()) {
+                const std::string season = media_season_root(
+                    entry, impl_->active_series_root);
+                if (!season.empty()) {
+                    impl_->active_season_root = season;
+                    impl_->selected = 0;
+                    impl_->first_visible = 0;
+                    ++impl_->published_generation;
+                } else {
+                    selected_path = entry.path;
+                }
             } else {
                 selected_path = entry.path;
             }

@@ -123,7 +123,8 @@ try {
         $objects += $object
     }
     $cSources = @(
-        'src\playback\kitsubimage_safe.c'
+        'src\playback\kitsubimage_safe.c',
+        'src\playback\kitchensink_subtitle_timing.c'
     )
     $cCommon = @(
         '-std=c17',

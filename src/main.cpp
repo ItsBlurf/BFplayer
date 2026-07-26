@@ -16,6 +16,7 @@ extern "C" {
 #include "ps5mc/library_database.hpp"
 #include "ps5mc/library_scanner.hpp"
 #include "ps5mc/library_ui.hpp"
+#include "ps5mc/kitchensink_subtitle_timing.h"
 #include "ps5mc/playlist.hpp"
 #include "ps5mc/playback_osd.hpp"
 #include "ps5mc/player_settings.hpp"
@@ -1004,7 +1005,9 @@ void adjust_subtitle_delay(App& app, std::int64_t delta_ms) {
         static_cast<long long>(delta_ms),
         static_cast<long long>(app.subtitle_delay_ms));
     app.osd.show(
-        "External subtitle delay: " + std::to_string(app.subtitle_delay_ms) + " ms",
+        "Subtitle timing: " +
+            std::to_string(app.subtitle_delay_ms) +
+            " ms (positive = later)",
         5000);
 }
 
@@ -1157,7 +1160,7 @@ void refresh_playback_overlay(App& app) {
                 "Long seek step                  " +
                     std::to_string(app.settings.long_seek_seconds) +
                     " seconds",
-                "On-screen display               " +
+                "Pop-up message duration         " +
                     std::to_string(app.settings.osd_duration_ms / 1000) +
                     " seconds",
                 std::string("Video scaling                   ") +
@@ -1182,7 +1185,7 @@ void refresh_playback_overlay(App& app) {
             "View all controls",
             "Playback settings",
             app.volume_percent == 0 ? "Unmute audio" : "Mute audio",
-            "Subtitle timing        " +
+            "Subtitle timing              " +
                 std::to_string(app.subtitle_delay_ms) +
                 " ms   (Left / Right)",
             "Return to library",
@@ -1385,6 +1388,7 @@ bool handle_playback_overlay_button(
             break;
         case 4:
             app.subtitle_delay_ms = 0;
+            app.osd.show("Subtitle timing reset to 0 ms");
             refresh_playback_overlay(app);
             break;
         case 5:
@@ -1723,6 +1727,7 @@ PlaybackOutcome run_player(
     const bool source_persistence_allowed =
         !ps5mc::uri_has_sensitive_components(path);
     ps5mc::ResumeState saved_resume{};
+    double pending_resume_seconds = 0.0;
     if (app.settings.resume_playback &&
         database_available &&
         source_persistence_allowed &&
@@ -1732,13 +1737,27 @@ PlaybackOutcome run_player(
         if (std::isfinite(duration) && !saved_resume.completed &&
             resume_seconds >= 10.0 &&
             resume_seconds < duration - 30.0) {
-            if (Kit_PlayerSeek(app.player, resume_seconds) == 0) {
-                ps5mc::diagnostics_log(
-                    ps5mc::DiagnosticLevel::info,
-                    "resume-applied seconds=%.3f",
-                    resume_seconds);
-            }
+            // Kitchensink ignores/rejects seeks while the player is stopped.
+            // Apply this immediately after Kit_PlayerPlay() below.
+            pending_resume_seconds = resume_seconds;
+            ps5mc::diagnostics_log(
+                ps5mc::DiagnosticLevel::info,
+                "resume-pending seconds=%.3f duration=%.3f",
+                resume_seconds,
+                duration);
+        } else {
+            ps5mc::diagnostics_log(
+                ps5mc::DiagnosticLevel::info,
+                "resume-skipped saved_ms=%lld duration=%.3f completed=%d",
+                static_cast<long long>(saved_resume.position_ms),
+                duration,
+                saved_resume.completed ? 1 : 0);
         }
+    } else if (app.settings.resume_playback && database_available &&
+               source_persistence_allowed) {
+        ps5mc::diagnostics_log(
+            ps5mc::DiagnosticLevel::info,
+            "resume-not-found");
     }
     std::string saved_video_scale;
     if (database_available &&
@@ -1800,9 +1819,31 @@ PlaybackOutcome run_player(
         Kit_GetPlayerDuration(app.player));
 
     Kit_PlayerPlay(app.player);
-    app.osd.show(
-        "Cross Play/Pause   D-pad Seek   Touchpad Controls   Options Menu",
-        6000);
+    if (pending_resume_seconds > 0.0) {
+        if (Kit_PlayerSeek(app.player, pending_resume_seconds) == 0) {
+            ps5mc::diagnostics_log(
+                ps5mc::DiagnosticLevel::info,
+                "resume-applied seconds=%.3f actual=%.3f",
+                pending_resume_seconds,
+                Kit_GetPlayerPosition(app.player));
+            app.osd.show(
+                "Resumed at " +
+                    std::to_string(
+                        static_cast<long long>(pending_resume_seconds)) +
+                    " seconds",
+                5000);
+        } else {
+            ps5mc::diagnostics_log(
+                ps5mc::DiagnosticLevel::error,
+                "resume-seek failed seconds=%.3f error=%s",
+                pending_resume_seconds,
+                Kit_GetError());
+        }
+    } else {
+        app.osd.show(
+            "Cross Play/Pause   D-pad Seek   Touchpad Controls   Options Menu",
+            6000);
+    }
     Uint64 last_resume_save = SDL_GetTicks64();
     Uint64 last_diagnostics = last_resume_save;
     static_assert(kAudioBufferBytes % sizeof(std::int16_t) == 0);
@@ -1878,12 +1919,16 @@ PlaybackOutcome run_player(
                 &destination);
         }
         if (app.subtitles) {
-            const int fragments = Kit_GetPlayerSubtitleSDLTexture(
+            const double subtitle_clock =
+                Kit_GetPlayerPosition(app.player) -
+                static_cast<double>(app.subtitle_delay_ms) / 1000.0;
+            const int fragments = ps5mc_get_player_subtitle_texture_at(
                 app.player,
                 app.subtitles,
                 subtitle_sources.data(),
                 subtitle_targets.data(),
-                static_cast<int>(subtitle_sources.size()));
+                static_cast<int>(subtitle_sources.size()),
+                subtitle_clock);
             const int safe_fragments = std::clamp(
                 fragments,
                 0,
@@ -1973,10 +2018,10 @@ PlaybackOutcome run_player(
     if (database_available) {
         if (source_persistence_allowed) {
             ps5mc::ResumeState current{};
-            current.position_ms = seconds_to_milliseconds(
-                Kit_GetPlayerPosition(app.player));
-            current.duration_ms = seconds_to_milliseconds(
-                Kit_GetPlayerDuration(app.player));
+            // Use the values captured before any cleanup/stop transition.
+            // Some decoder backends reset their public clock when stopping.
+            current.position_ms = seconds_to_milliseconds(final_position);
+            current.duration_ms = seconds_to_milliseconds(final_duration);
             current.last_played_unix = static_cast<std::int64_t>(std::time(nullptr));
             current.completed = playback_completed(
                 current.position_ms, current.duration_ms);

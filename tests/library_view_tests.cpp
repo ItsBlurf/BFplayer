@@ -75,6 +75,41 @@ int main() {
     check(ps5mc::next_library_sort_mode(LibrarySortMode::size) == LibrarySortMode::smart,
           "sort cycle wraps");
 
+    MediaEntry nested_episode{
+        "/media/Shows/The Example/Season 2/Disc 1/Episode 4.mkv",
+        "Episode 4.mkv",
+        MediaKind::video};
+    check(
+        ps5mc::media_season_root(
+            nested_episode, "/media/Shows/The Example") ==
+            "/media/Shows/The Example/Season 2",
+        "nested episode groups under its first season directory");
+    MediaEntry direct_episode{
+        "/media/Shows/The Example/Special.mkv",
+        "Special.mkv",
+        MediaKind::video};
+    check(
+        ps5mc::media_season_root(
+            direct_episode, "/media/Shows/The Example").empty(),
+        "direct series file remains an ungrouped episode");
+    MediaEntry sibling_episode{
+        "/media/Shows/The Example Extra/Season 1/Episode.mkv",
+        "Episode.mkv",
+        MediaKind::video};
+    check(
+        ps5mc::media_season_root(
+            sibling_episode, "/media/Shows/The Example").empty(),
+        "season grouping enforces a series-root path boundary");
+    MediaEntry windows_episode{
+        R"(D:\Shows\Example\Season 10\Episode.mkv)",
+        "Episode.mkv",
+        MediaKind::video};
+    check(
+        ps5mc::media_season_root(
+            windows_episode, R"(D:\Shows\Example)") ==
+            "D:/Shows/Example/Season 10",
+        "season grouping normalizes Windows separators for host tests");
+
     std::string utf8 = "caf\xC3\xA9";
     check(ps5mc::erase_last_utf8_codepoint(utf8) && utf8 == "caf",
           "UTF-8 backspace removes one complete code point");

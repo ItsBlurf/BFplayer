@@ -51,6 +51,11 @@ while adding bounded allocations, palette/index validation, correct FFmpeg
 RGB32 palette conversion, safe callbacks, and repaired cleanup paths. It must
 not be represented as the unmodified upstream source.
 
+`src/playback/kitchensink_subtitle_timing.c` is a narrow ABI adapter for
+SDL_kitchensink 2.0.0-a2. It calls the library's existing explicit subtitle
+synchronization-timestamp entry point so the application can apply a
+user-selected subtitle delay.
+
 The upstream file is covered by the following MIT license:
 
 > Copyright (c) 2018 Tuomas Virtanen

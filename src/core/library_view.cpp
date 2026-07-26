@@ -239,6 +239,32 @@ void sort_media_indices(
     });
 }
 
+std::string media_season_root(
+    const MediaEntry& entry,
+    std::string_view series_root) {
+    if (entry.path.empty() || series_root.empty()) {
+        return {};
+    }
+    std::string normalized_path = entry.path;
+    std::string normalized_root(series_root);
+    std::replace(normalized_path.begin(), normalized_path.end(), '\\', '/');
+    std::replace(normalized_root.begin(), normalized_root.end(), '\\', '/');
+    while (normalized_root.size() > 1 && normalized_root.back() == '/') {
+        normalized_root.pop_back();
+    }
+    if (normalized_path.size() <= normalized_root.size() ||
+        normalized_path.compare(0, normalized_root.size(), normalized_root) != 0 ||
+        normalized_path[normalized_root.size()] != '/') {
+        return {};
+    }
+    const std::size_t relative_start = normalized_root.size() + 1;
+    const std::size_t separator = normalized_path.find('/', relative_start);
+    if (separator == std::string::npos || separator == relative_start) {
+        return {};
+    }
+    return normalized_path.substr(0, separator);
+}
+
 bool erase_last_utf8_codepoint(std::string& text) noexcept {
     if (text.empty()) {
         return false;
