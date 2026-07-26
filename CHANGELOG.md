@@ -1,5 +1,30 @@
 # Changelog
 
+## 0.1.0-alpha.13 - single-tile test build
+
+### Dashboard registration
+
+- Consolidated the visible Media tile and BigApp runtime host onto the single
+  `PSMC00001` title ID.
+- Changed the repaired `/system_ex/app/PSMC00001` host metadata to the
+  Prospero Native Media App category.
+- Removed the separate `PSMR00001` native-Game registration that caused a
+  duplicate PS5 Media Center entry in Games.
+- Added a startup migration that uninstalls the legacy `PSMR00001`
+  registration and removes its old `/user/app` metadata before registering the
+  single Media entry.
+
+### Add Media reliability
+
+- Fixed the `/` source browser so PS5 mount points such as `/data`, `/user`,
+  and attached storage remain visible and can be entered explicitly.
+- Kept the picker descriptor-bound and symlink-safe, with PS5 removable-drive
+  `lstat` fallback, bounded listings, fatal-I/O aborts, and visible errors.
+- Added a combined traversal budget to bulk library import so many child
+  folders cannot bypass the per-folder limits or silently return partial
+  results.
+- Roll back in-memory source changes when database persistence fails.
+
 ## 0.1.0-alpha.12 - manual-library test build
 
 ### Manual library management

@@ -50,7 +50,7 @@ along with this program; see the file COPYING. If not, see
 
 
 #define PSNOW_EBOOT "/system_ex/app/NPXS40106/eboot.bin"
-#define HOST_TITLE_ID "PSMR00001"
+#define HOST_TITLE_ID "PSMC00001"
 #define FAKE_PATH "/system_ex/app/" HOST_TITLE_ID
 
 #define IOVEC_ENTRY(x) {x ? x : 0, \
@@ -59,12 +59,12 @@ along with this program; see the file COPYING. If not, see
 
 
 static const char param_json[] = "{\n"
-  "  \"applicationCategoryType\": 0,\n"
+  "  \"applicationCategoryType\": 65536,\n"
   "  \"attribute\": 1,\n"
   "  \"attribute2\": 0,\n"
   "  \"attribute3\": 4,\n"
   "  \"titleId\": \"" HOST_TITLE_ID "\",\n"
-  "  \"contentId\": \"IV9999-PSMR00001_00-PS5MEDIARUNTIME0\",\n"
+  "  \"contentId\": \"IV9999-PSMC00001_00-PS5MEDIACENTER0\",\n"
   "  \"localizedParameters\": {\n"
   "    \"defaultLanguage\": \"en-US\",\n"
   "    \"en-US\": {\n"

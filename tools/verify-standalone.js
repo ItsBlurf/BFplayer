@@ -16,7 +16,6 @@ const compressedPlayer = fs.readFileSync(
 const assets = [
     ['compressed player ELF', compressedPlayer],
     ['tile param', fs.readFileSync(path.join(root, 'assets', 'tile', 'param.json'))],
-    ['host param', fs.readFileSync(path.join(root, 'assets', 'fakeapp', 'param.json'))],
     ['icon', fs.readFileSync(path.join(root, 'assets', 'icon0.png'))],
     ['font', fs.readFileSync(
         path.join(root, 'assets', 'fonts', 'NotoSans-Regular.ttf'))],
@@ -46,6 +45,14 @@ for (const [label, bytes] of assets) {
 }
 
 const strings = standalone.toString('latin1');
+assert.strictEqual(
+    strings.split('"applicationCategoryType": 65536').length - 1,
+    2,
+    'visible tile and system host must both use the Media category');
+assert(!strings.includes('"applicationCategoryType": 0'),
+    'standalone must not embed a native-Game registration');
+assert(!strings.includes('PS5MEDIARUNTIME0'),
+    'standalone must not embed the removed second host manifest');
 assert(!strings.includes('127.0.0.1:8080'));
 assert(!strings.includes('/hbldr?'));
 assert(!strings.includes('libmicrohttpd'));

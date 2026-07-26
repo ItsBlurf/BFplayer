@@ -11,8 +11,9 @@ player logs. Stop on a console disconnect, black screen that does not recover,
 or a fatal filesystem error.
 
 1. With HBL uninstalled and `/data/homebrew/PS5-MediaCenter` absent, inject only
-   the alpha.12 standalone payload. Verify it recreates its files, keeps the
-   dashboard tile in Media, shows the
+   the alpha.13 standalone payload. Verify it removes the obsolete Games
+   entry, recreates its files, leaves exactly one dashboard tile in Media, and
+   shows the
    Media Center icon in the active-app switcher, launches with no media
    argument, and exits cleanly with Options. Verify the dark launch countdown
    returns/closes, or follow its PS-button fallback.

@@ -9,10 +9,10 @@ The payload:
    form and verifies it while expanding it in memory for launch;
 2. writes its small runtime font, icon, and manifest assets under
    `/data/homebrew/PS5-MediaCenter`;
-3. installs and registers its own English-only `PSMR00001` BigApp runtime host,
-   including the same Media Center icon used by the dashboard;
-4. creates or repairs the matching `/system_ex/app/PSMR00001` host files;
-5. registers the English-only `PSMC00001` dashboard tile;
+3. creates or repairs the Media-category `/system_ex/app/PSMC00001` BigApp
+   host files;
+4. registers the English-only `PSMC00001` dashboard tile;
+5. uninstalls the obsolete `PSMR00001` Games registration from alpha.11/12;
 6. keeps a minimal HTTP listener bound only to `127.0.0.1:9040`;
 7. launches the embedded player into the required PS5 BigApp context when the
    tile requests `/launch`.
@@ -29,9 +29,8 @@ The SDK wrapper still records `libkernel_web.sprx` as a normal low-level PS5
 runtime stub dependency. That system library is not the `ps5-payload-websrv`
 application and does not create a websrv process or listen on port 8080.
 
-The visible `PSMC00001` registration uses `applicationCategoryType: 65536`, so
-the dashboard lists it in Media. The separate `PSMR00001` registration is the
-native BigApp runtime host and must keep its application category unchanged.
+The single `PSMC00001` registration and its repaired system host both use
+`applicationCategoryType: 65536`, so PS5 Media Center is listed only in Media.
 
 The payload must be injected once after each jailbreak because the minimal
 loopback launcher is a resident process. The installed dashboard tile remains,
@@ -41,8 +40,8 @@ but selecting it while the payload is not resident cannot start the player.
 does not need to be retained between jailbreaks. The payload recreates its
 font, icon, and manifest there. Older builds appeared to require HBL because
 they launched through HBL's registered `FAKE00000` host; removing HBL removed
-that registration. This build owns the distinct `PSMR00001` host and no longer
-shares HBL state.
+that registration. This build owns its `PSMC00001` host and no longer shares
+HBL state.
 
 Logs are written to:
 

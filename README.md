@@ -11,8 +11,8 @@ evidence and references.
 
 - One standalone resident payload containing the player, dashboard-tile
   installer, runtime assets, minimal loopback launcher, and BigApp transition.
-- Independent `PSMR00001` runtime-host installation and repair, so uninstalling
-  HBL or deleting `/data/homebrew` cannot remove a hidden launch dependency.
+- One `PSMC00001` Media-category registration serves as both the visible tile
+  and repaired BigApp runtime host, with no second Games entry.
 - Stripped, gzip-compressed embedded player for a much smaller LAN-injected
   payload, expanded and ELF-validated in memory only when launched.
 - No websrv runtime dependency, port 8080, web catalog, or web file picker:
@@ -96,8 +96,8 @@ are required. From this folder:
 Override that location with `PS5_PACBREW_HOME` if needed. The build output is
 `dist\ps5-media-center-standalone.elf`; the ready-to-copy archive is
 `dist\PS5-MediaCenter-standalone.zip`. The standalone ELF already embeds the
-compressed player ELF, font, icon, visible-tile data, private runtime-host
-registration, and launch core.
+compressed player ELF, font, icon, single-title Media registration, and launch
+core.
 
 ## Install
 
@@ -172,6 +172,6 @@ acceptance gates are tracked in
 [docs/COMPLETION_MATRIX.md](docs/COMPLETION_MATRIX.md).
 The current alpha is exhaustively offline-verified but cannot claim console
 runtime behavior. See
-[docs/ALPHA12_OFFLINE_VERIFICATION.md](docs/ALPHA12_OFFLINE_VERIFICATION.md),
+[docs/ALPHA13_OFFLINE_VERIFICATION.md](docs/ALPHA13_OFFLINE_VERIFICATION.md),
 [docs/FULL_VERIFICATION_AUDIT.md](docs/FULL_VERIFICATION_AUDIT.md), and
 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

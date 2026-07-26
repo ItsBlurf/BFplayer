@@ -3,8 +3,8 @@
 ## Decision
 
 The release is one resident Prospero payload. It embeds the complete stripped
-player ELF as gzip, installs its private `PSMR00001` BigApp host plus the
-`PSMC00001` tile, and binds a one-route HTTP listener only to
+player ELF as gzip, uses the single Media-category `PSMC00001` title as both
+the dashboard tile and BigApp host, and binds a one-route HTTP listener only to
 `127.0.0.1:9040`. The tile calls `/launch`; the resident payload expands and
 validates the player, creates the BigApp context, and replaces it directly.
 
@@ -15,7 +15,7 @@ It does not embed or depend on the websrv application, libmicrohttpd, port
 ```text
 standalone payload -> loopback :9040 <- PS5 Media Center tile
         |                 |
- compressed player   PSMR00001 BigApp transition
+ compressed player   PSMC00001 BigApp transition
         |                 |
         +---------> BigApp player
                           |
@@ -147,8 +147,9 @@ ps5-media-center-standalone.elf
 ```
 
 At startup it writes only the small font, icon, and runtime manifest required
-by the embedded player, registers `/user/app/PSMR00001/sce_sys`, repairs
-`/system_ex/app/PSMR00001`, and registers `/user/app/PSMC00001/sce_sys`. The
+by the embedded player, repairs `/system_ex/app/PSMC00001`, and registers
+`/user/app/PSMC00001/sce_sys`. It also removes the obsolete `PSMR00001`
+registration created by alpha.11/alpha.12. The
 player is launched from its compressed embedded bytes, so no separate player
 ELF transfer or HBL installation is required. AppInst and kernel-system imports
 belong to the outer resident launcher; the embedded player ELF retains its

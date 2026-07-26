@@ -24,6 +24,7 @@ namespace ps5mc {
 namespace {
 
 constexpr std::size_t kMaximumDirectEntries = 10000;
+constexpr std::size_t kMaximumBulkEntries = 200000;
 
 #if !defined(_WIN32)
 bool fatal_io_errno(int value) {
@@ -40,6 +41,13 @@ bool fatal_io_errno(int value) {
 #endif
 
 bool folder_contains_video(const std::string& path, BulkImportResult& output) {
+    if (output.entries_checked >= kMaximumBulkEntries) {
+        output.fatal_errno = EOVERFLOW;
+        output.fatal_path = path;
+        return false;
+    }
+    const std::size_t remaining_entries =
+        kMaximumBulkEntries - output.entries_checked;
     bool found = false;
     const ScanResult scan = scan_media_library(
         path,
@@ -50,13 +58,28 @@ bool folder_contains_video(const std::string& path, BulkImportResult& output) {
             }
             return true;
         },
-        ScanLimits{32, 200000, 75000});
+        ScanLimits{32, remaining_entries, 75000});
     output.entries_checked += scan.entries_seen;
     output.skipped_symlinks += scan.skipped_symlinks;
     output.skipped_devices += scan.skipped_devices;
     if (scan.fatal_errno != 0) {
         output.fatal_errno = scan.fatal_errno;
         output.fatal_path = scan.fatal_path;
+        return false;
+    }
+    // The scanner reports incomplete when our visitor intentionally stops at
+    // the first video. Any other incomplete result would make the folder's
+    // classification unreliable, so fail the bulk import instead of silently
+    // returning a partial library.
+    if (!found && !scan.fully_enumerated()) {
+        output.fatal_errno =
+            scan.first_recoverable_errno != 0
+                ? scan.first_recoverable_errno
+                : EOVERFLOW;
+        output.fatal_path =
+            scan.first_recoverable_path.empty()
+                ? path
+                : scan.first_recoverable_path;
         return false;
     }
     return found;
@@ -137,8 +160,16 @@ BulkImportResult discover_bulk_media_sources(
         output.fatal_path = root;
         return output;
     }
-    while (current != end && output.entries_checked < kMaximumDirectEntries) {
+    std::size_t direct_entries = 0;
+    while (current != end) {
+        if (direct_entries >= kMaximumDirectEntries ||
+            output.entries_checked >= kMaximumBulkEntries) {
+            output.fatal_errno = EOVERFLOW;
+            output.fatal_path = root;
+            return output;
+        }
         const std::filesystem::directory_entry entry = *current;
+        ++direct_entries;
         ++output.entries_checked;
         const std::string path = utf8_path(entry.path());
         if (is_reparse_point(entry.path())) {
@@ -202,6 +233,7 @@ BulkImportResult discover_bulk_media_sources(
         close(descriptor);
         return output;
     }
+    std::size_t direct_entries = 0;
     for (;;) {
         errno = 0;
         dirent* item = readdir(directory);
@@ -216,7 +248,8 @@ BulkImportResult discover_bulk_media_sources(
             std::strcmp(item->d_name, "..") == 0) {
             continue;
         }
-        if (++output.entries_checked > kMaximumDirectEntries) {
+        if (++direct_entries > kMaximumDirectEntries ||
+            ++output.entries_checked > kMaximumBulkEntries) {
             output.fatal_errno = EOVERFLOW;
             output.fatal_path = root;
             break;

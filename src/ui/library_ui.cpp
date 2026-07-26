@@ -48,6 +48,9 @@ constexpr int kFilterCount = 8;
 constexpr std::size_t kMetadataProbeBudget = 512;
 constexpr std::size_t kMetadataFailureBudget = 8;
 constexpr std::size_t kMaxSearchBytes = 512;
+constexpr std::size_t kMaxBrowserEntriesSeen = 100000;
+constexpr std::size_t kMaxBrowserItems = 50000;
+constexpr std::size_t kMaxBrowserPathBytes = 4096;
 
 struct Label {
     SDL_Texture* texture = nullptr;
@@ -399,6 +402,18 @@ bool is_directory(const std::string& path) {
            !S_ISLNK(status.st_mode);
 }
 
+bool fatal_browser_io_errno(int value) {
+    if (value == EIO || value == EBADF || value == EFAULT) {
+        return true;
+    }
+#ifdef ESTALE
+    if (value == ESTALE) {
+        return true;
+    }
+#endif
+    return false;
+}
+
 } // namespace
 
 struct LibraryUi::Impl {
@@ -644,6 +659,9 @@ struct LibraryUi::Impl {
 
         std::vector<BrowserEntry> updated;
         int read_error = 0;
+        int entry_error = 0;
+        std::string entry_error_path;
+        std::size_t entries_seen = 0;
         for (;;) {
             errno = 0;
             dirent* item = readdir(directory);
@@ -655,21 +673,46 @@ struct LibraryUi::Impl {
                 std::strcmp(item->d_name, "..") == 0) {
                 continue;
             }
+            if (++entries_seen > kMaxBrowserEntriesSeen) {
+                entry_error = EOVERFLOW;
+                entry_error_path = path;
+                break;
+            }
             std::string item_path = path;
             if (item_path != "/") {
                 item_path.push_back('/');
             }
             item_path += item->d_name;
+            if (item_path.size() > kMaxBrowserPathBytes) {
+                continue;
+            }
             struct stat status {};
             if (fstatat(
                     descriptor,
                     item->d_name,
                     &status,
-                    AT_SYMLINK_NOFOLLOW) != 0 ||
-                S_ISLNK(status.st_mode) ||
-                status.st_dev != root_status.st_dev) {
+                    AT_SYMLINK_NOFOLLOW) != 0) {
+                int value = errno;
+                if (fatal_browser_io_errno(value) ||
+                    lstat(item_path.c_str(), &status) != 0) {
+                    if (!fatal_browser_io_errno(value)) {
+                        value = errno;
+                    }
+                    if (!fatal_browser_io_errno(value)) {
+                        continue;
+                    }
+                    entry_error = value != 0 ? value : EIO;
+                    entry_error_path = item_path;
+                    break;
+                }
+            }
+            if (S_ISLNK(status.st_mode)) {
                 continue;
             }
+            // This is an interactive one-directory-at-a-time picker. Mount
+            // points must stay visible at `/`; opening one captures and
+            // validates that mount as the next browsing root. Recursive media
+            // scans retain their strict same-st_dev boundary.
             if (S_ISDIR(status.st_mode)) {
                 const std::string folded = lower_ascii(item->d_name);
                 if (folded == "$recycle.bin" ||
@@ -684,6 +727,11 @@ struct LibraryUi::Impl {
                     std::move(item_path),
                     true,
                     MediaKind::unknown});
+                if (updated.size() > kMaxBrowserItems) {
+                    entry_error = EOVERFLOW;
+                    entry_error_path = path;
+                    break;
+                }
                 continue;
             }
             if (!S_ISREG(status.st_mode)) {
@@ -697,14 +745,24 @@ struct LibraryUi::Impl {
                     std::move(item_path),
                     false,
                     kind});
+                if (updated.size() > kMaxBrowserItems) {
+                    entry_error = EOVERFLOW;
+                    entry_error_path = path;
+                    break;
+                }
             }
         }
         closedir(directory);
-        if (read_error == EIO || read_error == EBADF || read_error == EFAULT
-#ifdef ESTALE
-            || read_error == ESTALE
-#endif
-        ) {
+        if (entry_error != 0) {
+            last_error =
+                (entry_error == EOVERFLOW
+                     ? "Folder is too large to browse safely: "
+                     : "Folder entry read failed: ") +
+                (entry_error_path.empty() ? path : entry_error_path) +
+                " (errno " + std::to_string(entry_error) + ")";
+            return false;
+        }
+        if (read_error != 0) {
             last_error = "Folder read failed: " + path +
                 " (errno " + std::to_string(read_error) + ")";
             return false;
@@ -719,6 +777,7 @@ struct LibraryUi::Impl {
                 return natural_path_less(left.name, right.name);
             });
 
+        const std::size_t updated_count = updated.size();
         SDL_LockMutex(mutex);
         browser_path = path;
         browser_entries = std::move(updated);
@@ -730,8 +789,16 @@ struct LibraryUi::Impl {
             DiagnosticLevel::info,
             "source-browser folder=%s entries=%zu",
             path.c_str(),
-            browser_entries.size());
+            updated_count);
         return true;
+    }
+
+    void report_browser_failure() {
+        diagnostics_log(
+            DiagnosticLevel::error,
+            "source-browser failed error=%s",
+            last_error.c_str());
+        set_notice("ADD MEDIA FAILED  |  " + last_error, 8000);
     }
 
     void open_browser() {
@@ -748,6 +815,7 @@ struct LibraryUi::Impl {
             first_visible = saved_library_first_visible;
             ++published_generation;
             SDL_UnlockMutex(mutex);
+            report_browser_failure();
         }
     }
 
@@ -799,7 +867,9 @@ struct LibraryUi::Impl {
         const std::string& success_message) {
         stop_scan();
         std::size_t inserted = 0;
+        std::vector<MediaSource> previous_sources;
         SDL_LockMutex(mutex);
+        previous_sources = sources;
         for (MediaSource source : additions) {
             source.path = normalize_media_source_path(std::move(source.path));
             if (source.path.empty() || source.path[0] != '/') {
@@ -823,6 +893,11 @@ struct LibraryUi::Impl {
         annotate_media_sources(entries, sources);
         SDL_UnlockMutex(mutex);
         if (!persist_sources()) {
+            SDL_LockMutex(mutex);
+            sources = std::move(previous_sources);
+            annotate_media_sources(entries, sources);
+            SDL_UnlockMutex(mutex);
+            set_notice("IMPORT FAILED  |  " + last_error, 8000);
             return;
         }
         diagnostics_log(
@@ -894,10 +969,13 @@ struct LibraryUi::Impl {
               classify_media_path(path) != MediaKind::subtitle));
         if (!valid) {
             last_error = "Selected media source is no longer available";
+            report_browser_failure();
             return;
         }
 
+        std::vector<MediaSource> previous_sources;
         SDL_LockMutex(mutex);
+        previous_sources = sources;
         const auto duplicate = std::find_if(
             sources.begin(),
             sources.end(),
@@ -920,6 +998,11 @@ struct LibraryUi::Impl {
         ++published_generation;
         SDL_UnlockMutex(mutex);
         if (!persist_sources()) {
+            SDL_LockMutex(mutex);
+            sources = std::move(previous_sources);
+            annotate_media_sources(entries, sources);
+            SDL_UnlockMutex(mutex);
+            report_browser_failure();
             return;
         }
         diagnostics_log(
@@ -1038,7 +1121,9 @@ struct LibraryUi::Impl {
             close_browser();
             return;
         }
-        load_browser_directory(parent_path(current));
+        if (!load_browser_directory(parent_path(current))) {
+            report_browser_failure();
+        }
     }
 
     void handle_browser_button(Uint8 button) {
@@ -1059,7 +1144,9 @@ struct LibraryUi::Impl {
                     return;
                 }
                 if (highlighted.directory) {
-                    load_browser_directory(highlighted.path);
+                    if (!load_browser_directory(highlighted.path)) {
+                        report_browser_failure();
+                    }
                 } else {
                     add_source(MediaSourceKind::movie_file, highlighted.path);
                 }
@@ -1917,8 +2004,14 @@ struct LibraryUi::Impl {
             clear_artwork();
             std::vector<BrowserEntry> visible_browser;
             std::string current_path;
+            std::string browser_notice;
             int total = 0;
             SDL_LockMutex(mutex);
+            const std::uint64_t now = SDL_GetTicks64();
+            if (!notice.empty() && now >= notice_until) {
+                notice.clear();
+                ++notice_generation;
+            }
             total = static_cast<int>(browser_entries.size());
             selected = std::clamp(selected, 0, std::max(0, total - 1));
             if (selected < first_visible) {
@@ -1935,6 +2028,7 @@ struct LibraryUi::Impl {
                     browser_entries[static_cast<std::size_t>(index)]);
             }
             current_path = browser_path;
+            browser_notice = notice;
             rendered_generation = published_generation;
             rendered_selected = selected;
             rendered_first = first_visible;
@@ -1947,12 +2041,17 @@ struct LibraryUi::Impl {
             SDL_UnlockMutex(mutex);
 
             title_label = make_label(renderer, title_font, "Add Media Source", white);
+            std::string browser_status =
+                current_path + "  |  " + std::to_string(total) + " ITEMS";
+            if (!browser_notice.empty()) {
+                browser_status += "  |  " + browser_notice;
+            }
             status_label = make_label(
                 renderer,
                 row_font,
                 fit_text_to_width(
                     row_font,
-                    current_path + "  |  " + std::to_string(total) + " ITEMS",
+                    std::move(browser_status),
                     kUiWidth - 112),
                 muted);
             add_footer_hint(FooterGlyph::cross, "", "Open / Add Movie");
