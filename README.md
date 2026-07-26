@@ -43,7 +43,7 @@ settings, sources, playback history, and logs.
 | Button | Action |
 | --- | --- |
 | Cross | Open or play |
-| Circle | Play from here, or go back inside a show |
+| Circle | Go back inside a show or season; no action at the library root |
 | Triangle | Remove the selected movie or TV source (press twice) |
 | D-pad Left/Right | Change library category |
 | D-pad Up/Down | Move through the list |

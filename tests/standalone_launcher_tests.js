@@ -147,6 +147,15 @@ assert(!libraryUi.includes(
     'const bool empty = impl_->entries.empty() && !impl_->scanning;'));
 assert(libraryUi.includes(
     '"Square       Add Media: Import folder             Audio track"'));
+const libraryCircleCase = libraryUi.slice(
+    libraryUi.indexOf('case SDL_CONTROLLER_BUTTON_B:', libraryUi.indexOf(
+        'bool play_queue = false;')),
+    libraryUi.indexOf('case SDL_CONTROLLER_BUTTON_X:', libraryUi.indexOf(
+        'bool play_queue = false;')));
+assert(libraryCircleCase.includes('leave_season'));
+assert(libraryCircleCase.includes('leave_series'));
+assert(!libraryCircleCase.includes('play_queue'),
+    'Circle must only navigate back and must never launch library media');
 assert(libraryUi.includes('if (browsing && event.type == SDL_KEYDOWN)'));
 assert(libraryUi.includes(
     '"Finish or cancel the current library import first"'));

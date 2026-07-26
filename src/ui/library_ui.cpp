@@ -2822,7 +2822,7 @@ struct LibraryUi::Impl {
                     subtitle = "Library first, playback second";
                     rows = {
                         "Cross        Open or play                         Play / pause",
-                        "Circle       Queue or go back                     Subtitle track",
+                        "Circle       Back inside show                     Subtitle track",
                         "Square       Add Media: Import folder             Audio track",
                         "Triangle     Add TV / remove source               Video track",
                         "D-pad        Navigate and change category         Seek short / long",
@@ -3553,7 +3553,6 @@ LibraryAction LibraryUi::handle_event(const SDL_Event& event, std::string& selec
                 leave_series =
                     !leave_season && !impl_->active_series_root.empty();
                 SDL_UnlockMutex(impl_->mutex);
-                play_queue = !leave_season && !leave_series;
                 break;
             case SDL_CONTROLLER_BUTTON_X:
                 break;

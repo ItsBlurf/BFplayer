@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.0-alpha.21 - Circle input safety test build
+
+- Stop Circle from launching the selected video or playback queue at the
+  library root.
+- Keep Circle exclusively as Back while browsing a TV show or season, so a
+  second press after returning to the root cannot unexpectedly start media.
+- Correct the in-app controls screen and README to match the input behavior.
+
 ## 0.1.0-alpha.20 - original aspect ratio test build
 
 - Start every video in `Original` aspect mode, honoring the stream display
