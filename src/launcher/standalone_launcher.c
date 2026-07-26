@@ -82,6 +82,12 @@ int sceAppInstUtilInitialize(void);
 int sceAppInstUtilTerminate(void);
 int sceAppInstUtilAppInstallAll(void*);
 int sceAppInstUtilAppUnInstall(const char*, void*, void*);
+int sceKernelSendNotificationRequest(int, void*, size_t, int);
+
+typedef struct ps5mc_notify_request {
+    char reserved[45];
+    char message[3075];
+} ps5mc_notify_request_t;
 
 static int mkdir_if_needed(const char* path) {
     if (mkdir(path, 0755) == 0 || errno == EEXIST) {
@@ -122,6 +128,23 @@ static void launcher_log(const char* format, ...) {
         (void)write(descriptor, line, (size_t)length);
         close(descriptor);
     }
+}
+
+static void send_ready_notification(void) {
+    ps5mc_notify_request_t request;
+    int result;
+
+    memset(&request, 0, sizeof(request));
+    (void)snprintf(
+        request.message,
+        sizeof(request.message),
+        "PS5 Media Center %s loaded. Open it from Media.",
+        PS5MC_VERSION);
+    result = sceKernelSendNotificationRequest(
+        0, &request, sizeof(request), 0);
+    launcher_log(
+        "notification ready result=0x%08x",
+        (unsigned int)result);
 }
 
 static int write_file_atomic(
@@ -638,15 +661,21 @@ static void serve_forever(int listener) {
         "font-size:72px;font-weight:bold;margin:18px}</style></head><body>"
         "<main class=\"card\"><div class=\"accent\"></div>"
         "<h1>Launching PS5 Media Center</h1>"
-        "<p>The player is starting. This page will close or return automatically.</p>"
-        "<div class=\"count\" id=\"count\">3</div>"
-        "<p>If this screen remains after the countdown, press the PS button once.</p>"
+        "<p>The player is starting. Closing this window automatically...</p>"
+        "<div class=\"count\" id=\"count\">2</div>"
+        "<p id=\"fallback\">If this window remains, press O to close it.</p>"
         "</main><script>"
-        "let n=3;const e=document.getElementById('count');"
+        "let n=2;const e=document.getElementById('count');"
+        "function leave(){"
+        "try{window.open('','_self')}catch(x){};"
+        "try{window.close()}catch(x){};"
+        "try{self.close()}catch(x){};"
+        "try{history.back()}catch(x){};"
+        "try{history.go(-1)}catch(x){}"
+        "}"
         "const t=setInterval(()=>{n--;e.textContent=n>0?n:'Ready';"
-        "if(n<=0){clearInterval(t);setTimeout(()=>{"
-        "try{window.close()}catch(x){};try{history.back()}catch(x){}"
-        "},250)}},1000);"
+        "if(n<=0){clearInterval(t);leave();"
+        "setInterval(leave,750)}},750);"
         "</script></body></html>";
     for (;;) {
         char request[2048];
@@ -742,6 +771,7 @@ int main(void) {
         "ready address=%s port=%d routes=/launch,/shutdown websrv=unused",
         PS5MC_SERVICE_ADDRESS,
         PS5MC_SERVICE_PORT);
+    send_ready_notification();
     serve_forever(listener);
     close(listener);
     (void)sceUserServiceTerminate();

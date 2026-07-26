@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.1.0-alpha.18 - native lifecycle test build
+
+### Launch handoff
+
+- Retry all browser-supported close and history-return methods after the
+  shortened launch handoff instead of making only one close attempt.
+- Replace the PS-button fallback with `Press O to close this window`, because
+  Circle dismisses the browser without opening the PlayStation control center.
+- Send a native PS5 notification after injection finishes installing the
+  runtime assets, Media tile, and loopback launch service.
+
+### Native exit
+
+- On a normal Media Center exit, close SDL/player resources and ask
+  SystemService to terminate the active `PSMC00001` BigApp host so the console
+  returns to PlayStation Home instead of leaving a black VideoOut surface.
+  The title ID is verified before termination so a directly injected player
+  cannot close an unrelated game.
+- Add lifecycle diagnostics for the detected BigApp ID and any failed
+  SystemService termination request.
+- Extend the standalone structural tests to require the notification,
+  automatic-close retry, Circle fallback, and native BigApp exit paths.
+
 ## 0.1.0-alpha.17 - playback-resume and season-navigation test build
 
 ### Playback corrections

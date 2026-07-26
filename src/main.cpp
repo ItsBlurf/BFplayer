@@ -44,6 +44,14 @@ extern "C" {
 
 namespace {
 
+extern "C" int sceSystemServiceGetAppIdOfRunningBigApp(void);
+extern "C" int sceSystemServiceGetAppTitleId(int app_id, char* title_id);
+extern "C" int sceSystemServiceKillApp(
+    int app_id,
+    int how,
+    int reason,
+    int core_dump);
+
 #ifndef PS5MC_VERSION
 #define PS5MC_VERSION "development"
 #endif
@@ -2243,6 +2251,51 @@ void cleanup(App& app) {
     SDL_Quit();
 }
 
+void return_to_playstation_home() {
+    constexpr const char* kMediaCenterTitleId = "PSMC00001";
+    const int app_id = sceSystemServiceGetAppIdOfRunningBigApp();
+    if (app_id <= 0) {
+        ps5mc::diagnostics_log(
+            ps5mc::DiagnosticLevel::error,
+            "home-return failed reason=no-running-bigapp app_id=%d",
+            app_id);
+        return;
+    }
+    std::array<char, 16> title_id{};
+    const int title_result =
+        sceSystemServiceGetAppTitleId(app_id, title_id.data());
+    if (title_result != 0) {
+        ps5mc::diagnostics_log(
+            ps5mc::DiagnosticLevel::error,
+            "home-return failed reason=title-id app_id=%d result=0x%08x",
+            app_id,
+            static_cast<unsigned int>(title_result));
+        return;
+    }
+    if (std::strcmp(title_id.data(), kMediaCenterTitleId) != 0) {
+        ps5mc::diagnostics_log(
+            ps5mc::DiagnosticLevel::error,
+            "home-return skipped reason=unexpected-bigapp app_id=%d title_id=%s",
+            app_id,
+            title_id.data());
+        return;
+    }
+    ps5mc::diagnostics_log(
+        ps5mc::DiagnosticLevel::info,
+        "home-return kill-bigapp app_id=%d title_id=%s",
+        app_id,
+        title_id.data());
+    const int result =
+        sceSystemServiceKillApp(app_id, -1, 0, 0);
+    if (result != 0) {
+        ps5mc::diagnostics_log(
+            ps5mc::DiagnosticLevel::error,
+            "home-return kill-bigapp failed app_id=%d result=0x%08x",
+            app_id,
+            static_cast<unsigned int>(result));
+    }
+}
+
 } // namespace
 
 int main(int argc, char** argv) {
@@ -2352,6 +2405,7 @@ int main(int argc, char** argv) {
         ps5mc::DiagnosticLevel::info,
         "application-end result=%d",
         result);
+    return_to_playstation_home();
     ps5mc::diagnostics_shutdown();
     return result;
 }

@@ -17,9 +17,18 @@ The payload:
 7. launches the embedded player into the required PS5 BigApp context when the
    tile requests `/launch`.
 
-The loopback response is a dark three-second handoff screen. It attempts
-`window.close()` and browser history return after the countdown; if PS5's
-browser blocks both operations, it tells the user to press the PS button once.
+The loopback response is a short dark handoff screen. It repeatedly attempts
+`window.close()`, `self.close()`, and browser history return. PS5 WebKit can
+still reject script-initiated closure depending on how the tile created the
+window, so the visible fallback says `Press O to close this window`; Circle
+dismisses it without opening the PlayStation control center.
+
+After successful injection setup, the resident launcher sends a native PS5
+notification confirming that Media Center is loaded and available in Media.
+When the user chooses Exit Media Center, the native player closes its
+resources and terminates the active BigApp host through SystemService so the
+console can return to PlayStation Home. It verifies that the active title is
+`PSMC00001` first and refuses to terminate an unrelated BigApp.
 
 It does not start, link, load, or contact `ps5-payload-websrv`. It does not use
 port 8080, the websrv catalog, `homebrew.js`, or the HBL file picker. The HTTP
