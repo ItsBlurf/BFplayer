@@ -25,16 +25,6 @@ function Fill([string]$hex, [int]$x, [int]$y, [int]$w, [int]$h) {
     $brush.Dispose()
 }
 
-function Draw-Logo([int]$cx, [int]$cy, [int]$size) {
-    $graphics.DrawImage(
-        $logo,
-        [Drawing.Rectangle]::new(
-            $cx - [int]($size / 2),
-            $cy - [int]($size / 2),
-            $size,
-            $size))
-}
-
 function Draw-Hint(
     [string]$button,
     [string]$action,
@@ -96,12 +86,9 @@ function Draw-Hint(
 }
 
 try {
-    $logo = [Drawing.Image]::FromFile((Join-Path $root 'assets\icon0.png'))
     Fill '#050913' 0 0 1920 1080
-    Fill '#0c1426' 0 0 1920 202
-    Fill '#192c4e' 0 202 1920 8
-    Fill '#2f89ff' 0 202 1920 2
-    Draw-Logo 82 92 112
+    Fill '#09101e' 0 0 1920 190
+    Fill '#192c4e' 0 190 1920 2
 
     $titleFont = [Drawing.Font]::new($family, 48, [Drawing.FontStyle]::Regular, [Drawing.GraphicsUnit]::Pixel)
     $rowFont = [Drawing.Font]::new($family, 27, [Drawing.FontStyle]::Regular, [Drawing.GraphicsUnit]::Pixel)
@@ -109,10 +96,8 @@ try {
     $white = Brush '#f0f4ff'
     $muted = Brush '#9daac4'
 
-    $graphics.DrawString('PS5 Media Center', $titleFont, $white, 146, 38)
-    Fill '#14223d' 146 112 575 46
-    Fill '#f4b22a' 146 112 5 46
-    $graphics.DrawString('ALL MEDIA  |  0 ITEMS  |  SORT: SMART', $rowFont, $muted, 166, 119)
+    $graphics.DrawString('Library', $titleFont, $white, 58, 38)
+    $graphics.DrawString('ALL MEDIA  |  0 ITEMS  |  SORT: SMART', $rowFont, $muted, 58, 119)
 
     Fill '#09101e' 42 214 1228 744
     Fill '#0b1425' 1310 214 552 744
@@ -122,23 +107,14 @@ try {
     Fill '#0f1c33' 1344 248 484 602
     $graphics.DrawRectangle($border, 1344, 248, 484, 602)
 
-    Draw-Logo 656 522 174
     $emptyTitle = 'Your library is empty'
-    $emptyHelp = 'Press the touchpad to add a movie or TV-show folder.'
+    $emptyHelp = 'Press the touchpad or open Options to add media.'
     $titleSize = $graphics.MeasureString($emptyTitle, $titleFont)
     $helpSize = $graphics.MeasureString($emptyHelp, $rowFont)
-    $graphics.DrawString($emptyTitle, $titleFont, $white, 656 - $titleSize.Width / 2, 665)
-    $graphics.DrawString($emptyHelp, $rowFont, $muted, 656 - $helpSize.Width / 2, 730)
+    $graphics.DrawString($emptyTitle, $titleFont, $white, 656 - $titleSize.Width / 2, 560)
+    $graphics.DrawString($emptyHelp, $rowFont, $muted, 656 - $helpSize.Width / 2, 630)
 
-    # Representative generated video frame; the runtime decodes this from the
-    # selected title when no local JPEG/PNG cover is available.
-    Fill '#071226' 1360 288 452 254
-    Fill '#16345c' 1360 288 452 62
-    Fill '#285a78' 1360 350 452 104
-    Fill '#d08a35' 1360 454 452 88
-    Fill '#0c1e32' 1428 378 92 76
-    Fill '#18283d' 1554 326 172 128
-    $artText = 'VIDEO PREVIEW  |  00:47:12  |  640x360'
+    $artText = 'NO PREVIEW AVAILABLE'
     $artSize = $graphics.MeasureString($artText, $rowFont)
     $graphics.DrawString($artText, $rowFont, $muted, 1586 - $artSize.Width / 2, 897)
 
@@ -146,13 +122,8 @@ try {
     Fill '#1c3050' 0 990 1920 2
     $hintX = 48
     $hintX = Draw-Hint 'X' 'Play' $hintX $footerFont $muted
-    $hintX = Draw-Hint 'O' 'Queue' $hintX $footerFont $muted
-    $hintX = Draw-Hint 'DPAD' 'Category' $hintX $footerFont $muted
-    $hintX = Draw-Hint 'L3' 'Favorite' $hintX $footerFont $muted
     $hintX = Draw-Hint 'TOUCH' 'Add Media' $hintX $footerFont $muted
-    $hintX = Draw-Hint 'R3' 'Sort' $hintX $footerFont $muted
-    $hintX = Draw-Hint 'TRIANGLE' 'Remove' $hintX $footerFont $muted
-    $null = Draw-Hint 'OPTIONS' 'Exit' $hintX $footerFont $muted
+    $null = Draw-Hint 'OPTIONS' 'Menu' $hintX $footerFont $muted
 
     $target = [IO.Path]::GetFullPath($OutFile)
     $directory = Split-Path -Parent $target
@@ -167,7 +138,6 @@ finally {
     if ($titleFont) { $titleFont.Dispose() }
     if ($rowFont) { $rowFont.Dispose() }
     if ($footerFont) { $footerFont.Dispose() }
-    if ($logo) { $logo.Dispose() }
     $graphics.Dispose()
     $bitmap.Dispose()
     $fontCollection.Dispose()

@@ -18,6 +18,7 @@ extern "C" {
 #include "ps5mc/library_ui.hpp"
 #include "ps5mc/playlist.hpp"
 #include "ps5mc/playback_osd.hpp"
+#include "ps5mc/player_settings.hpp"
 #include "ps5mc/safe_read_file.hpp"
 #include "ps5mc/source_uri.hpp"
 #include "ps5mc/video_layout.hpp"
@@ -52,6 +53,12 @@ constexpr int kAudioBufferBytes = 64 * 1024;
 constexpr int kSubtitleAtlasSize = 4096;
 constexpr int kSubtitleFragments = 1024;
 
+enum class PlaybackOverlay {
+    none,
+    menu,
+    controls,
+};
+
 struct App {
     SDL_Window* window = nullptr;
     SDL_Renderer* renderer = nullptr;
@@ -72,7 +79,9 @@ struct App {
     int volume_percent = 100;
     int previous_volume_percent = 100;
     std::int64_t subtitle_delay_ms = 0;
-    bool subtitle_delay_mode = false;
+    ps5mc::PlayerSettings settings;
+    PlaybackOverlay playback_overlay = PlaybackOverlay::none;
+    int playback_overlay_selected = 0;
     ps5mc::VideoScaleMode video_scale_mode = ps5mc::VideoScaleMode::fit;
     ps5mc::VideoAspectMode video_aspect_mode =
         ps5mc::VideoAspectMode::default_ratio;
@@ -164,6 +173,51 @@ void log_installed_manifest(const char* executable_path) {
         bytes,
         complete ? 1 : 0,
         contents);
+}
+
+ps5mc::PlayerSettings load_player_settings(
+    ps5mc::LibraryDatabase& database) {
+    ps5mc::PlayerSettings settings{};
+    std::string value;
+    int integer = 0;
+    bool boolean = false;
+    if (database.get_setting(
+            std::string(ps5mc::kSettingVolumePercent),
+            value) &&
+        ps5mc::parse_setting_integer(value, 0, 100, integer)) {
+        settings.volume_percent = integer;
+    }
+    if (database.get_setting(
+            std::string(ps5mc::kSettingShortSeekSeconds),
+            value) &&
+        ps5mc::parse_setting_integer(value, 1, 300, integer)) {
+        settings.short_seek_seconds = integer;
+    }
+    if (database.get_setting(
+            std::string(ps5mc::kSettingLongSeekSeconds),
+            value) &&
+        ps5mc::parse_setting_integer(value, 1, 900, integer)) {
+        settings.long_seek_seconds = integer;
+    }
+    if (database.get_setting(
+            std::string(ps5mc::kSettingOsdDurationMs),
+            value) &&
+        ps5mc::parse_setting_integer(value, 500, 30000, integer)) {
+        settings.osd_duration_ms = integer;
+    }
+    if (database.get_setting(
+            std::string(ps5mc::kSettingResumePlayback),
+            value) &&
+        ps5mc::parse_setting_boolean(value, boolean)) {
+        settings.resume_playback = boolean;
+    }
+    if (database.get_setting(
+            std::string(ps5mc::kSettingAutoSubtitles),
+            value) &&
+        ps5mc::parse_setting_boolean(value, boolean)) {
+        settings.auto_subtitles = boolean;
+    }
+    return ps5mc::normalized_player_settings(settings);
 }
 
 std::int64_t monotonic_milliseconds() {
@@ -1000,7 +1054,127 @@ void cycle_video_crop(App& app) {
         ps5mc::video_crop_mode_name(app.video_crop_mode));
 }
 
+void refresh_playback_overlay(App& app) {
+    if (app.playback_overlay == PlaybackOverlay::none) {
+        app.osd.hide_panel();
+        return;
+    }
+    if (app.playback_overlay == PlaybackOverlay::controls) {
+        app.osd.show_panel(
+            "Playback controls",
+            {
+                "Cross             Play or pause",
+                "D-pad Left/Right  Seek short step",
+                "D-pad Down/Up     Seek long step",
+                "L1 / R1           Previous / next chapter",
+                "Circle            Change subtitle track",
+                "Square            Change audio track",
+                "Triangle          Change video track",
+                "L3 / R3           Volume down / up",
+                "L2 + Triangle     Crop mode",
+                "R2 + Triangle     Aspect ratio",
+                "L2+R2+Triangle    Scale mode",
+                "Touchpad          Show this controls page",
+                "Options           Playback menu",
+            },
+            -1);
+        return;
+    }
+    app.osd.show_panel(
+        "Playback menu",
+        {
+            "Resume playback",
+            "View all controls",
+            "Subtitle timing        " +
+                std::to_string(app.subtitle_delay_ms) +
+                " ms   (Left / Right)",
+            "Return to library",
+        },
+        app.playback_overlay_selected);
+}
+
+void open_playback_overlay(App& app, PlaybackOverlay overlay) {
+    app.playback_overlay = overlay;
+    app.playback_overlay_selected = 0;
+    refresh_playback_overlay(app);
+    ps5mc::diagnostics_log(
+        ps5mc::DiagnosticLevel::info,
+        "playback-overlay open=%s",
+        overlay == PlaybackOverlay::menu ? "menu" : "controls");
+}
+
+bool handle_playback_overlay_button(
+    App& app,
+    SDL_GameControllerButton button) {
+    if (app.playback_overlay == PlaybackOverlay::none) {
+        return false;
+    }
+    if (button == ps5mc::kControllerOptionsButton) {
+        app.playback_overlay = PlaybackOverlay::none;
+        refresh_playback_overlay(app);
+        return true;
+    }
+    if (button == SDL_CONTROLLER_BUTTON_B) {
+        if (app.playback_overlay == PlaybackOverlay::controls) {
+            open_playback_overlay(app, PlaybackOverlay::menu);
+        } else {
+            app.playback_overlay = PlaybackOverlay::none;
+            refresh_playback_overlay(app);
+        }
+        return true;
+    }
+    if (app.playback_overlay == PlaybackOverlay::controls) {
+        return true;
+    }
+    if (button == SDL_CONTROLLER_BUTTON_DPAD_UP ||
+        button == SDL_CONTROLLER_BUTTON_DPAD_DOWN) {
+        const int direction =
+            button == SDL_CONTROLLER_BUTTON_DPAD_UP ? -1 : 1;
+        app.playback_overlay_selected =
+            (app.playback_overlay_selected + 4 + direction) % 4;
+        refresh_playback_overlay(app);
+        return true;
+    }
+    if (app.playback_overlay_selected == 2 &&
+        (button == SDL_CONTROLLER_BUTTON_DPAD_LEFT ||
+         button == SDL_CONTROLLER_BUTTON_DPAD_RIGHT)) {
+        adjust_subtitle_delay(
+            app,
+            button == SDL_CONTROLLER_BUTTON_DPAD_LEFT ? -100 : 100);
+        refresh_playback_overlay(app);
+        return true;
+    }
+    if (button != SDL_CONTROLLER_BUTTON_A) {
+        return true;
+    }
+    switch (app.playback_overlay_selected) {
+        case 0:
+            app.playback_overlay = PlaybackOverlay::none;
+            refresh_playback_overlay(app);
+            break;
+        case 1:
+            open_playback_overlay(app, PlaybackOverlay::controls);
+            break;
+        case 2:
+            app.subtitle_delay_ms = 0;
+            refresh_playback_overlay(app);
+            break;
+        case 3:
+            app.playback_running = false;
+            ps5mc::diagnostics_log(
+                ps5mc::DiagnosticLevel::info,
+                "playback-stop requested=menu");
+            break;
+        default:
+            break;
+    }
+    return true;
+}
+
 void on_controller_button(App& app, SDL_GameControllerButton button) {
+    if (handle_playback_overlay_button(app, button)) {
+        return;
+    }
     switch (button) {
         case SDL_CONTROLLER_BUTTON_A:
             toggle_pause(app);
@@ -1035,32 +1209,24 @@ void on_controller_button(App& app, SDL_GameControllerButton button) {
             }
             break;
         case SDL_CONTROLLER_BUTTON_DPAD_LEFT:
-            if (app.subtitle_delay_mode) {
-                adjust_subtitle_delay(app, -100);
-            } else {
-                seek_relative(app, -10.0);
-            }
+            seek_relative(
+                app,
+                -static_cast<double>(app.settings.short_seek_seconds));
             break;
         case SDL_CONTROLLER_BUTTON_DPAD_RIGHT:
-            if (app.subtitle_delay_mode) {
-                adjust_subtitle_delay(app, 100);
-            } else {
-                seek_relative(app, 10.0);
-            }
+            seek_relative(
+                app,
+                static_cast<double>(app.settings.short_seek_seconds));
             break;
         case SDL_CONTROLLER_BUTTON_DPAD_DOWN:
-            if (app.subtitle_delay_mode) {
-                adjust_subtitle_delay(app, -500);
-            } else {
-                seek_relative(app, -60.0);
-            }
+            seek_relative(
+                app,
+                -static_cast<double>(app.settings.long_seek_seconds));
             break;
         case SDL_CONTROLLER_BUTTON_DPAD_UP:
-            if (app.subtitle_delay_mode) {
-                adjust_subtitle_delay(app, 500);
-            } else {
-                seek_relative(app, 60.0);
-            }
+            seek_relative(
+                app,
+                static_cast<double>(app.settings.long_seek_seconds));
             break;
         case SDL_CONTROLLER_BUTTON_LEFTSHOULDER:
             seek_chapter(app, -1);
@@ -1075,16 +1241,7 @@ void on_controller_button(App& app, SDL_GameControllerButton button) {
             set_volume(app, app.volume_percent + 5);
             break;
         case ps5mc::kControllerTouchpadButton:
-            app.subtitle_delay_mode = !app.subtitle_delay_mode;
-            ps5mc::diagnostics_log(
-                ps5mc::DiagnosticLevel::info,
-                "subtitle-delay-mode enabled=%d",
-                app.subtitle_delay_mode ? 1 : 0);
-            app.osd.show(
-                app.subtitle_delay_mode
-                    ? "Subtitle-delay mode: D-pad adjusts timing"
-                    : "Subtitle-delay mode: Off",
-                5000);
+            open_playback_overlay(app, PlaybackOverlay::controls);
             break;
 #if !defined(PS5MC_PS5)
         case SDL_CONTROLLER_BUTTON_BACK:
@@ -1097,10 +1254,7 @@ void on_controller_button(App& app, SDL_GameControllerButton button) {
             break;
 #endif
         case ps5mc::kControllerOptionsButton:
-            app.playback_running = false;
-            ps5mc::diagnostics_log(
-                ps5mc::DiagnosticLevel::info,
-                "playback-stop requested=options");
+            open_playback_overlay(app, PlaybackOverlay::menu);
             break;
         default:
             break;
@@ -1134,13 +1288,38 @@ void pump_events(App& app) {
                 break;
             case SDL_KEYDOWN:
                 if (event.key.keysym.sym == SDLK_ESCAPE) {
-                    app.playback_running = false;
+                    if (app.playback_overlay == PlaybackOverlay::none) {
+                        open_playback_overlay(app, PlaybackOverlay::menu);
+                    } else {
+                        app.playback_overlay = PlaybackOverlay::none;
+                        refresh_playback_overlay(app);
+                    }
+                } else if (event.key.keysym.sym == SDLK_F1) {
+                    open_playback_overlay(app, PlaybackOverlay::controls);
+                } else if (app.playback_overlay != PlaybackOverlay::none) {
+                    if (event.key.keysym.sym == SDLK_UP) {
+                        on_controller_button(app, SDL_CONTROLLER_BUTTON_DPAD_UP);
+                    } else if (event.key.keysym.sym == SDLK_DOWN) {
+                        on_controller_button(app, SDL_CONTROLLER_BUTTON_DPAD_DOWN);
+                    } else if (event.key.keysym.sym == SDLK_LEFT) {
+                        on_controller_button(app, SDL_CONTROLLER_BUTTON_DPAD_LEFT);
+                    } else if (event.key.keysym.sym == SDLK_RIGHT) {
+                        on_controller_button(app, SDL_CONTROLLER_BUTTON_DPAD_RIGHT);
+                    } else if (event.key.keysym.sym == SDLK_RETURN) {
+                        on_controller_button(app, SDL_CONTROLLER_BUTTON_A);
+                    } else if (event.key.keysym.sym == SDLK_BACKSPACE) {
+                        on_controller_button(app, SDL_CONTROLLER_BUTTON_B);
+                    }
                 } else if (event.key.keysym.sym == SDLK_SPACE) {
                     toggle_pause(app);
                 } else if (event.key.keysym.sym == SDLK_LEFT) {
-                    seek_relative(app, -10.0);
+                    seek_relative(
+                        app,
+                        -static_cast<double>(app.settings.short_seek_seconds));
                 } else if (event.key.keysym.sym == SDLK_RIGHT) {
-                    seek_relative(app, 10.0);
+                    seek_relative(
+                        app,
+                        static_cast<double>(app.settings.short_seek_seconds));
                 } else if (event.key.keysym.sym == SDLK_z) {
                     cycle_video_scale(app);
                 } else if (event.key.keysym.sym == SDLK_a) {
@@ -1169,8 +1348,9 @@ PlaybackOutcome run_player(
             : "<none>");
     app.playback_running = true;
     app.paused = false;
-    app.subtitle_delay_mode = false;
     app.subtitle_delay_ms = 0;
+    app.playback_overlay = PlaybackOverlay::none;
+    app.playback_overlay_selected = 0;
     const bool opening_osd_ready =
         app.osd.open(app.renderer, app.fallback_font);
     if (opening_osd_ready) {
@@ -1214,6 +1394,26 @@ PlaybackOutcome run_player(
         show_open_error(source_error);
         return PlaybackOutcome::error;
     }
+    ps5mc::LibraryDatabase resume_database;
+    const bool database_available =
+        resume_database.open("/data/PS5-MediaCenter/library.db");
+    app.settings = database_available
+        ? load_player_settings(resume_database)
+        : ps5mc::PlayerSettings{};
+    app.volume_percent = app.settings.volume_percent;
+    app.previous_volume_percent =
+        app.volume_percent > 0 ? app.volume_percent : 100;
+    app.osd.set_default_duration(
+        static_cast<std::uint64_t>(app.settings.osd_duration_ms));
+    ps5mc::diagnostics_log(
+        ps5mc::DiagnosticLevel::info,
+        "player-settings volume=%d short_seek=%d long_seek=%d osd_ms=%d resume=%d auto_subtitles=%d",
+        app.settings.volume_percent,
+        app.settings.short_seek_seconds,
+        app.settings.long_seek_seconds,
+        app.settings.osd_duration_ms,
+        app.settings.resume_playback ? 1 : 0,
+        app.settings.auto_subtitles ? 1 : 0);
     app.subtitle_sidecars = ps5mc::is_network_uri(path)
         ? std::vector<std::string>{}
         : ps5mc::find_subtitle_sidecars(path);
@@ -1255,7 +1455,8 @@ PlaybackOutcome run_player(
         Kit_GetBestSourceStream(app.source, KIT_STREAMTYPE_AUDIO);
     // Kitchensink requires a video decoder for subtitle layout. Audio-only
     // files with timed lyrics must still open instead of failing creation.
-    const int initial_subtitle = initial_video >= 0
+    const int initial_subtitle =
+        initial_video >= 0 && app.settings.auto_subtitles
         ? Kit_GetBestSourceStream(app.source, KIT_STREAMTYPE_SUBTITLE)
         : -1;
     app.player = Kit_CreatePlayer(
@@ -1294,13 +1495,12 @@ PlaybackOutcome run_player(
             app.osd.error().c_str());
     }
 
-    ps5mc::LibraryDatabase resume_database;
-    const bool database_available =
-        resume_database.open("/data/PS5-MediaCenter/library.db");
     const bool source_persistence_allowed =
         !ps5mc::uri_has_sensitive_components(path);
     ps5mc::ResumeState saved_resume{};
-    if (database_available && source_persistence_allowed &&
+    if (app.settings.resume_playback &&
+        database_available &&
+        source_persistence_allowed &&
         resume_database.load_resume(path, saved_resume)) {
         const double resume_seconds = static_cast<double>(saved_resume.position_ms) / 1000.0;
         const double duration = Kit_GetPlayerDuration(app.player);
@@ -1313,16 +1513,6 @@ PlaybackOutcome run_player(
                     "resume-applied seconds=%.3f",
                     resume_seconds);
             }
-        }
-    }
-    std::string saved_volume;
-    if (database_available && resume_database.get_setting("volume_percent", saved_volume)) {
-        char* end = nullptr;
-        errno = 0;
-        const long parsed = std::strtol(saved_volume.c_str(), &end, 10);
-        if (errno != ERANGE && end && *end == '\0' &&
-            parsed >= 0 && parsed <= 100) {
-            app.volume_percent = static_cast<int>(parsed);
         }
     }
     std::string saved_video_scale;
@@ -1386,7 +1576,7 @@ PlaybackOutcome run_player(
 
     Kit_PlayerPlay(app.player);
     app.osd.show(
-        "Cross Pause  Circle Subtitles  Square Audio  R2+Triangle Scale",
+        "Cross Play/Pause   D-pad Seek   Touchpad Controls   Options Menu",
         6000);
     Uint64 last_resume_save = SDL_GetTicks64();
     Uint64 last_diagnostics = last_resume_save;
@@ -1621,7 +1811,8 @@ void close_media(App& app) {
     app.external_subtitle_index = -1;
     app.playback_running = false;
     app.paused = false;
-    app.subtitle_delay_mode = false;
+    app.playback_overlay = PlaybackOverlay::none;
+    app.playback_overlay_selected = 0;
 }
 
 int run_library(

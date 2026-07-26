@@ -131,13 +131,13 @@ Controller mappings during direct-file playback:
 | R2 + Triangle | Cycle VLC display-aspect ratios: Default, 1:1, 4:3, 16:9, 16:10, 2.21:1, 2.35:1, 2.39:1, 5:4 |
 | L2 + Triangle | Cycle VLC crop ratios: Default, 16:10, 16:9, 1.85:1, 2.21:1, 2.35:1, 2.39:1, 5:3, 4:3, 5:4, 1:1 |
 | L2 + R2 + Triangle | Cycle Best fit, Fill screen (crop), and Fullscreen stretch |
-| D-pad Left/Right | Seek -/+10 seconds |
-| D-pad Down/Up | Seek -/+60 seconds |
+| D-pad Left/Right | Seek by the configurable short step (10 seconds by default) |
+| D-pad Down/Up | Seek by the configurable long step (60 seconds by default) |
 | L1/R1 | Previous/next chapter, or -/+600 seconds when none exist |
 | L3/R3 | Volume down/up |
 | Create | Mute/unmute |
-| Touchpad | Toggle external-subtitle delay mode; D-pad adjusts timing |
-| Options | Return/exit |
+| Touchpad | Show the complete playback control map |
+| Options | Open the playback menu (controls, subtitle timing, return to library) |
 
 Controller mappings in the media library:
 
@@ -153,14 +153,20 @@ Controller mappings in the media library:
 | R3 | Cycle and persist the library sort mode |
 | D-pad Up/Down | Move one item |
 | L1/R1 | Move one page |
-| Options | Exit |
+| Options | Open Add Media, Controls, Playback Settings, About, or Exit |
 
 Inside Add Media Source, Cross opens a folder or adds the highlighted media
 file as a standalone movie. Triangle adds the highlighted folder as one TV
-show. Square explicitly imports the current folder as a whole library: loose
-video files become Movies and child folders containing videos become TV Shows.
+show. Square explicitly imports the highlighted folder (or the current folder
+when a file is highlighted) as a whole library: loose video files become
+Movies and child folders containing videos become TV Shows.
 The browser always starts at `/`; Circle goes to the parent (or closes at `/`)
 and Options closes it.
+
+Playback Settings in the Options menu controls default volume, short and long
+seek steps, on-screen-display duration, resume behavior, and automatic
+subtitle selection. Changes are saved immediately and apply to the next item
+opened. The Controls page is also available directly with F1 on desktop builds.
 
 See [docs/STANDALONE_LAUNCHER.md](docs/STANDALONE_LAUNCHER.md),
 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md),

@@ -9,6 +9,7 @@ extern "C" {
  * Query strings, alternate methods, and prefix/suffix paths are rejected.
  */
 int ps5mc_request_is_launch(const char* request);
+int ps5mc_request_is_shutdown(const char* request);
 
 #ifdef __cplusplus
 }

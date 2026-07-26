@@ -238,7 +238,7 @@ BulkImportResult discover_bulk_media_sources(
         errno = 0;
         dirent* item = readdir(directory);
         if (!item) {
-            if (fatal_io_errno(errno)) {
+            if (errno != 0) {
                 output.fatal_errno = errno;
                 output.fatal_path = root;
             }
@@ -254,18 +254,37 @@ BulkImportResult discover_bulk_media_sources(
             output.fatal_path = root;
             break;
         }
+        std::string path = root;
+        if (path.back() != '/') {
+            path.push_back('/');
+        }
+        path += item->d_name;
         struct stat status {};
         if (fstatat(
                 descriptor,
                 item->d_name,
                 &status,
                 AT_SYMLINK_NOFOLLOW) != 0) {
-            if (fatal_io_errno(errno)) {
-                output.fatal_errno = errno;
-                output.fatal_path = root + "/" + item->d_name;
+            int value = errno;
+            if (fatal_io_errno(value)) {
+                output.fatal_errno = value;
+                output.fatal_path = path;
                 break;
             }
-            continue;
+            // PS5 exFAT can enumerate an entry while descriptor-relative stat
+            // rejects it. Use the scanner's stable no-follow fallback before
+            // deciding that an otherwise visible USB item does not exist.
+            ++output.stat_fallbacks;
+            if (lstat(path.c_str(), &status) != 0) {
+                value = errno;
+                if (fatal_io_errno(value)) {
+                    output.fatal_errno = value;
+                    output.fatal_path = path;
+                    break;
+                }
+                ++output.unreadable_entries;
+                continue;
+            }
         }
         if (S_ISLNK(status.st_mode)) {
             ++output.skipped_symlinks;
@@ -275,11 +294,6 @@ BulkImportResult discover_bulk_media_sources(
             ++output.skipped_devices;
             continue;
         }
-        std::string path = root;
-        if (path.back() != '/') {
-            path.push_back('/');
-        }
-        path += item->d_name;
         if (S_ISREG(status.st_mode)) {
             if (classify_media_path(path) == MediaKind::video) {
                 add_movie(output, std::move(path));

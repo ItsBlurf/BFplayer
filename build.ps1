@@ -101,6 +101,7 @@ try {
         'src\core\library_scanner.cpp',
         'src\core\library_view.cpp',
         'src\core\media_sources.cpp',
+        'src\core\player_settings.cpp',
         'src\core\playlist.cpp',
         'src\core\safe_read_file.cpp',
         'src\core\source_uri.cpp',

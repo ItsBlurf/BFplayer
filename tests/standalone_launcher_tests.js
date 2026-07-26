@@ -16,6 +16,9 @@ const hbldr = fs.readFileSync(
 const libraryUi = fs.readFileSync(
     path.join(root, 'src', 'ui', 'library_ui.cpp'),
     'utf8');
+const player = fs.readFileSync(
+    path.join(root, 'src', 'main.cpp'),
+    'utf8');
 const build = fs.readFileSync(path.join(root, 'build.ps1'), 'utf8');
 
 assert.strictEqual(param.applicationCategoryType, 65536);
@@ -42,6 +45,9 @@ assert.notStrictEqual(uri.port, '8080');
 assert(launcher.includes('#define PS5MC_SERVICE_PORT 9040'));
 assert(launcher.includes('htonl(INADDR_LOOPBACK)'));
 assert(launcher.includes('ps5mc_request_is_launch'));
+assert(launcher.includes('ps5mc_request_is_shutdown'));
+assert(launcher.includes('create_loopback_listener_with_takeover'));
+assert(launcher.includes('request route=/shutdown action=exit'));
 assert(launcher.includes('hbldr_launch_buffer'));
 assert(launcher.includes('build/ps5/ps5-media-center.elf.gz'));
 assert(launcher.includes('inflateInit2'));
@@ -85,6 +91,22 @@ assert(!browserSource.includes('if (status.st_dev != root_status.st_dev)'),
 assert(libraryUi.includes('const std::string initial = "/"'));
 assert(!libraryUi.includes('default_roots()'));
 assert(libraryUi.includes('ADD MEDIA FAILED'));
+assert(libraryUi.includes('LibraryOverlay::controls'));
+assert(libraryUi.includes('LibraryOverlay::settings'));
+assert(libraryUi.includes('Import Selected Folder'));
+assert(libraryUi.includes('notice_label'));
+const bulkImport = fs.readFileSync(
+    path.join(root, 'src', 'core', 'bulk_import.cpp'),
+    'utf8');
+assert(bulkImport.includes('lstat(path.c_str(), &status)'),
+    'PS5 removable-storage bulk import must retain its lstat fallback');
+assert(player.includes('PlaybackOverlay::menu'));
+assert(player.includes('PlaybackOverlay::controls'));
+assert(player.includes('kSettingShortSeekSeconds'));
+assert(player.includes('app.settings.short_seek_seconds'));
+assert(player.includes('app.settings.long_seek_seconds'));
+assert(!player.includes('subtitle_delay_mode'),
+    'D-pad seeking must not be captured by a hidden subtitle-delay mode');
 assert(build.includes('ps5-media-center-standalone.elf'));
 assert(build.includes("'--strip-all'"));
 assert(build.includes('GZipStream'));

@@ -12,6 +12,7 @@ add_library(ps5mc_core STATIC
     src/core/library_scanner.cpp
     src/core/library_view.cpp
     src/core/media_sources.cpp
+    src/core/player_settings.cpp
     src/core/playlist.cpp
     src/core/safe_read_file.cpp
     src/core/source_uri.cpp
@@ -50,6 +51,10 @@ if(BUILD_TESTING)
     add_executable(media_sources_tests tests/media_sources_tests.cpp)
     target_link_libraries(media_sources_tests PRIVATE ps5mc_core)
     add_test(NAME media_sources_tests COMMAND media_sources_tests)
+
+    add_executable(player_settings_tests tests/player_settings_tests.cpp)
+    target_link_libraries(player_settings_tests PRIVATE ps5mc_core)
+    add_test(NAME player_settings_tests COMMAND player_settings_tests)
 
     add_executable(source_uri_tests tests/source_uri_tests.cpp)
     target_link_libraries(source_uri_tests PRIVATE ps5mc_core)

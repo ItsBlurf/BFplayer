@@ -9,6 +9,7 @@
 #include "ps5mc/library_view.hpp"
 #include "ps5mc/media_sources.hpp"
 #include "ps5mc/media_probe.hpp"
+#include "ps5mc/player_settings.hpp"
 #include "ps5mc/video_thumbnail.hpp"
 
 #include <SDL.h>
@@ -31,6 +32,10 @@
 #include <utility>
 #include <vector>
 #include <unistd.h>
+
+#ifndef PS5MC_VERSION
+#define PS5MC_VERSION "development"
+#endif
 
 namespace ps5mc {
 namespace {
@@ -75,6 +80,14 @@ struct FooterHint {
     Label action_label;
 };
 
+enum class LibraryOverlay {
+    none,
+    menu,
+    settings,
+    controls,
+    about,
+};
+
 void destroy_label(Label& label) {
     SDL_DestroyTexture(label.texture);
     label = {};
@@ -91,23 +104,6 @@ Label make_label(SDL_Renderer* renderer, TTF_Font* font, const std::string& text
     label.height = surface->h;
     SDL_FreeSurface(surface);
     return label;
-}
-
-void draw_logo(
-    SDL_Renderer* renderer,
-    SDL_Texture* texture,
-    int center_x,
-    int center_y,
-    int size) {
-    if (!renderer || !texture || size < 1) {
-        return;
-    }
-    SDL_Rect target{
-        center_x - size / 2,
-        center_y - size / 2,
-        size,
-        size};
-    SDL_RenderCopy(renderer, texture, nullptr, &target);
 }
 
 int footer_glyph_width(const FooterHint& hint) {
@@ -443,12 +439,12 @@ struct LibraryUi::Impl {
     std::vector<Label> row_labels;
     Label title_label;
     Label status_label;
+    Label notice_label;
     std::vector<FooterHint> footer_hints;
     Label artwork_label;
     Label empty_title_label;
     Label empty_help_label;
     SDL_Texture* artwork_texture = nullptr;
-    SDL_Texture* logo_texture = nullptr;
     int artwork_width = 0;
     int artwork_height = 0;
     int artwork_generation = -1;
@@ -485,6 +481,11 @@ struct LibraryUi::Impl {
     std::uint64_t pending_remove_until = 0;
     int notice_generation = 0;
     int rendered_notice_generation = -1;
+    LibraryOverlay overlay = LibraryOverlay::none;
+    int overlay_selected = 0;
+    int rendered_overlay = -1;
+    int rendered_overlay_selected = -1;
+    PlayerSettings player_settings;
     bool search_editing = false;
     bool rendered_search_editing = false;
     bool ime_was_visible = false;
@@ -499,6 +500,238 @@ struct LibraryUi::Impl {
     mutable int filtered_cache_sort_mode = -1;
     mutable std::string filtered_cache_query;
     mutable std::string filtered_cache_series_root;
+
+    void load_player_settings() {
+        PlayerSettings loaded{};
+        LibraryDatabase database;
+        if (!database.open(database_path)) {
+            player_settings = loaded;
+            return;
+        }
+        std::string value;
+        int parsed = 0;
+        bool parsed_bool = false;
+        if (database.get_setting(
+                std::string(kSettingVolumePercent),
+                value) &&
+            parse_setting_integer(value, 0, 100, parsed)) {
+            loaded.volume_percent = parsed;
+        }
+        if (database.get_setting(
+                std::string(kSettingShortSeekSeconds),
+                value) &&
+            parse_setting_integer(value, 1, 300, parsed)) {
+            loaded.short_seek_seconds = parsed;
+        }
+        if (database.get_setting(
+                std::string(kSettingLongSeekSeconds),
+                value) &&
+            parse_setting_integer(value, 1, 900, parsed)) {
+            loaded.long_seek_seconds = parsed;
+        }
+        if (database.get_setting(
+                std::string(kSettingOsdDurationMs),
+                value) &&
+            parse_setting_integer(value, 500, 30000, parsed)) {
+            loaded.osd_duration_ms = parsed;
+        }
+        if (database.get_setting(
+                std::string(kSettingResumePlayback),
+                value) &&
+            parse_setting_boolean(value, parsed_bool)) {
+            loaded.resume_playback = parsed_bool;
+        }
+        if (database.get_setting(
+                std::string(kSettingAutoSubtitles),
+                value) &&
+            parse_setting_boolean(value, parsed_bool)) {
+            loaded.auto_subtitles = parsed_bool;
+        }
+        player_settings = normalized_player_settings(loaded);
+    }
+
+    bool persist_player_settings() {
+        const PlayerSettings snapshot =
+            normalized_player_settings(player_settings);
+        LibraryDatabase database;
+        const bool saved =
+            database.open(database_path) &&
+            database.set_setting(
+                std::string(kSettingVolumePercent),
+                std::to_string(snapshot.volume_percent)) &&
+            database.set_setting(
+                std::string(kSettingShortSeekSeconds),
+                std::to_string(snapshot.short_seek_seconds)) &&
+            database.set_setting(
+                std::string(kSettingLongSeekSeconds),
+                std::to_string(snapshot.long_seek_seconds)) &&
+            database.set_setting(
+                std::string(kSettingOsdDurationMs),
+                std::to_string(snapshot.osd_duration_ms)) &&
+            database.set_setting(
+                std::string(kSettingResumePlayback),
+                snapshot.resume_playback ? "1" : "0") &&
+            database.set_setting(
+                std::string(kSettingAutoSubtitles),
+                snapshot.auto_subtitles ? "1" : "0");
+        if (!saved) {
+            last_error =
+                "Unable to save playback settings: " + database.error();
+            diagnostics_log(
+                DiagnosticLevel::error,
+                "player-settings save failed error=%s",
+                database.error().c_str());
+            set_notice(last_error, 8000);
+            return false;
+        }
+        player_settings = snapshot;
+        diagnostics_log(
+            DiagnosticLevel::info,
+            "player-settings saved volume=%d short_seek=%d long_seek=%d osd_ms=%d resume=%d auto_subtitles=%d",
+            snapshot.volume_percent,
+            snapshot.short_seek_seconds,
+            snapshot.long_seek_seconds,
+            snapshot.osd_duration_ms,
+            snapshot.resume_playback ? 1 : 0,
+            snapshot.auto_subtitles ? 1 : 0);
+        return true;
+    }
+
+    void open_overlay(LibraryOverlay next) {
+        SDL_LockMutex(mutex);
+        overlay = next;
+        overlay_selected = 0;
+        ++published_generation;
+        SDL_UnlockMutex(mutex);
+    }
+
+    bool handle_overlay_button(Uint8 button) {
+        LibraryOverlay current = LibraryOverlay::none;
+        int current_selected = 0;
+        SDL_LockMutex(mutex);
+        current = overlay;
+        current_selected = overlay_selected;
+        SDL_UnlockMutex(mutex);
+        if (current == LibraryOverlay::none) {
+            return false;
+        }
+        if (button == kControllerOptionsButton) {
+            open_overlay(LibraryOverlay::none);
+            return false;
+        }
+        if (button == SDL_CONTROLLER_BUTTON_B) {
+            open_overlay(
+                current == LibraryOverlay::menu
+                    ? LibraryOverlay::none
+                    : LibraryOverlay::menu);
+            return false;
+        }
+
+        const int item_count =
+            current == LibraryOverlay::menu
+                ? 5
+                : (current == LibraryOverlay::settings ? 7 : 0);
+        if (item_count > 0 &&
+            (button == SDL_CONTROLLER_BUTTON_DPAD_UP ||
+             button == SDL_CONTROLLER_BUTTON_DPAD_DOWN)) {
+            const int delta =
+                button == SDL_CONTROLLER_BUTTON_DPAD_UP ? -1 : 1;
+            SDL_LockMutex(mutex);
+            overlay_selected =
+                (overlay_selected + item_count + delta) % item_count;
+            ++published_generation;
+            SDL_UnlockMutex(mutex);
+            return false;
+        }
+
+        if (current == LibraryOverlay::menu &&
+            button == SDL_CONTROLLER_BUTTON_A) {
+            switch (current_selected) {
+                case 0:
+                    open_overlay(LibraryOverlay::none);
+                    open_browser();
+                    break;
+                case 1:
+                    open_overlay(LibraryOverlay::controls);
+                    break;
+                case 2:
+                    open_overlay(LibraryOverlay::settings);
+                    break;
+                case 3:
+                    open_overlay(LibraryOverlay::about);
+                    break;
+                case 4:
+                    return true;
+                default:
+                    break;
+            }
+            return false;
+        }
+
+        if (current != LibraryOverlay::settings) {
+            return false;
+        }
+        if (button == SDL_CONTROLLER_BUTTON_X) {
+            player_settings = {};
+            (void)persist_player_settings();
+            SDL_LockMutex(mutex);
+            ++published_generation;
+            SDL_UnlockMutex(mutex);
+            return false;
+        }
+        if (button != SDL_CONTROLLER_BUTTON_A &&
+            button != SDL_CONTROLLER_BUTTON_DPAD_LEFT &&
+            button != SDL_CONTROLLER_BUTTON_DPAD_RIGHT) {
+            return false;
+        }
+        const int direction =
+            button == SDL_CONTROLLER_BUTTON_DPAD_LEFT ? -1 : 1;
+        switch (current_selected) {
+            case 0:
+                player_settings.volume_percent =
+                    std::clamp(
+                        player_settings.volume_percent + direction * 5,
+                        0,
+                        100);
+                break;
+            case 1:
+                player_settings.short_seek_seconds =
+                    next_short_seek_seconds(
+                        player_settings.short_seek_seconds,
+                        direction);
+                break;
+            case 2:
+                player_settings.long_seek_seconds =
+                    next_long_seek_seconds(
+                        player_settings.long_seek_seconds,
+                        direction);
+                break;
+            case 3:
+                player_settings.osd_duration_ms =
+                    next_osd_duration_ms(
+                        player_settings.osd_duration_ms,
+                        direction);
+                break;
+            case 4:
+                player_settings.resume_playback =
+                    !player_settings.resume_playback;
+                break;
+            case 5:
+                player_settings.auto_subtitles =
+                    !player_settings.auto_subtitles;
+                break;
+            case 6:
+                player_settings = {};
+                break;
+            default:
+                return false;
+        }
+        (void)persist_player_settings();
+        SDL_LockMutex(mutex);
+        ++published_generation;
+        SDL_UnlockMutex(mutex);
+        return false;
+    }
 
     const std::vector<std::size_t>& filtered_indices_locked() const {
         if (filtered_cache_generation == published_generation &&
@@ -912,8 +1145,8 @@ struct LibraryUi::Impl {
         start_scan();
     }
 
-    void bulk_import_current_folder(const std::string& current) {
-        if (current == "/") {
+    void bulk_import_folder(const std::string& target) {
+        if (target == "/") {
             set_notice("Choose a media folder before using Import Library");
             return;
         }
@@ -921,32 +1154,56 @@ struct LibraryUi::Impl {
         diagnostics_log(
             DiagnosticLevel::info,
             "bulk-import begin root=%s",
-            current.c_str());
+            target.c_str());
+        set_notice(
+            "Checking " + media_source_default_title(target) +
+            " for movies and TV shows...",
+            30000);
         const BulkImportResult result =
-            discover_bulk_media_sources(current);
+            discover_bulk_media_sources(target);
         if (!result.ok()) {
             diagnostics_log(
                 DiagnosticLevel::error,
                 "bulk-import failed root=%s path=%s errno=%d",
-                current.c_str(),
+                target.c_str(),
                 result.fatal_path.c_str(),
                 result.fatal_errno);
             set_notice(
-                "IMPORT FAILED  |  " +
-                (result.fatal_path.empty() ? current : result.fatal_path));
+                "Import failed (error " +
+                std::to_string(result.fatal_errno) + "): " +
+                (result.fatal_path.empty() ? target : result.fatal_path),
+                8000);
+            (void)start_scan();
             return;
         }
         if (result.sources.empty()) {
-            set_notice("No loose movies or TV-show folders found here");
+            diagnostics_log(
+                DiagnosticLevel::warning,
+                "bulk-import empty root=%s checked=%zu stat_fallbacks=%zu unreadable=%zu symlinks=%zu devices=%zu",
+                target.c_str(),
+                result.entries_checked,
+                result.stat_fallbacks,
+                result.unreadable_entries,
+                result.skipped_symlinks,
+                result.skipped_devices);
+            set_notice(
+                result.unreadable_entries > 0
+                    ? "Nothing imported; some folder entries could not be read"
+                    : "No movies or TV-show folders were found in " +
+                          media_source_default_title(target),
+                8000);
+            (void)start_scan();
             return;
         }
         diagnostics_log(
             DiagnosticLevel::info,
-            "bulk-import complete root=%s movies=%zu shows=%zu checked=%zu symlinks=%zu devices=%zu",
-            current.c_str(),
+            "bulk-import complete root=%s movies=%zu shows=%zu checked=%zu stat_fallbacks=%zu unreadable=%zu symlinks=%zu devices=%zu",
+            target.c_str(),
             result.loose_movies,
             result.tv_folders,
             result.entries_checked,
+            result.stat_fallbacks,
+            result.unreadable_entries,
             result.skipped_symlinks,
             result.skipped_devices);
         add_sources(
@@ -1157,7 +1414,10 @@ struct LibraryUi::Impl {
                 }
                 break;
             case SDL_CONTROLLER_BUTTON_X:
-                bulk_import_current_folder(current);
+                bulk_import_folder(
+                    has_highlighted && highlighted.directory
+                        ? highlighted.path
+                        : current);
                 break;
             case SDL_CONTROLLER_BUTTON_B:
                 browser_parent();
@@ -1363,6 +1623,7 @@ struct LibraryUi::Impl {
         row_labels.clear();
         destroy_label(title_label);
         destroy_label(status_label);
+        destroy_label(notice_label);
         for (FooterHint& hint : footer_hints) {
             destroy_label(hint.button_label);
             destroy_label(hint.action_label);
@@ -2005,6 +2266,7 @@ struct LibraryUi::Impl {
             std::vector<BrowserEntry> visible_browser;
             std::string current_path;
             std::string browser_notice;
+            bool selected_is_directory = false;
             int total = 0;
             SDL_LockMutex(mutex);
             const std::uint64_t now = SDL_GetTicks64();
@@ -2029,6 +2291,9 @@ struct LibraryUi::Impl {
             }
             current_path = browser_path;
             browser_notice = notice;
+            selected_is_directory =
+                selected >= 0 && selected < total &&
+                browser_entries[static_cast<std::size_t>(selected)].directory;
             rendered_generation = published_generation;
             rendered_selected = selected;
             rendered_first = first_visible;
@@ -2038,14 +2303,13 @@ struct LibraryUi::Impl {
             rendered_search_edit = search_edit;
             rendered_search_editing = search_editing;
             rendered_notice_generation = notice_generation;
+            rendered_overlay = static_cast<int>(LibraryOverlay::none);
+            rendered_overlay_selected = 0;
             SDL_UnlockMutex(mutex);
 
             title_label = make_label(renderer, title_font, "Add Media Source", white);
             std::string browser_status =
                 current_path + "  |  " + std::to_string(total) + " ITEMS";
-            if (!browser_notice.empty()) {
-                browser_status += "  |  " + browser_notice;
-            }
             status_label = make_label(
                 renderer,
                 row_font,
@@ -2054,9 +2318,24 @@ struct LibraryUi::Impl {
                     std::move(browser_status),
                     kUiWidth - 112),
                 muted);
+            if (!browser_notice.empty()) {
+                notice_label = make_label(
+                    renderer,
+                    row_font,
+                    fit_text_to_width(
+                        row_font,
+                        std::move(browser_notice),
+                        kUiWidth - 180),
+                    white);
+            }
             add_footer_hint(FooterGlyph::cross, "", "Open / Add Movie");
             add_footer_hint(FooterGlyph::triangle, "", "Add TV Folder");
-            add_footer_hint(FooterGlyph::square, "", "Import This Library");
+            add_footer_hint(
+                FooterGlyph::square,
+                "",
+                selected_is_directory
+                    ? "Import Selected Folder"
+                    : "Import Current Folder");
             add_footer_hint(FooterGlyph::circle, "", "Up");
             add_footer_hint(FooterGlyph::options, "", "Close");
             artwork_label = make_label(
@@ -2077,6 +2356,130 @@ struct LibraryUi::Impl {
             return;
         }
 
+        LibraryOverlay active_overlay = LibraryOverlay::none;
+        int active_overlay_selected = 0;
+        PlayerSettings active_player_settings{};
+        SDL_LockMutex(mutex);
+        active_overlay = overlay;
+        active_overlay_selected = overlay_selected;
+        active_player_settings = player_settings;
+        SDL_UnlockMutex(mutex);
+        if (active_overlay != LibraryOverlay::none) {
+            clear_artwork();
+            std::vector<std::string> rows;
+            std::string title;
+            std::string subtitle;
+            switch (active_overlay) {
+                case LibraryOverlay::menu:
+                    title = "Media Center";
+                    subtitle = "Choose what you want to do";
+                    rows = {
+                        "Add media",
+                        "Controls & shortcuts",
+                        "Playback settings",
+                        "About & diagnostics",
+                        "Exit Media Center",
+                    };
+                    add_footer_hint(FooterGlyph::cross, "", "Select");
+                    add_footer_hint(FooterGlyph::circle, "", "Close");
+                    break;
+                case LibraryOverlay::settings:
+                    title = "Playback settings";
+                    subtitle = "Changes are saved automatically";
+                    rows = {
+                        "Default volume                                      " +
+                            std::to_string(active_player_settings.volume_percent) +
+                            "%",
+                        "Short seek step                                    " +
+                            std::to_string(active_player_settings.short_seek_seconds) +
+                            " seconds",
+                        "Long seek step                                     " +
+                            std::to_string(active_player_settings.long_seek_seconds) +
+                            " seconds",
+                        "On-screen display                                  " +
+                            std::to_string(
+                                active_player_settings.osd_duration_ms / 1000) +
+                            " seconds",
+                        std::string("Resume where I stopped                              ") +
+                            (active_player_settings.resume_playback ? "On" : "Off"),
+                        std::string("Automatically select subtitles                     ") +
+                            (active_player_settings.auto_subtitles ? "On" : "Off"),
+                        "Restore playback defaults",
+                    };
+                    add_footer_hint(FooterGlyph::dpad, "", "Change");
+                    add_footer_hint(FooterGlyph::cross, "", "Change");
+                    add_footer_hint(FooterGlyph::square, "", "Reset All");
+                    add_footer_hint(FooterGlyph::circle, "", "Back");
+                    break;
+                case LibraryOverlay::controls:
+                    title = "Controls";
+                    subtitle = "Library first, playback second";
+                    rows = {
+                        "Cross        Open or play                         Play / pause",
+                        "Circle       Queue or go back                     Subtitle track",
+                        "Square       Import selected library              Audio track",
+                        "Triangle     Add or remove a TV show              Video track",
+                        "D-pad        Navigate and change category         Seek short / long",
+                        "L1 / R1      Previous or next page                 Previous / next chapter",
+                        "L3 / R3      Favorite / sort                      Volume down / up",
+                        "Touchpad     Add media                             Full controls",
+                        "L2/R2 + Triangle                                  Crop / aspect / scale",
+                        "Options      Menu                                  Playback menu",
+                    };
+                    add_footer_hint(FooterGlyph::circle, "", "Back");
+                    break;
+                case LibraryOverlay::about:
+                    title = "About PS5 Media Center";
+                    subtitle = "Private test software for your jailbroken PS5";
+                    rows = {
+                        "Standalone native PS5 payload",
+                        "FFmpeg 7.0.1 with SDL_kitchensink and SDL2",
+                        "Library and logs: /data/PS5-MediaCenter",
+                        "Dashboard title: PSMC00001 (Media)",
+                        "Build: " PS5MC_VERSION,
+                    };
+                    add_footer_hint(FooterGlyph::circle, "", "Back");
+                    break;
+                case LibraryOverlay::none:
+                    break;
+            }
+            title_label = make_label(renderer, title_font, title, white);
+            status_label = make_label(renderer, row_font, subtitle, muted);
+            std::string active_notice;
+            SDL_LockMutex(mutex);
+            if (!notice.empty() && SDL_GetTicks64() >= notice_until) {
+                notice.clear();
+                ++notice_generation;
+            }
+            active_notice = notice;
+            rendered_notice_generation = notice_generation;
+            SDL_UnlockMutex(mutex);
+            if (!active_notice.empty()) {
+                notice_label = make_label(
+                    renderer,
+                    row_font,
+                    fit_text_to_width(
+                        row_font,
+                        std::move(active_notice),
+                        kUiWidth - 180),
+                    white);
+            }
+            for (std::string& row : rows) {
+                row_labels.push_back(make_label(
+                    renderer,
+                    row_font,
+                    fit_text_to_width(row_font, std::move(row), kUiWidth - 180),
+                    white));
+            }
+            rendered_generation = published_generation;
+            rendered_overlay = static_cast<int>(active_overlay);
+            rendered_overlay_selected = active_overlay_selected;
+            rendered_selected = selected;
+            rendered_first = first_visible;
+            rendered_notice_generation = notice_generation;
+            return;
+        }
+
         std::string series_root;
         SDL_LockMutex(mutex);
         series_root = active_series_root;
@@ -2085,25 +2488,18 @@ struct LibraryUi::Impl {
             renderer,
             title_font,
             series_root.empty()
-                ? "PS5 Media Center"
-                : "TV Show  |  " + media_source_default_title(series_root),
+                ? "Library"
+                : media_source_default_title(series_root),
             white);
         if (series_root.empty()) {
             add_footer_hint(FooterGlyph::cross, "", "Play");
-            add_footer_hint(FooterGlyph::circle, "", "Queue");
-            add_footer_hint(FooterGlyph::dpad, "", "Category");
-            add_footer_hint(FooterGlyph::text_button, "L3", "Favorite");
             add_footer_hint(FooterGlyph::touchpad, "", "Add Media");
-            add_footer_hint(FooterGlyph::text_button, "R3", "Sort");
-            add_footer_hint(FooterGlyph::triangle, "", "Remove");
-            add_footer_hint(FooterGlyph::options, "", "Exit");
+            add_footer_hint(FooterGlyph::options, "", "Menu");
         } else {
             add_footer_hint(FooterGlyph::cross, "", "Play Episode");
             add_footer_hint(FooterGlyph::circle, "", "Back");
-            add_footer_hint(FooterGlyph::text_button, "L1/R1", "Page");
             add_footer_hint(FooterGlyph::touchpad, "", "Add Media");
-            add_footer_hint(FooterGlyph::triangle, "", "Remove Show");
-            add_footer_hint(FooterGlyph::options, "", "Exit");
+            add_footer_hint(FooterGlyph::options, "", "Menu");
         }
 
         std::vector<MediaEntry> visible;
@@ -2170,6 +2566,8 @@ struct LibraryUi::Impl {
         rendered_search_edit = search_edit;
         rendered_search_editing = search_editing;
         rendered_notice_generation = notice_generation;
+        rendered_overlay = static_cast<int>(LibraryOverlay::none);
+        rendered_overlay_selected = 0;
         SDL_UnlockMutex(mutex);
 
         update_artwork(active_media_path, active_generation);
@@ -2196,14 +2594,21 @@ struct LibraryUi::Impl {
         if (is_scanning) {
             status += "  |  INDEXING SELECTED SOURCES...";
         }
-        if (!active_notice.empty()) {
-            status += "  |  " + active_notice;
-        }
         status_label = make_label(
             renderer,
             row_font,
             fit_text_to_width(row_font, std::move(status), kUiWidth - 220),
             muted);
+        if (!active_notice.empty()) {
+            notice_label = make_label(
+                renderer,
+                row_font,
+                fit_text_to_width(
+                    row_font,
+                    std::move(active_notice),
+                    kUiWidth - 180),
+                white);
+        }
         if (total == 0) {
             empty_title_label = make_label(
                 renderer,
@@ -2215,7 +2620,7 @@ struct LibraryUi::Impl {
                 row_font,
                 is_scanning
                     ? "Indexing the media sources you selected..."
-                    : "Press the touchpad to add a movie or TV-show folder.",
+                    : "Press the touchpad or open Options to add media.",
                 muted);
         }
         std::string artwork_status;
@@ -2293,10 +2698,11 @@ bool LibraryUi::open(
     const std::vector<MediaSource>& initial_sources) {
     close();
     impl_->renderer = renderer;
-    if (!renderer || font_path.empty() || logo_path.empty()) {
+    if (!renderer || font_path.empty()) {
         impl_->last_error = "LibraryUi::open: invalid argument";
         return false;
     }
+    (void)logo_path;
     if (TTF_Init() != 0) {
         impl_->last_error = std::string("TTF_Init: ") + TTF_GetError();
         return false;
@@ -2306,26 +2712,6 @@ bool LibraryUi::open(
     impl_->footer_font = TTF_OpenFont(font_path.c_str(), 22);
     if (!impl_->title_font || !impl_->row_font || !impl_->footer_font) {
         impl_->last_error = std::string("TTF_OpenFont: ") + TTF_GetError();
-        close();
-        return false;
-    }
-    SDL_RWops* logo_source = SDL_RWFromFile(logo_path.c_str(), "rb");
-    SDL_Surface* logo_surface =
-        logo_source ? IMG_LoadPNG_RW(logo_source) : nullptr;
-    if (logo_source) {
-        SDL_RWclose(logo_source);
-    }
-    if (!logo_surface) {
-        impl_->last_error = std::string("Logo load: ") + IMG_GetError();
-        close();
-        return false;
-    }
-    impl_->logo_texture =
-        SDL_CreateTextureFromSurface(renderer, logo_surface);
-    SDL_FreeSurface(logo_surface);
-    if (!impl_->logo_texture) {
-        impl_->last_error =
-            std::string("Logo texture: ") + SDL_GetError();
         close();
         return false;
     }
@@ -2342,6 +2728,7 @@ bool LibraryUi::open(
             errno);
     }
     impl_->load_cache();
+    impl_->load_player_settings();
     bool sources_changed = false;
     for (MediaSource source : initial_sources) {
         source.path = normalize_media_source_path(std::move(source.path));
@@ -2436,8 +2823,6 @@ void LibraryUi::close() {
     }
     impl_->clear_labels();
     impl_->clear_artwork();
-    SDL_DestroyTexture(impl_->logo_texture);
-    impl_->logo_texture = nullptr;
     if (impl_->title_font) {
         TTF_CloseFont(impl_->title_font);
         impl_->title_font = nullptr;
@@ -2459,6 +2844,8 @@ void LibraryUi::close() {
     }
     impl_->renderer = nullptr;
     impl_->entries.clear();
+    impl_->overlay = LibraryOverlay::none;
+    impl_->overlay_selected = 0;
 }
 
 LibraryAction LibraryUi::handle_event(const SDL_Event& event, std::string& selected_path) {
@@ -2469,6 +2856,7 @@ LibraryAction LibraryUi::handle_event(const SDL_Event& event, std::string& selec
     SDL_LockMutex(impl_->mutex);
     const bool editing_search = impl_->search_editing;
     const bool browsing = impl_->browser_mode;
+    const bool overlay_open = impl_->overlay != LibraryOverlay::none;
     SDL_UnlockMutex(impl_->mutex);
 
     if (event.type == SDL_QUIT) {
@@ -2508,10 +2896,52 @@ LibraryAction LibraryUi::handle_event(const SDL_Event& event, std::string& selec
         if (duplicate_down) {
             return LibraryAction::none;
         }
+        if (overlay_open) {
+            return impl_->handle_overlay_button(event.cbutton.button)
+                ? LibraryAction::exit
+                : LibraryAction::none;
+        }
         if (browsing) {
             impl_->handle_browser_button(event.cbutton.button);
             return LibraryAction::none;
         }
+    }
+
+    if (overlay_open && event.type == SDL_KEYDOWN) {
+        int button = -1;
+        switch (event.key.keysym.sym) {
+            case SDLK_RETURN:
+            case SDLK_KP_ENTER:
+                button = SDL_CONTROLLER_BUTTON_A;
+                break;
+            case SDLK_ESCAPE:
+            case SDLK_BACKSPACE:
+                button = SDL_CONTROLLER_BUTTON_B;
+                break;
+            case SDLK_UP:
+                button = SDL_CONTROLLER_BUTTON_DPAD_UP;
+                break;
+            case SDLK_DOWN:
+                button = SDL_CONTROLLER_BUTTON_DPAD_DOWN;
+                break;
+            case SDLK_LEFT:
+                button = SDL_CONTROLLER_BUTTON_DPAD_LEFT;
+                break;
+            case SDLK_RIGHT:
+                button = SDL_CONTROLLER_BUTTON_DPAD_RIGHT;
+                break;
+            case SDLK_x:
+                button = SDL_CONTROLLER_BUTTON_X;
+                break;
+            default:
+                break;
+        }
+        if (button >= 0) {
+            return impl_->handle_overlay_button(static_cast<Uint8>(button))
+                ? LibraryAction::exit
+                : LibraryAction::none;
+        }
+        return LibraryAction::none;
     }
 
     if (editing_search && event.type == SDL_TEXTINPUT) {
@@ -2616,8 +3046,8 @@ LibraryAction LibraryUi::handle_event(const SDL_Event& event, std::string& selec
                 toggle_favorite = true;
                 break;
             case kControllerOptionsButton:
-                exit = true;
-                break;
+                impl_->open_overlay(LibraryOverlay::menu);
+                return LibraryAction::none;
             default:
                 break;
         }
@@ -2665,8 +3095,14 @@ LibraryAction LibraryUi::handle_event(const SDL_Event& event, std::string& selec
                 delta = kVisibleRows;
                 break;
             case SDLK_ESCAPE:
-                exit = true;
-                break;
+                impl_->open_overlay(LibraryOverlay::menu);
+                return LibraryAction::none;
+            case SDLK_F1:
+                impl_->open_overlay(LibraryOverlay::controls);
+                return LibraryAction::none;
+            case SDLK_F2:
+                impl_->open_overlay(LibraryOverlay::settings);
+                return LibraryAction::none;
             default:
                 break;
         }
@@ -2787,6 +3223,8 @@ void LibraryUi::render() {
     const bool dirty = impl_->rendered_generation != impl_->published_generation ||
                        impl_->rendered_selected != impl_->selected ||
                        impl_->rendered_first != impl_->first_visible ||
+                       impl_->rendered_overlay != static_cast<int>(impl_->overlay) ||
+                       impl_->rendered_overlay_selected != impl_->overlay_selected ||
                        impl_->rendered_filter != impl_->filter ||
                        impl_->rendered_sort_mode != static_cast<int>(impl_->sort_mode) ||
                        impl_->rendered_search_query != impl_->search_query ||
@@ -2802,56 +3240,50 @@ void LibraryUi::render() {
     SDL_SetRenderDrawColor(impl_->renderer, 5, 9, 19, 255);
     SDL_RenderClear(impl_->renderer);
 
-    // Header rail uses the exact installed dashboard artwork so branding stays
-    // identical in the tile, switcher, and player.
-    SDL_SetRenderDrawColor(impl_->renderer, 12, 20, 38, 255);
-    SDL_Rect header{0, 0, kUiWidth, 202};
+    SDL_SetRenderDrawColor(impl_->renderer, 9, 16, 30, 255);
+    SDL_Rect header{0, 0, kUiWidth, 190};
     SDL_RenderFillRect(impl_->renderer, &header);
     SDL_SetRenderDrawColor(impl_->renderer, 25, 44, 78, 255);
-    SDL_Rect header_shadow{0, 202, kUiWidth, 8};
+    SDL_Rect header_shadow{0, 190, kUiWidth, 2};
     SDL_RenderFillRect(impl_->renderer, &header_shadow);
-    SDL_SetRenderDrawColor(impl_->renderer, 47, 137, 255, 255);
-    SDL_Rect header_accent{0, 202, kUiWidth, 2};
-    SDL_RenderFillRect(impl_->renderer, &header_accent);
-    draw_logo(impl_->renderer, impl_->logo_texture, 82, 92, 112);
 
     if (impl_->title_label.texture) {
-        SDL_Rect target{146, 40, impl_->title_label.width, impl_->title_label.height};
+        SDL_Rect target{58, 40, impl_->title_label.width, impl_->title_label.height};
         SDL_RenderCopy(impl_->renderer, impl_->title_label.texture, nullptr, &target);
     }
     if (impl_->status_label.texture) {
-        SDL_SetRenderDrawColor(impl_->renderer, 20, 34, 61, 255);
-        SDL_Rect status_pill{
-            146,
-            112,
-            std::min(impl_->status_label.width + 42, kUiWidth - 202),
-            46};
-        SDL_RenderFillRect(impl_->renderer, &status_pill);
-        SDL_SetRenderDrawColor(impl_->renderer, 244, 178, 42, 255);
-        SDL_Rect status_accent{146, 112, 5, 46};
-        SDL_RenderFillRect(impl_->renderer, &status_accent);
         SDL_Rect target{
-            166,
-            112 + (46 - impl_->status_label.height) / 2,
+            58,
+            119,
             impl_->status_label.width,
             impl_->status_label.height};
         SDL_RenderCopy(impl_->renderer, impl_->status_label.texture, nullptr, &target);
     }
 
+    const bool overlay_open = impl_->overlay != LibraryOverlay::none;
+    const int active_selection =
+        overlay_open ? impl_->overlay_selected : impl_->selected;
+    const int active_first = overlay_open ? 0 : impl_->first_visible;
+    const int content_width =
+        overlay_open ? kUiWidth - 84 : kListWidth;
     SDL_SetRenderDrawColor(impl_->renderer, 9, 16, 30, 255);
-    SDL_Rect list_panel{42, kRowsTop - 12, kListWidth, kArtworkPanelHeight + 24};
+    SDL_Rect list_panel{
+        42,
+        kRowsTop - 12,
+        content_width,
+        kArtworkPanelHeight + 24};
     SDL_RenderFillRect(impl_->renderer, &list_panel);
     SDL_SetRenderDrawColor(impl_->renderer, 25, 42, 71, 255);
     SDL_RenderDrawRect(impl_->renderer, &list_panel);
 
     for (int row = 0; row < static_cast<int>(impl_->row_labels.size()); ++row) {
-        const int absolute = impl_->first_visible + row;
+        const int absolute = active_first + row;
         SDL_Rect background{
             56,
             kRowsTop + row * kRowHeight,
-            kListWidth - 28,
+            content_width - 28,
             kRowHeight - 7};
-        if (absolute == impl_->selected) {
+        if (absolute == active_selection) {
             SDL_SetRenderDrawColor(impl_->renderer, 27, 61, 111, 255);
         } else {
             SDL_SetRenderDrawColor(
@@ -2862,7 +3294,7 @@ void LibraryUi::render() {
                 255);
         }
         SDL_RenderFillRect(impl_->renderer, &background);
-        if (absolute == impl_->selected) {
+        if (absolute == active_selection) {
             SDL_SetRenderDrawColor(impl_->renderer, 244, 178, 42, 255);
             SDL_Rect selector{background.x, background.y, 7, background.h};
             SDL_RenderFillRect(impl_->renderer, &selector);
@@ -2883,11 +3315,10 @@ void LibraryUi::render() {
     }
 
     if (impl_->row_labels.empty()) {
-        draw_logo(impl_->renderer, impl_->logo_texture, 656, 522, 174);
         if (impl_->empty_title_label.texture) {
             SDL_Rect target{
                 656 - impl_->empty_title_label.width / 2,
-                666,
+                560,
                 impl_->empty_title_label.width,
                 impl_->empty_title_label.height};
             SDL_RenderCopy(
@@ -2899,7 +3330,7 @@ void LibraryUi::render() {
         if (impl_->empty_help_label.texture) {
             SDL_Rect target{
                 656 - impl_->empty_help_label.width / 2,
-                730,
+                630,
                 impl_->empty_help_label.width,
                 impl_->empty_help_label.height};
             SDL_RenderCopy(
@@ -2910,16 +3341,21 @@ void LibraryUi::render() {
         }
     }
 
-    SDL_SetRenderDrawColor(impl_->renderer, 11, 20, 37, 255);
-    SDL_Rect artwork_panel{
-        kArtworkPanelX,
-        kRowsTop - 12,
-        kArtworkPanelWidth,
-        kArtworkPanelHeight + 24};
-    SDL_RenderFillRect(impl_->renderer, &artwork_panel);
-    SDL_SetRenderDrawColor(impl_->renderer, 25, 42, 71, 255);
-    SDL_RenderDrawRect(impl_->renderer, &artwork_panel);
-    if (impl_->artwork_texture && impl_->artwork_width > 0 && impl_->artwork_height > 0) {
+    if (!overlay_open) {
+        SDL_SetRenderDrawColor(impl_->renderer, 11, 20, 37, 255);
+        SDL_Rect artwork_panel{
+            kArtworkPanelX,
+            kRowsTop - 12,
+            kArtworkPanelWidth,
+            kArtworkPanelHeight + 24};
+        SDL_RenderFillRect(impl_->renderer, &artwork_panel);
+        SDL_SetRenderDrawColor(impl_->renderer, 25, 42, 71, 255);
+        SDL_RenderDrawRect(impl_->renderer, &artwork_panel);
+    }
+    if (!overlay_open &&
+        impl_->artwork_texture &&
+        impl_->artwork_width > 0 &&
+        impl_->artwork_height > 0) {
         const int available_width = kArtworkPanelWidth - 48;
         const int available_height = kArtworkPanelHeight - 104;
         const double scale = std::min(
@@ -2936,7 +3372,7 @@ void LibraryUi::render() {
         SDL_Rect frame{target.x - 8, target.y - 8, target.w + 16, target.h + 16};
         SDL_RenderFillRect(impl_->renderer, &frame);
         SDL_RenderCopy(impl_->renderer, impl_->artwork_texture, nullptr, &target);
-    } else {
+    } else if (!overlay_open) {
         SDL_SetRenderDrawColor(impl_->renderer, 15, 28, 51, 255);
         SDL_Rect empty_art{
             kArtworkPanelX + 34,
@@ -2947,13 +3383,36 @@ void LibraryUi::render() {
         SDL_SetRenderDrawColor(impl_->renderer, 28, 49, 82, 255);
         SDL_RenderDrawRect(impl_->renderer, &empty_art);
     }
-    if (impl_->artwork_label.texture) {
+    if (!overlay_open && impl_->artwork_label.texture) {
         SDL_Rect target{
             kArtworkPanelX + (kArtworkPanelWidth - impl_->artwork_label.width) / 2,
             kRowsTop + kArtworkPanelHeight - impl_->artwork_label.height - 6,
             impl_->artwork_label.width,
             impl_->artwork_label.height};
         SDL_RenderCopy(impl_->renderer, impl_->artwork_label.texture, nullptr, &target);
+    }
+
+    if (impl_->notice_label.texture) {
+        const int width = std::min(impl_->notice_label.width + 64, kUiWidth - 116);
+        SDL_Rect toast{
+            (kUiWidth - width) / 2,
+            914,
+            width,
+            58};
+        SDL_SetRenderDrawColor(impl_->renderer, 24, 72, 126, 245);
+        SDL_RenderFillRect(impl_->renderer, &toast);
+        SDL_SetRenderDrawColor(impl_->renderer, 83, 164, 255, 255);
+        SDL_RenderDrawRect(impl_->renderer, &toast);
+        SDL_Rect target{
+            toast.x + (toast.w - impl_->notice_label.width) / 2,
+            toast.y + (toast.h - impl_->notice_label.height) / 2,
+            impl_->notice_label.width,
+            impl_->notice_label.height};
+        SDL_RenderCopy(
+            impl_->renderer,
+            impl_->notice_label.texture,
+            nullptr,
+            &target);
     }
 
     SDL_SetRenderDrawColor(impl_->renderer, 10, 18, 33, 255);

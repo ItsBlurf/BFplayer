@@ -11,11 +11,11 @@ player logs. Stop on a console disconnect, black screen that does not recover,
 or a fatal filesystem error.
 
 1. With HBL uninstalled and `/data/homebrew/PS5-MediaCenter` absent, inject only
-   the alpha.13 standalone payload. Verify it removes the obsolete Games
+   the alpha.14 standalone payload. Verify it removes the obsolete Games
    entry, recreates its files, leaves exactly one dashboard tile in Media, and
    shows the
    Media Center icon in the active-app switcher, launches with no media
-   argument, and exits cleanly with Options. Verify the dark launch countdown
+   argument, and exits cleanly through the Options menu. Verify the dark launch countdown
    returns/closes, or follow its PS-button fallback.
 2. Play a local 720p H.264/AAC MP4 with no subtitles for ten minutes.
 3. Pause/resume and seek repeatedly; verify A/V sync and clean return.
@@ -35,7 +35,7 @@ or a fatal filesystem error.
    Continue Watching, Recently Played, title, duration, resolution, and codec
    metadata, then modify one file and confirm only that metadata is refreshed.
    Use Circle on an episode and verify Play From Here advances only after a
-   natural ending; Options must stop the queue and return immediately. Press
+   natural ending; Options then Return to library must stop the queue. Press
    Touchpad and verify Add Media Source opens without an IME or black screen.
    Add one file as a Movie and one folder as a TV Show, then verify the show
    opens to a naturally ordered episode list. Verify R3 cycles all six
@@ -45,9 +45,9 @@ or a fatal filesystem error.
    and verify the choice persisted without pausing navigation. Play local M3U,
    PLS, and XSPF lists containing relative paths and confirm order, automatic
    advance, unsupported-entry filtering, and visible malformed-list errors.
-   Use Square in a chosen folder and verify loose videos become Movies while
-   child folders containing videos become TV Shows. Confirm Square is rejected
-   at `/`. Press Triangle twice to remove a Movie and a TV Show and confirm
+   Use Square on a highlighted chosen folder and verify loose videos become
+   Movies while child folders containing videos become TV Shows. Confirm
+   Square is rejected at `/`. Press Triangle twice to remove a Movie and a TV Show and confirm
    only their library rows disappear. Add title-specific and folder-level
    JPEG/PNG artwork and confirm priority/aspect ratio. For a title without
    artwork, verify an interior video-frame preview appears and the old logo

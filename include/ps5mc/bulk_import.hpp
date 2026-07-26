@@ -15,6 +15,8 @@ struct BulkImportResult {
     std::size_t entries_checked = 0;
     std::size_t skipped_symlinks = 0;
     std::size_t skipped_devices = 0;
+    std::size_t stat_fallbacks = 0;
+    std::size_t unreadable_entries = 0;
     int fatal_errno = 0;
     std::string fatal_path;
 
@@ -27,7 +29,8 @@ struct BulkImportResult {
 //   Show source, with episodes discovered recursively by the normal scanner.
 //
 // The console filesystem implementation never follows symlinks and never
-// crosses the selected root's st_dev.
+// crosses the selected root's st_dev. Descriptor-relative stat failures on
+// PS5 removable storage fall back to lstat without following symlinks.
 [[nodiscard]] BulkImportResult discover_bulk_media_sources(
     const std::string& selected_root);
 

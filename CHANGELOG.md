@@ -1,5 +1,43 @@
 # Changelog
 
+## 0.1.0-alpha.14 - import and complete-player test build
+
+### Add Media repair
+
+- Fixed bulk import on PS5 removable/exFAT storage by falling back from
+  descriptor-relative stat to a no-follow path stat when the mount exposes an
+  entry but rejects `fstatat`.
+- Made Square import the highlighted directory, or the current directory when
+  a file is highlighted, with contextual footer text.
+- Added explicit import-empty/failure diagnostics and a dedicated visible
+  notification instead of hiding the result at the clipped end of a status
+  line.
+
+### Complete playback controls
+
+- Replaced immediate Options-to-exit with an in-player menu for Resume,
+  Controls, Subtitle timing, and Return to library.
+- Added complete in-app library and playback control references.
+- Restored D-pad to predictable seeking at all times; subtitle timing is now a
+  visible playback-menu setting instead of a hidden modal control takeover.
+- Added persistent settings for default volume, short and long seek steps, OSD
+  duration, resume behavior, and automatic subtitle selection.
+
+### Interface audit
+
+- Removed repeated old-logo rendering and decorative fake artwork from the
+  runtime library and preview.
+- Simplified the main library footer and promoted advanced actions to the
+  Options/Controls pages.
+- Added a documented product/UX and current build-input audit.
+
+### Test-build replacement
+
+- Added a loopback-only graceful shutdown/takeover route so a newer standalone
+  payload can replace an already-resident alpha.14-or-newer launcher instead
+  of failing to bind port 9040. The first upgrade from alpha.13 still requires
+  ending that older launcher once because it does not implement the route.
+
 ## 0.1.0-alpha.13 - single-tile test build
 
 ### Dashboard registration

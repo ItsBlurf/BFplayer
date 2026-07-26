@@ -22,6 +22,7 @@
 #include <string.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
+#include <sys/time.h>
 #include <time.h>
 #include <unistd.h>
 #include <zlib.h>
@@ -419,10 +420,99 @@ static int create_loopback_listener(void) {
     address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
     if (bind(listener, (struct sockaddr*)&address, sizeof(address)) != 0 ||
         listen(listener, 2) != 0) {
+        const int error = errno;
         close(listener);
+        errno = error;
         return -1;
     }
     return listener;
+}
+
+static int request_existing_launcher_shutdown(void) {
+    static const char request[] =
+        "GET /shutdown HTTP/1.1\r\n"
+        "Host: 127.0.0.1\r\n"
+        "Connection: close\r\n\r\n";
+    struct sockaddr_in address;
+    char response[128];
+    int connection = socket(AF_INET, SOCK_STREAM, 0);
+    size_t sent = 0;
+    ssize_t received;
+    struct timeval timeout = {1, 0};
+
+    if (connection < 0) {
+        return -1;
+    }
+    (void)setsockopt(
+        connection,
+        SOL_SOCKET,
+        SO_SNDTIMEO,
+        &timeout,
+        sizeof(timeout));
+    (void)setsockopt(
+        connection,
+        SOL_SOCKET,
+        SO_RCVTIMEO,
+        &timeout,
+        sizeof(timeout));
+    memset(&address, 0, sizeof(address));
+    address.sin_family = AF_INET;
+    address.sin_port = htons(PS5MC_SERVICE_PORT);
+    address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    if (connect(
+            connection,
+            (struct sockaddr*)&address,
+            sizeof(address)) != 0) {
+        close(connection);
+        return -1;
+    }
+    while (sent < sizeof(request) - 1U) {
+        const ssize_t written = send(
+            connection,
+            request + sent,
+            sizeof(request) - 1U - sent,
+            0);
+        if (written <= 0) {
+            close(connection);
+            return -1;
+        }
+        sent += (size_t)written;
+    }
+    received = recv(connection, response, sizeof(response) - 1U, 0);
+    close(connection);
+    if (received <= 0) {
+        return -1;
+    }
+    response[received] = '\0';
+    return strstr(response, "HTTP/1.1 200 ") == response ? 0 : -1;
+}
+
+static int create_loopback_listener_with_takeover(void) {
+    int listener = create_loopback_listener();
+    int attempt;
+    if (listener >= 0 || errno != EADDRINUSE) {
+        return listener;
+    }
+    launcher_log("existing launcher detected; requesting graceful takeover");
+    if (request_existing_launcher_shutdown() != 0) {
+        launcher_log("existing launcher does not support graceful takeover");
+        errno = EADDRINUSE;
+        return -1;
+    }
+    for (attempt = 0; attempt < 50; ++attempt) {
+        usleep(40000);
+        listener = create_loopback_listener();
+        if (listener >= 0) {
+            launcher_log("graceful takeover complete attempts=%d", attempt + 1);
+            return listener;
+        }
+        if (errno != EADDRINUSE) {
+            return -1;
+        }
+    }
+    launcher_log("graceful takeover timed out");
+    errno = EADDRINUSE;
+    return -1;
 }
 
 static void send_response(
@@ -592,6 +682,11 @@ static void serve_forever(int listener) {
             close(connection);
             launcher_log("request route=/launch");
             (void)launch_embedded_player();
+        } else if (ps5mc_request_is_shutdown(request)) {
+            send_response(connection, 200, "text/plain", "Shutting down\n");
+            close(connection);
+            launcher_log("request route=/shutdown action=exit");
+            return;
         } else {
             send_response(connection, 404, "text/plain", "Not found\n");
             close(connection);
@@ -627,7 +722,7 @@ int main(void) {
         (void)sceUserServiceTerminate();
         return 4;
     }
-    listener = create_loopback_listener();
+    listener = create_loopback_listener_with_takeover();
     if (listener < 0) {
         launcher_log(
             "loopback bind failed address=%s port=%d errno=%d",
@@ -644,7 +739,7 @@ int main(void) {
         return 6;
     }
     launcher_log(
-        "ready address=%s port=%d route=/launch websrv=unused",
+        "ready address=%s port=%d routes=/launch,/shutdown websrv=unused",
         PS5MC_SERVICE_ADDRESS,
         PS5MC_SERVICE_PORT);
     serve_forever(listener);

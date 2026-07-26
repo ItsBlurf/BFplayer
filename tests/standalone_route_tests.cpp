@@ -33,6 +33,17 @@ int main() {
     check(
         !ps5mc_request_is_launch("GET / HTTP/1.1\r\n\r\n"),
         "other route rejected");
+    check(
+        ps5mc_request_is_shutdown(
+            "GET /shutdown HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n"),
+        "exact shutdown route accepted");
+    check(
+        !ps5mc_request_is_shutdown("POST /shutdown HTTP/1.1\r\n\r\n"),
+        "shutdown alternate method rejected");
+    check(
+        !ps5mc_request_is_shutdown(
+            "GET /shutdown?force=1 HTTP/1.1\r\n\r\n"),
+        "shutdown query string rejected");
 
     if (failures == 0) {
         std::cout << "standalone_route_tests: PASS\n";
