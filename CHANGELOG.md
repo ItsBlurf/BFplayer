@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.0-alpha.20 - original aspect ratio test build
+
+- Start every video in `Original` aspect mode, honoring the stream display
+  ratio and falling back to decoded frame dimensions when metadata is absent.
+- Keep manual aspect overrides local to the current playback so an override
+  cannot distort a different video opened later.
+- Label the automatic mode and playback-setting scope clearly in the UI.
+
 ## 0.1.0-beta.1 - first public beta
 
 - Keep the active sort mode in the library status line and simplify the footer

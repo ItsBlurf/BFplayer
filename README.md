@@ -23,6 +23,11 @@ Playback is powered by FFmpeg 7.0.1, SDL2, SDL_kitchensink, and libass. Decoding
 is currently software-based, so demanding 4K HEVC or AV1 files may not play
 smoothly.
 
+Every video starts in **Original** aspect mode. The player uses the display
+ratio reported by the stream, including anamorphic pixel-ratio metadata, and
+falls back to the decoded frame dimensions when that metadata is unavailable.
+Manual aspect overrides apply only to the current video.
+
 ## Install
 
 Download `ps5-media-center-standalone.elf` from the latest release and inject

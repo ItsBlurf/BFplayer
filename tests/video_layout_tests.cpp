@@ -76,6 +76,11 @@ int main() {
     const auto fallback = ps5mc::compute_video_layout(
         1920, 1080, 0.0, 1280, 720, VideoScaleMode::fit);
     check(rect_is(fallback.destination, 0, 0, 1280, 720), "invalid aspect fallback");
+    const auto fallback_4_3 = ps5mc::compute_video_layout(
+        640, 480, 0.0, 1920, 1080, VideoScaleMode::fit);
+    check(
+        rect_is(fallback_4_3.destination, 240, 0, 1440, 1080),
+        "missing display aspect falls back to original frame ratio");
     const auto infinite_aspect = ps5mc::compute_video_layout(
         1920,
         1080,
@@ -166,6 +171,10 @@ int main() {
         ps5mc::parse_video_aspect_mode("2.39:1") ==
             VideoAspectMode::ratio_2_39_1,
         "parse VLC aspect ratio");
+    check(
+        std::string(ps5mc::video_aspect_mode_name(
+            VideoAspectMode::default_ratio)) == "Original",
+        "automatic aspect mode is clearly labeled Original");
     check(
         ps5mc::next_video_aspect_mode(VideoAspectMode::ratio_5_4) ==
             VideoAspectMode::default_ratio,

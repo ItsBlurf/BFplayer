@@ -1096,8 +1096,6 @@ bool persist_active_player_settings(App& app) {
              settings.auto_subtitles ? "1" : "0"},
             {"video_scale_mode",
              ps5mc::video_scale_mode_key(app.video_scale_mode)},
-            {"video_aspect_mode",
-             ps5mc::video_aspect_mode_key(app.video_aspect_mode)},
             {"video_crop_mode",
              ps5mc::video_crop_mode_key(app.video_crop_mode)},
         });
@@ -1173,7 +1171,7 @@ void refresh_playback_overlay(App& app) {
                     " seconds",
                 std::string("Video scaling                   ") +
                     ps5mc::video_scale_mode_name(app.video_scale_mode),
-                std::string("Display aspect                  ") +
+                std::string("Display aspect (this video)     ") +
                     ps5mc::video_aspect_mode_name(app.video_aspect_mode),
                 std::string("Crop                            ") +
                     ps5mc::video_crop_mode_name(app.video_crop_mode),
@@ -1575,6 +1573,9 @@ PlaybackOutcome run_player(
     App& app,
     const char* path,
     const char* explicit_subtitle = nullptr) {
+    // Aspect overrides are playback-local. Each newly opened video starts by
+    // honoring its reported display aspect, with frame dimensions as fallback.
+    app.video_aspect_mode = ps5mc::VideoAspectMode::default_ratio;
     app.current_media_path = path ? ps5mc::redact_uri_secrets(path) : std::string{};
     ps5mc::diagnostics_log(
         ps5mc::DiagnosticLevel::info,
@@ -1774,15 +1775,6 @@ PlaybackOutcome run_player(
             ps5mc::parse_video_scale_mode(saved_video_scale);
         if (parsed.has_value()) {
             app.video_scale_mode = *parsed;
-        }
-    }
-    std::string saved_video_aspect;
-    if (database_available &&
-        resume_database.get_setting("video_aspect_mode", saved_video_aspect)) {
-        const std::optional<ps5mc::VideoAspectMode> parsed =
-            ps5mc::parse_video_aspect_mode(saved_video_aspect);
-        if (parsed.has_value()) {
-            app.video_aspect_mode = *parsed;
         }
     }
     std::string saved_video_crop;
@@ -2053,8 +2045,6 @@ PlaybackOutcome run_player(
                 {"volume_percent", std::to_string(app.volume_percent)},
                 {"video_scale_mode",
                  ps5mc::video_scale_mode_key(app.video_scale_mode)},
-                {"video_aspect_mode",
-                 ps5mc::video_aspect_mode_key(app.video_aspect_mode)},
                 {"video_crop_mode",
                  ps5mc::video_crop_mode_key(app.video_crop_mode)},
             })) {

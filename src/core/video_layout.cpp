@@ -16,7 +16,7 @@ struct RatioEntry {
 };
 
 constexpr std::array<RatioEntry<VideoAspectMode, 9>, 9> kAspectModes{{
-    {VideoAspectMode::default_ratio, "default", "Default", 0.0},
+    {VideoAspectMode::default_ratio, "default", "Original", 0.0},
     {VideoAspectMode::ratio_1_1, "1:1", "1:1", 1.0},
     {VideoAspectMode::ratio_4_3, "4:3", "4:3", 4.0 / 3.0},
     {VideoAspectMode::ratio_16_9, "16:9", "16:9", 16.0 / 9.0},
