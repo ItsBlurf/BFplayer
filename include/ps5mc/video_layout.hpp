@@ -57,18 +57,27 @@ struct VideoLayout {
 [[nodiscard]] std::optional<VideoScaleMode> parse_video_scale_mode(
     std::string_view value) noexcept;
 [[nodiscard]] VideoScaleMode next_video_scale_mode(VideoScaleMode mode) noexcept;
+[[nodiscard]] VideoScaleMode step_video_scale_mode(
+    VideoScaleMode mode,
+    int direction) noexcept;
 
 [[nodiscard]] const char* video_aspect_mode_name(VideoAspectMode mode) noexcept;
 [[nodiscard]] const char* video_aspect_mode_key(VideoAspectMode mode) noexcept;
 [[nodiscard]] std::optional<VideoAspectMode> parse_video_aspect_mode(
     std::string_view value) noexcept;
 [[nodiscard]] VideoAspectMode next_video_aspect_mode(VideoAspectMode mode) noexcept;
+[[nodiscard]] VideoAspectMode step_video_aspect_mode(
+    VideoAspectMode mode,
+    int direction) noexcept;
 
 [[nodiscard]] const char* video_crop_mode_name(VideoCropMode mode) noexcept;
 [[nodiscard]] const char* video_crop_mode_key(VideoCropMode mode) noexcept;
 [[nodiscard]] std::optional<VideoCropMode> parse_video_crop_mode(
     std::string_view value) noexcept;
 [[nodiscard]] VideoCropMode next_video_crop_mode(VideoCropMode mode) noexcept;
+[[nodiscard]] VideoCropMode step_video_crop_mode(
+    VideoCropMode mode,
+    int direction) noexcept;
 
 // display_aspect is the decoded stream's display aspect ratio after pixel-aspect
 // correction. A non-positive value falls back to frame_width/frame_height.

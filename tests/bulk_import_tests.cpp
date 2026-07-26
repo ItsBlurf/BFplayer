@@ -65,6 +65,25 @@ int main() {
     check(movie_one, "movie file source keeps its filename");
     check(!not_media, "folder without video is ignored");
 
+    bool cancel_requested = false;
+    std::size_t progress_calls = 0;
+    const ps5mc::BulkImportResult cancelled =
+        ps5mc::discover_bulk_media_sources(
+            root.string(),
+            [&]() { return cancel_requested; },
+            [&](const ps5mc::BulkImportProgress& progress) {
+                ++progress_calls;
+                check(
+                    !progress.current_path.empty(),
+                    "progress includes current path");
+                if (progress.direct_entries_checked >= 1) {
+                    cancel_requested = true;
+                }
+            });
+    check(cancelled.cancelled, "bulk import cancellation is explicit");
+    check(cancelled.ok(), "cancellation is not reported as fatal I/O");
+    check(progress_calls > 0, "bulk import reports progress");
+
     const ps5mc::BulkImportResult unsafe =
         ps5mc::discover_bulk_media_sources("/");
     check(!unsafe.ok(), "filesystem root cannot be bulk imported");

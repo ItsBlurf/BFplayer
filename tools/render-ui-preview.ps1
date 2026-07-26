@@ -99,30 +99,29 @@ try {
     $graphics.DrawString('Library', $titleFont, $white, 58, 38)
     $graphics.DrawString('ALL MEDIA  |  0 ITEMS  |  SORT: SMART', $rowFont, $muted, 58, 119)
 
-    Fill '#09101e' 42 214 1228 744
-    Fill '#0b1425' 1310 214 552 744
+    Fill '#09101e' 42 214 1836 744
     $border = [Drawing.Pen]::new([Drawing.ColorTranslator]::FromHtml('#192a47'), 1)
-    $graphics.DrawRectangle($border, 42, 214, 1228, 744)
-    $graphics.DrawRectangle($border, 1310, 214, 552, 744)
-    Fill '#0f1c33' 1344 248 484 602
-    $graphics.DrawRectangle($border, 1344, 248, 484, 602)
+    $graphics.DrawRectangle($border, 42, 214, 1836, 744)
 
     $emptyTitle = 'Your library is empty'
-    $emptyHelp = 'Press the touchpad or open Options to add media.'
+    $emptyHelp = 'Press Cross to choose a movie or TV-show folder.'
     $titleSize = $graphics.MeasureString($emptyTitle, $titleFont)
     $helpSize = $graphics.MeasureString($emptyHelp, $rowFont)
-    $graphics.DrawString($emptyTitle, $titleFont, $white, 656 - $titleSize.Width / 2, 560)
-    $graphics.DrawString($emptyHelp, $rowFont, $muted, 656 - $helpSize.Width / 2, 630)
-
-    $artText = 'NO PREVIEW AVAILABLE'
-    $artSize = $graphics.MeasureString($artText, $rowFont)
-    $graphics.DrawString($artText, $rowFont, $muted, 1586 - $artSize.Width / 2, 897)
+    $graphics.DrawString($emptyTitle, $titleFont, $white, 960 - $titleSize.Width / 2, 486)
+    Fill '#1a4984' ([int](960 - ($helpSize.Width + 76) / 2)) 574 ([int]($helpSize.Width + 76)) 64
+    $actionBorder = [Drawing.Pen]::new([Drawing.ColorTranslator]::FromHtml('#53a4ff'), 1)
+    $graphics.DrawRectangle(
+        $actionBorder,
+        [int](960 - ($helpSize.Width + 76) / 2),
+        574,
+        [int]($helpSize.Width + 76),
+        64)
+    $graphics.DrawString($emptyHelp, $rowFont, $white, 960 - $helpSize.Width / 2, 587)
 
     Fill '#0a1221' 0 990 1920 90
     Fill '#1c3050' 0 990 1920 2
     $hintX = 48
-    $hintX = Draw-Hint 'X' 'Play' $hintX $footerFont $muted
-    $hintX = Draw-Hint 'TOUCH' 'Add Media' $hintX $footerFont $muted
+    $hintX = Draw-Hint 'X' 'Add Media' $hintX $footerFont $muted
     $null = Draw-Hint 'OPTIONS' 'Menu' $hintX $footerFont $muted
 
     $target = [IO.Path]::GetFullPath($OutFile)
@@ -133,6 +132,7 @@ try {
 }
 finally {
     if ($border) { $border.Dispose() }
+    if ($actionBorder) { $actionBorder.Dispose() }
     if ($white) { $white.Dispose() }
     if ($muted) { $muted.Dispose() }
     if ($titleFont) { $titleFont.Dispose() }

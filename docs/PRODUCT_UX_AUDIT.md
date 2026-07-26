@@ -3,7 +3,7 @@
 This audit covers the PS5 Media Center library, Add Media flow, playback
 controls, settings, diagnostics, and current build inputs.
 
-## Findings fixed for alpha.14
+## Findings fixed for alpha.14 and alpha.15
 
 - Add Media could enumerate a removable exFAT entry but silently discard it
   when descriptor-relative `fstatat` failed. Bulk import now uses the same
@@ -15,6 +15,9 @@ controls, settings, diagnostics, and current build inputs.
 - Square had an unclear scope. It now imports the highlighted directory, or
   the current directory when a file is highlighted, and says which action
   will occur in the footer.
+- Whole-library discovery now runs on a cancellable worker with live checked
+  entry and source counts, keeping navigation/rendering responsive and
+  discarding canceled partial results.
 - Options stopped playback without confirmation. It now opens a playback menu
   containing Resume, Controls, Subtitle timing, and Return to library.
 - Touchpad enabled a hidden subtitle-delay mode that repurposed every D-pad
@@ -23,10 +26,18 @@ controls, settings, diagnostics, and current build inputs.
 - Playback constants were not user-configurable. The library Options menu now
   persists default volume, short/long seek steps, OSD duration, resume, and
   automatic-subtitle behavior.
+- The in-player Options menu exposes those settings without leaving the video
+  and also provides live scaling, display-aspect, and crop selection, replacing
+  shortcut-only discovery for common display adjustments.
 - The library repeated dashboard branding and showed decorative empty artwork.
   Runtime branding is now reserved for the installed tile; the app uses a
   simpler title, content-first layout, real generated/local artwork only, and
   a small default footer with the full command set available under Controls.
+- The empty library is now a full-width first-run screen where Cross opens Add
+  Media directly instead of doing nothing. Empty searches and categories have
+  distinct recovery guidance and do not masquerade as a first-run library.
+- Search and Clear Search are now available in the controller Options menu;
+  Left/Right also move display settings in the direction shown.
 
 ## Interaction model
 

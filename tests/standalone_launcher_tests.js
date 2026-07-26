@@ -95,6 +95,12 @@ assert(libraryUi.includes('LibraryOverlay::controls'));
 assert(libraryUi.includes('LibraryOverlay::settings'));
 assert(libraryUi.includes('Import Selected Folder'));
 assert(libraryUi.includes('notice_label'));
+assert(libraryUi.includes('"Search library"'));
+assert(libraryUi.includes('"Clear search"'));
+assert(libraryUi.includes('SDL_CreateThread('));
+assert(libraryUi.includes('"ps5mc-bulk-import"'));
+assert(libraryUi.includes('"Cancel Import"'));
+assert(libraryUi.includes('consume_bulk_import_result()'));
 const bulkImport = fs.readFileSync(
     path.join(root, 'src', 'core', 'bulk_import.cpp'),
     'utf8');
@@ -102,6 +108,8 @@ assert(bulkImport.includes('lstat(path.c_str(), &status)'),
     'PS5 removable-storage bulk import must retain its lstat fallback');
 assert(player.includes('PlaybackOverlay::menu'));
 assert(player.includes('PlaybackOverlay::controls'));
+assert(player.includes('PlaybackOverlay::settings'));
+assert(player.includes('persist_active_player_settings'));
 assert(player.includes('kSettingShortSeekSeconds'));
 assert(player.includes('app.settings.short_seek_seconds'));
 assert(player.includes('app.settings.long_seek_seconds'));

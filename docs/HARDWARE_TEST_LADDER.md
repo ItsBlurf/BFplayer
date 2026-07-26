@@ -11,7 +11,7 @@ player logs. Stop on a console disconnect, black screen that does not recover,
 or a fatal filesystem error.
 
 1. With HBL uninstalled and `/data/homebrew/PS5-MediaCenter` absent, inject only
-   the alpha.14 standalone payload. Verify it removes the obsolete Games
+   the alpha.15 standalone payload. Verify it removes the obsolete Games
    entry, recreates its files, leaves exactly one dashboard tile in Media, and
    shows the
    Media Center icon in the active-app switcher, launches with no media
@@ -47,6 +47,10 @@ or a fatal filesystem error.
    advance, unsupported-entry filtering, and visible malformed-list errors.
    Use Square on a highlighted chosen folder and verify loose videos become
    Movies while child folders containing videos become TV Shows. Confirm
+   navigation and rendering remain responsive while the progress counters
+   advance. Start another import and press Square again; confirm it reports
+   cancellation and adds no partial sources. Then run the import to completion.
+   Confirm
    Square is rejected at `/`. Press Triangle twice to remove a Movie and a TV Show and confirm
    only their library rows disappear. Add title-specific and folder-level
    JPEG/PNG artwork and confirm priority/aspect ratio. For a title without

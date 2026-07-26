@@ -107,6 +107,10 @@ int main() {
         ps5mc::next_video_scale_mode(VideoScaleMode::stretch) == VideoScaleMode::fit,
         "scale mode wraps");
     check(
+        ps5mc::step_video_scale_mode(VideoScaleMode::fit, -1) ==
+            VideoScaleMode::stretch,
+        "scale mode steps backward and wraps");
+    check(
         std::string(ps5mc::video_scale_mode_name(VideoScaleMode::fill)) ==
             "Fill screen (crop)",
         "scale mode display name");
@@ -167,6 +171,11 @@ int main() {
             VideoAspectMode::default_ratio,
         "aspect list wraps");
     check(
+        ps5mc::step_video_aspect_mode(
+            VideoAspectMode::default_ratio,
+            -1) == VideoAspectMode::ratio_5_4,
+        "aspect list steps backward and wraps");
+    check(
         ps5mc::parse_video_crop_mode("1.85:1") ==
             VideoCropMode::ratio_1_85_1,
         "parse VLC crop ratio");
@@ -174,6 +183,11 @@ int main() {
         ps5mc::next_video_crop_mode(VideoCropMode::ratio_1_1) ==
             VideoCropMode::default_crop,
         "crop list wraps");
+    check(
+        ps5mc::step_video_crop_mode(
+            VideoCropMode::default_crop,
+            -1) == VideoCropMode::ratio_1_1,
+        "crop list steps backward and wraps");
 
     const std::array<std::pair<VideoAspectMode, double>, 8> aspect_modes{{
         {VideoAspectMode::ratio_1_1, 1.0},

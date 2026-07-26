@@ -426,6 +426,7 @@ struct LibraryUi::Impl {
     TTF_Font* footer_font = nullptr;
     SDL_mutex* mutex = nullptr;
     SDL_Thread* scan_thread = nullptr;
+    SDL_Thread* import_thread = nullptr;
     SDL_Thread* thumbnail_thread = nullptr;
     std::vector<MediaEntry> entries;
     std::vector<MediaSource> sources;
@@ -444,6 +445,7 @@ struct LibraryUi::Impl {
     Label artwork_label;
     Label empty_title_label;
     Label empty_help_label;
+    bool empty_action_enabled = false;
     SDL_Texture* artwork_texture = nullptr;
     int artwork_width = 0;
     int artwork_height = 0;
@@ -454,6 +456,7 @@ struct LibraryUi::Impl {
     std::string thumbnail_error;
     VideoThumbnail thumbnail_result;
     std::atomic<bool> thumbnail_cancel{false};
+    std::atomic<bool> import_cancel{false};
     bool thumbnail_loading = false;
     bool thumbnail_ready = false;
     bool artwork_is_video_frame = false;
@@ -491,6 +494,15 @@ struct LibraryUi::Impl {
     bool ime_was_visible = false;
     bool scanning = false;
     bool cancel_scan = false;
+    bool import_running = false;
+    bool import_result_ready = false;
+    BulkImportResult pending_import_result;
+    std::string import_target;
+    std::string import_progress_path;
+    std::size_t import_direct_entries = 0;
+    std::size_t import_entries_checked = 0;
+    std::size_t import_movies_found = 0;
+    std::size_t import_shows_found = 0;
     bool sort_setting_loaded = false;
     bool sort_setting_dirty = false;
     std::vector<std::pair<std::string, bool>> pending_favorites;
@@ -629,7 +641,7 @@ struct LibraryUi::Impl {
 
         const int item_count =
             current == LibraryOverlay::menu
-                ? 5
+                ? 6
                 : (current == LibraryOverlay::settings ? 7 : 0);
         if (item_count > 0 &&
             (button == SDL_CONTROLLER_BUTTON_DPAD_UP ||
@@ -651,16 +663,29 @@ struct LibraryUi::Impl {
                     open_overlay(LibraryOverlay::none);
                     open_browser();
                     break;
-                case 1:
+                case 1: {
+                    open_overlay(LibraryOverlay::none);
+                    bool has_query = false;
+                    SDL_LockMutex(mutex);
+                    has_query = !search_query.empty();
+                    SDL_UnlockMutex(mutex);
+                    if (has_query) {
+                        clear_search();
+                    } else {
+                        begin_search();
+                    }
+                    break;
+                }
+                case 2:
                     open_overlay(LibraryOverlay::controls);
                     break;
-                case 2:
+                case 3:
                     open_overlay(LibraryOverlay::settings);
                     break;
-                case 3:
+                case 4:
                     open_overlay(LibraryOverlay::about);
                     break;
-                case 4:
+                case 5:
                     return true;
                 default:
                     break;
@@ -672,8 +697,11 @@ struct LibraryUi::Impl {
             return false;
         }
         if (button == SDL_CONTROLLER_BUTTON_X) {
+            const PlayerSettings previous = player_settings;
             player_settings = {};
-            (void)persist_player_settings();
+            if (!persist_player_settings()) {
+                player_settings = previous;
+            }
             SDL_LockMutex(mutex);
             ++published_generation;
             SDL_UnlockMutex(mutex);
@@ -686,6 +714,7 @@ struct LibraryUi::Impl {
         }
         const int direction =
             button == SDL_CONTROLLER_BUTTON_DPAD_LEFT ? -1 : 1;
+        const PlayerSettings previous = player_settings;
         switch (current_selected) {
             case 0:
                 player_settings.volume_percent =
@@ -726,7 +755,9 @@ struct LibraryUi::Impl {
             default:
                 return false;
         }
-        (void)persist_player_settings();
+        if (!persist_player_settings()) {
+            player_settings = previous;
+        }
         SDL_LockMutex(mutex);
         ++published_generation;
         SDL_UnlockMutex(mutex);
@@ -1145,22 +1176,9 @@ struct LibraryUi::Impl {
         start_scan();
     }
 
-    void bulk_import_folder(const std::string& target) {
-        if (target == "/") {
-            set_notice("Choose a media folder before using Import Library");
-            return;
-        }
-        stop_scan();
-        diagnostics_log(
-            DiagnosticLevel::info,
-            "bulk-import begin root=%s",
-            target.c_str());
-        set_notice(
-            "Checking " + media_source_default_title(target) +
-            " for movies and TV shows...",
-            30000);
-        const BulkImportResult result =
-            discover_bulk_media_sources(target);
+    void finish_bulk_import(
+        const std::string& target,
+        const BulkImportResult& result) {
         if (!result.ok()) {
             diagnostics_log(
                 DiagnosticLevel::error,
@@ -1211,6 +1229,160 @@ struct LibraryUi::Impl {
             "IMPORTED " + std::to_string(result.loose_movies) +
             " MOVIES + " + std::to_string(result.tv_folders) +
             " TV SHOWS");
+    }
+
+    static int bulk_import_entry(void* userdata) {
+        auto* self = static_cast<Impl*>(userdata);
+        std::string target;
+        SDL_LockMutex(self->mutex);
+        target = self->import_target;
+        SDL_UnlockMutex(self->mutex);
+
+        BulkImportResult result = discover_bulk_media_sources(
+            target,
+            [&]() {
+                return self->import_cancel.load(std::memory_order_relaxed);
+            },
+            [&](const BulkImportProgress& progress) {
+                SDL_LockMutex(self->mutex);
+                self->import_progress_path = progress.current_path;
+                self->import_direct_entries =
+                    progress.direct_entries_checked;
+                self->import_entries_checked = progress.entries_checked;
+                self->import_movies_found = progress.loose_movies;
+                self->import_shows_found = progress.tv_folders;
+                ++self->published_generation;
+                SDL_UnlockMutex(self->mutex);
+            });
+
+        SDL_LockMutex(self->mutex);
+        self->pending_import_result = std::move(result);
+        self->import_running = false;
+        self->import_result_ready = true;
+        ++self->published_generation;
+        SDL_UnlockMutex(self->mutex);
+        return 0;
+    }
+
+    void consume_bulk_import_result() {
+        BulkImportResult result;
+        std::string target;
+        SDL_Thread* completed_thread = nullptr;
+        SDL_LockMutex(mutex);
+        if (import_result_ready) {
+            result = std::move(pending_import_result);
+            pending_import_result = {};
+            target = import_target;
+            import_result_ready = false;
+            completed_thread = import_thread;
+            import_thread = nullptr;
+        }
+        SDL_UnlockMutex(mutex);
+        if (!completed_thread) {
+            return;
+        }
+        SDL_WaitThread(completed_thread, nullptr);
+        if (result.cancelled) {
+            diagnostics_log(
+                DiagnosticLevel::info,
+                "bulk-import cancelled root=%s checked=%zu movies=%zu shows=%zu",
+                target.c_str(),
+                result.entries_checked,
+                result.loose_movies,
+                result.tv_folders);
+            set_notice("Library import canceled", 5000);
+            (void)start_scan();
+            return;
+        }
+        finish_bulk_import(target, result);
+    }
+
+    void stop_bulk_import() {
+        import_cancel.store(true, std::memory_order_relaxed);
+        if (import_thread) {
+            SDL_WaitThread(import_thread, nullptr);
+            import_thread = nullptr;
+        }
+        if (mutex) {
+            SDL_LockMutex(mutex);
+            import_running = false;
+            import_result_ready = false;
+            pending_import_result = {};
+            import_target.clear();
+            import_progress_path.clear();
+            import_direct_entries = 0;
+            import_entries_checked = 0;
+            import_movies_found = 0;
+            import_shows_found = 0;
+            SDL_UnlockMutex(mutex);
+        }
+        import_cancel.store(false, std::memory_order_relaxed);
+    }
+
+    void bulk_import_folder(const std::string& target) {
+        if (target == "/") {
+            set_notice("Choose a media folder before using Import Library");
+            return;
+        }
+        SDL_LockMutex(mutex);
+        const bool already_running = import_running;
+        const bool result_pending = import_result_ready;
+        SDL_UnlockMutex(mutex);
+        if (already_running) {
+            import_cancel.store(true, std::memory_order_relaxed);
+            diagnostics_log(
+                DiagnosticLevel::info,
+                "bulk-import cancel requested root=%s",
+                import_target.c_str());
+            set_notice("Canceling library import...", 5000);
+            return;
+        }
+        if (result_pending || import_thread) {
+            set_notice("Finishing the previous library import...", 5000);
+            return;
+        }
+
+        stop_scan();
+        diagnostics_log(
+            DiagnosticLevel::info,
+            "bulk-import begin root=%s mode=background",
+            target.c_str());
+        set_notice(
+            "Checking " + media_source_default_title(target) +
+            " for movies and TV shows...",
+            30000);
+        import_cancel.store(false, std::memory_order_relaxed);
+        SDL_LockMutex(mutex);
+        import_target = target;
+        import_progress_path = target;
+        import_direct_entries = 0;
+        import_entries_checked = 0;
+        import_movies_found = 0;
+        import_shows_found = 0;
+        pending_import_result = {};
+        import_result_ready = false;
+        import_running = true;
+        ++published_generation;
+        SDL_UnlockMutex(mutex);
+        import_thread = SDL_CreateThread(
+            bulk_import_entry,
+            "ps5mc-bulk-import",
+            this);
+        if (!import_thread) {
+            SDL_LockMutex(mutex);
+            import_running = false;
+            ++published_generation;
+            SDL_UnlockMutex(mutex);
+            last_error =
+                std::string("Unable to start library import: ") +
+                SDL_GetError();
+            diagnostics_log(
+                DiagnosticLevel::error,
+                "bulk-import thread create failed error=%s",
+                SDL_GetError());
+            set_notice(last_error, 8000);
+            (void)start_scan();
+        }
     }
 
     void add_source(MediaSourceKind kind, const std::string& raw_path) {
@@ -1632,6 +1804,7 @@ struct LibraryUi::Impl {
         destroy_label(artwork_label);
         destroy_label(empty_title_label);
         destroy_label(empty_help_label);
+        empty_action_enabled = false;
     }
 
     static int thumbnail_entry(void* userdata) {
@@ -2266,7 +2439,12 @@ struct LibraryUi::Impl {
             std::vector<BrowserEntry> visible_browser;
             std::string current_path;
             std::string browser_notice;
+            std::string progress_path;
             bool selected_is_directory = false;
+            bool is_importing = false;
+            std::size_t checked = 0;
+            std::size_t movies_found = 0;
+            std::size_t shows_found = 0;
             int total = 0;
             SDL_LockMutex(mutex);
             const std::uint64_t now = SDL_GetTicks64();
@@ -2291,6 +2469,11 @@ struct LibraryUi::Impl {
             }
             current_path = browser_path;
             browser_notice = notice;
+            progress_path = import_progress_path;
+            is_importing = import_running;
+            checked = import_entries_checked;
+            movies_found = import_movies_found;
+            shows_found = import_shows_found;
             selected_is_directory =
                 selected >= 0 && selected < total &&
                 browser_entries[static_cast<std::size_t>(selected)].directory;
@@ -2308,8 +2491,17 @@ struct LibraryUi::Impl {
             SDL_UnlockMutex(mutex);
 
             title_label = make_label(renderer, title_font, "Add Media Source", white);
-            std::string browser_status =
-                current_path + "  |  " + std::to_string(total) + " ITEMS";
+            std::string browser_status;
+            if (is_importing) {
+                browser_status =
+                    "IMPORTING  |  " + std::to_string(checked) +
+                    " CHECKED  |  " + std::to_string(movies_found) +
+                    " MOVIES  |  " + std::to_string(shows_found) +
+                    " TV SHOWS";
+            } else {
+                browser_status =
+                    current_path + "  |  " + std::to_string(total) + " ITEMS";
+            }
             status_label = make_label(
                 renderer,
                 row_font,
@@ -2333,7 +2525,9 @@ struct LibraryUi::Impl {
             add_footer_hint(
                 FooterGlyph::square,
                 "",
-                selected_is_directory
+                is_importing
+                    ? "Cancel Import"
+                    : selected_is_directory
                     ? "Import Selected Folder"
                     : "Import Current Folder");
             add_footer_hint(FooterGlyph::circle, "", "Up");
@@ -2341,7 +2535,12 @@ struct LibraryUi::Impl {
             artwork_label = make_label(
                 renderer,
                 row_font,
-                "SELECT A MOVIE FILE OR TV-SHOW FOLDER",
+                fit_text_to_width(
+                    row_font,
+                    is_importing && !progress_path.empty()
+                        ? "CHECKING  " + progress_path
+                        : "SELECT A MOVIE FILE OR TV-SHOW FOLDER",
+                    kArtworkPanelWidth - 28),
                 muted);
             for (const BrowserEntry& item : visible_browser) {
                 std::string text = item.directory
@@ -2359,10 +2558,12 @@ struct LibraryUi::Impl {
         LibraryOverlay active_overlay = LibraryOverlay::none;
         int active_overlay_selected = 0;
         PlayerSettings active_player_settings{};
+        bool active_search_query = false;
         SDL_LockMutex(mutex);
         active_overlay = overlay;
         active_overlay_selected = overlay_selected;
         active_player_settings = player_settings;
+        active_search_query = !search_query.empty();
         SDL_UnlockMutex(mutex);
         if (active_overlay != LibraryOverlay::none) {
             clear_artwork();
@@ -2375,6 +2576,7 @@ struct LibraryUi::Impl {
                     subtitle = "Choose what you want to do";
                     rows = {
                         "Add media",
+                        active_search_query ? "Clear search" : "Search library",
                         "Controls & shortcuts",
                         "Playback settings",
                         "About & diagnostics",
@@ -2424,7 +2626,7 @@ struct LibraryUi::Impl {
                         "L3 / R3      Favorite / sort                      Volume down / up",
                         "Touchpad     Add media                             Full controls",
                         "L2/R2 + Triangle                                  Crop / aspect / scale",
-                        "Options      Menu                                  Playback menu",
+                        "Options      Add, search, settings, exit           Playback menu",
                     };
                     add_footer_hint(FooterGlyph::circle, "", "Back");
                     break;
@@ -2491,20 +2693,10 @@ struct LibraryUi::Impl {
                 ? "Library"
                 : media_source_default_title(series_root),
             white);
-        if (series_root.empty()) {
-            add_footer_hint(FooterGlyph::cross, "", "Play");
-            add_footer_hint(FooterGlyph::touchpad, "", "Add Media");
-            add_footer_hint(FooterGlyph::options, "", "Menu");
-        } else {
-            add_footer_hint(FooterGlyph::cross, "", "Play Episode");
-            add_footer_hint(FooterGlyph::circle, "", "Back");
-            add_footer_hint(FooterGlyph::touchpad, "", "Add Media");
-            add_footer_hint(FooterGlyph::options, "", "Menu");
-        }
-
         std::vector<MediaEntry> visible;
         std::vector<int> visible_episode_counts;
         bool is_scanning = false;
+        bool library_has_entries = false;
         bool is_search_editing = false;
         int total = 0;
         int active_filter = 0;
@@ -2548,6 +2740,7 @@ struct LibraryUi::Impl {
             visible_episode_counts.push_back(episode_count);
         }
         is_scanning = scanning;
+        library_has_entries = !entries.empty();
         is_search_editing = search_editing;
         active_filter = filter;
         active_sort_mode = sort_mode;
@@ -2569,6 +2762,27 @@ struct LibraryUi::Impl {
         rendered_overlay = static_cast<int>(LibraryOverlay::none);
         rendered_overlay_selected = 0;
         SDL_UnlockMutex(mutex);
+
+        if (total == 0 && !library_has_entries) {
+            add_footer_hint(FooterGlyph::cross, "", "Add Media");
+            add_footer_hint(FooterGlyph::options, "", "Menu");
+        } else if (total == 0) {
+            if (!active_series_root.empty()) {
+                add_footer_hint(FooterGlyph::circle, "", "Back");
+            }
+            add_footer_hint(FooterGlyph::dpad, "", "Change Category");
+            add_footer_hint(FooterGlyph::touchpad, "", "Add Media");
+            add_footer_hint(FooterGlyph::options, "", "Menu");
+        } else if (series_root.empty()) {
+            add_footer_hint(FooterGlyph::cross, "", "Play");
+            add_footer_hint(FooterGlyph::touchpad, "", "Add Media");
+            add_footer_hint(FooterGlyph::options, "", "Menu");
+        } else {
+            add_footer_hint(FooterGlyph::cross, "", "Play Episode");
+            add_footer_hint(FooterGlyph::circle, "", "Back");
+            add_footer_hint(FooterGlyph::touchpad, "", "Add Media");
+            add_footer_hint(FooterGlyph::options, "", "Menu");
+        }
 
         update_artwork(active_media_path, active_generation);
         bool is_thumbnail_loading = false;
@@ -2610,17 +2824,38 @@ struct LibraryUi::Impl {
                 white);
         }
         if (total == 0) {
+            const bool first_run = !library_has_entries && !is_scanning;
+            std::string empty_title;
+            std::string empty_help;
+            if (is_scanning) {
+                empty_title = "Building your library";
+                empty_help = "Indexing the media sources you selected...";
+            } else if (first_run) {
+                empty_title = "Your library is empty";
+                empty_help =
+                    "Press Cross to choose a movie or TV-show folder.";
+            } else if (!active_query.empty()) {
+                empty_title = "No search results";
+                empty_help =
+                    "Open Options to clear the search, or change category.";
+            } else if (!active_series_root.empty()) {
+                empty_title = "No episodes found";
+                empty_help = "Press Circle to return to the library.";
+            } else {
+                empty_title = "No items in this category";
+                empty_help =
+                    "Use D-pad Left or Right to change category.";
+            }
+            empty_action_enabled = first_run;
             empty_title_label = make_label(
                 renderer,
                 title_font,
-                is_scanning ? "Building your library" : "Your library is empty",
+                empty_title,
                 white);
             empty_help_label = make_label(
                 renderer,
                 row_font,
-                is_scanning
-                    ? "Indexing the media sources you selected..."
-                    : "Press the touchpad or open Options to add media.",
+                empty_help,
                 muted);
         }
         std::string artwork_status;
@@ -2804,6 +3039,7 @@ void LibraryUi::close() {
     impl_->search_edit.clear();
     impl_->ime_was_visible = false;
     impl_->stop_scan();
+    impl_->stop_bulk_import();
     if (impl_->mutex) {
         SDL_LockMutex(impl_->mutex);
         const bool has_pending_favorites = !impl_->pending_favorites.empty();
@@ -2985,6 +3221,16 @@ LibraryAction LibraryUi::handle_event(const SDL_Event& event, std::string& selec
         return LibraryAction::none;
     }
 
+    const auto open_browser_for_empty_library = [&]() {
+        SDL_LockMutex(impl_->mutex);
+        const bool empty = impl_->entries.empty() && !impl_->scanning;
+        SDL_UnlockMutex(impl_->mutex);
+        if (empty) {
+            impl_->open_browser();
+        }
+        return empty;
+    };
+
     int delta = 0;
     bool play = false;
     bool play_queue = false;
@@ -2999,6 +3245,9 @@ LibraryAction LibraryUi::handle_event(const SDL_Event& event, std::string& selec
     if (event.type == SDL_CONTROLLERBUTTONDOWN) {
         switch (event.cbutton.button) {
             case SDL_CONTROLLER_BUTTON_A:
+                if (open_browser_for_empty_library()) {
+                    return LibraryAction::none;
+                }
                 play = true;
                 break;
             case SDL_CONTROLLER_BUTTON_B:
@@ -3054,6 +3303,9 @@ LibraryAction LibraryUi::handle_event(const SDL_Event& event, std::string& selec
     } else if (event.type == SDL_KEYDOWN) {
         switch (event.key.keysym.sym) {
             case SDLK_RETURN:
+                if (open_browser_for_empty_library()) {
+                    return LibraryAction::none;
+                }
                 play = true;
                 break;
             case SDLK_q:
@@ -3216,6 +3468,7 @@ void LibraryUi::show_notice(std::string message, std::uint64_t milliseconds) {
 void LibraryUi::render() {
     impl_->update_ime_state();
     impl_->consume_thumbnail_result();
+    impl_->consume_bulk_import_result();
     SDL_RenderSetLogicalSize(impl_->renderer, kUiWidth, kUiHeight);
     SDL_LockMutex(impl_->mutex);
     const bool notice_expired = !impl_->notice.empty() &&
@@ -3261,11 +3514,17 @@ void LibraryUi::render() {
     }
 
     const bool overlay_open = impl_->overlay != LibraryOverlay::none;
+    const bool empty_library_view =
+        !overlay_open &&
+        !impl_->browser_mode &&
+        impl_->row_labels.empty();
     const int active_selection =
         overlay_open ? impl_->overlay_selected : impl_->selected;
     const int active_first = overlay_open ? 0 : impl_->first_visible;
     const int content_width =
-        overlay_open ? kUiWidth - 84 : kListWidth;
+        overlay_open || empty_library_view
+            ? kUiWidth - 84
+            : kListWidth;
     SDL_SetRenderDrawColor(impl_->renderer, 9, 16, 30, 255);
     SDL_Rect list_panel{
         42,
@@ -3317,8 +3576,8 @@ void LibraryUi::render() {
     if (impl_->row_labels.empty()) {
         if (impl_->empty_title_label.texture) {
             SDL_Rect target{
-                656 - impl_->empty_title_label.width / 2,
-                560,
+                kUiWidth / 2 - impl_->empty_title_label.width / 2,
+                486,
                 impl_->empty_title_label.width,
                 impl_->empty_title_label.height};
             SDL_RenderCopy(
@@ -3328,9 +3587,21 @@ void LibraryUi::render() {
                 &target);
         }
         if (impl_->empty_help_label.texture) {
+            const int help_y = impl_->empty_action_enabled ? 574 : 590;
+            SDL_Rect action{
+                kUiWidth / 2 - (impl_->empty_help_label.width + 76) / 2,
+                help_y,
+                impl_->empty_help_label.width + 76,
+                64};
+            if (impl_->empty_action_enabled) {
+                SDL_SetRenderDrawColor(impl_->renderer, 26, 73, 132, 255);
+                SDL_RenderFillRect(impl_->renderer, &action);
+                SDL_SetRenderDrawColor(impl_->renderer, 83, 164, 255, 255);
+                SDL_RenderDrawRect(impl_->renderer, &action);
+            }
             SDL_Rect target{
-                656 - impl_->empty_help_label.width / 2,
-                630,
+                kUiWidth / 2 - impl_->empty_help_label.width / 2,
+                action.y + (action.h - impl_->empty_help_label.height) / 2,
                 impl_->empty_help_label.width,
                 impl_->empty_help_label.height};
             SDL_RenderCopy(
@@ -3341,7 +3612,7 @@ void LibraryUi::render() {
         }
     }
 
-    if (!overlay_open) {
+    if (!overlay_open && !empty_library_view) {
         SDL_SetRenderDrawColor(impl_->renderer, 11, 20, 37, 255);
         SDL_Rect artwork_panel{
             kArtworkPanelX,
@@ -3353,6 +3624,7 @@ void LibraryUi::render() {
         SDL_RenderDrawRect(impl_->renderer, &artwork_panel);
     }
     if (!overlay_open &&
+        !empty_library_view &&
         impl_->artwork_texture &&
         impl_->artwork_width > 0 &&
         impl_->artwork_height > 0) {
@@ -3372,7 +3644,7 @@ void LibraryUi::render() {
         SDL_Rect frame{target.x - 8, target.y - 8, target.w + 16, target.h + 16};
         SDL_RenderFillRect(impl_->renderer, &frame);
         SDL_RenderCopy(impl_->renderer, impl_->artwork_texture, nullptr, &target);
-    } else if (!overlay_open) {
+    } else if (!overlay_open && !empty_library_view) {
         SDL_SetRenderDrawColor(impl_->renderer, 15, 28, 51, 255);
         SDL_Rect empty_art{
             kArtworkPanelX + 34,
@@ -3383,7 +3655,9 @@ void LibraryUi::render() {
         SDL_SetRenderDrawColor(impl_->renderer, 28, 49, 82, 255);
         SDL_RenderDrawRect(impl_->renderer, &empty_art);
     }
-    if (!overlay_open && impl_->artwork_label.texture) {
+    if (!overlay_open &&
+        !empty_library_view &&
+        impl_->artwork_label.texture) {
         SDL_Rect target{
             kArtworkPanelX + (kArtworkPanelWidth - impl_->artwork_label.width) / 2,
             kRowsTop + kArtworkPanelHeight - impl_->artwork_label.height - 6,

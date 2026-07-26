@@ -153,20 +153,25 @@ Controller mappings in the media library:
 | R3 | Cycle and persist the library sort mode |
 | D-pad Up/Down | Move one item |
 | L1/R1 | Move one page |
-| Options | Open Add Media, Controls, Playback Settings, About, or Exit |
+| Options | Open Add Media, Search/Clear Search, Controls, Playback Settings, About, or Exit |
 
 Inside Add Media Source, Cross opens a folder or adds the highlighted media
 file as a standalone movie. Triangle adds the highlighted folder as one TV
 show. Square explicitly imports the highlighted folder (or the current folder
 when a file is highlighted) as a whole library: loose video files become
 Movies and child folders containing videos become TV Shows.
+Whole-library discovery runs in the background with visible progress; pressing
+Square again cancels it and discards partial results.
 The browser always starts at `/`; Circle goes to the parent (or closes at `/`)
 and Options closes it.
 
-Playback Settings in the Options menu controls default volume, short and long
-seek steps, on-screen-display duration, resume behavior, and automatic
-subtitle selection. Changes are saved immediately and apply to the next item
-opened. The Controls page is also available directly with F1 on desktop builds.
+Playback Settings is available from both the library and in-player Options
+menus. It controls default volume, short and long seek steps,
+on-screen-display duration, video scaling, display aspect, crop, resume
+behavior, and automatic subtitle selection. Changes are saved immediately;
+volume, seeking, OSD timing, and display modes apply to the current player
+while resume/subtitle defaults apply when the next item opens.
+The Controls page is also available directly with F1 on desktop builds.
 
 See [docs/STANDALONE_LAUNCHER.md](docs/STANDALONE_LAUNCHER.md),
 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md),
@@ -176,8 +181,11 @@ The exact static-library evidence is recorded in
 [docs/FFMPEG_SYMBOL_AUDIT.md](docs/FFMPEG_SYMBOL_AUDIT.md), and the remaining
 acceptance gates are tracked in
 [docs/COMPLETION_MATRIX.md](docs/COMPLETION_MATRIX.md).
-The current alpha is exhaustively offline-verified but cannot claim console
-runtime behavior. See
+The current alpha is exhaustively offline-verified. Earlier library/playback
+paths and alpha.13 launcher installation have partial console evidence, while
+the alpha.15 background USB-import interaction still requires controller
+acceptance. See
+[docs/ALPHA15_HARDWARE_IMPORT_PROBE.md](docs/ALPHA15_HARDWARE_IMPORT_PROBE.md),
 [docs/ALPHA13_OFFLINE_VERIFICATION.md](docs/ALPHA13_OFFLINE_VERIFICATION.md),
 [docs/FULL_VERIFICATION_AUDIT.md](docs/FULL_VERIFICATION_AUDIT.md), and
 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

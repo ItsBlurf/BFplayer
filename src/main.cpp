@@ -57,6 +57,7 @@ enum class PlaybackOverlay {
     none,
     menu,
     controls,
+    settings,
 };
 
 struct App {
@@ -1054,6 +1055,68 @@ void cycle_video_crop(App& app) {
         ps5mc::video_crop_mode_name(app.video_crop_mode));
 }
 
+bool persist_active_player_settings(App& app) {
+    const ps5mc::PlayerSettings settings =
+        ps5mc::normalized_player_settings(app.settings);
+    ps5mc::LibraryDatabase database;
+    const bool saved =
+        database.open("/data/PS5-MediaCenter/library.db") &&
+        database.set_setting(
+            std::string(ps5mc::kSettingVolumePercent),
+            std::to_string(settings.volume_percent)) &&
+        database.set_setting(
+            std::string(ps5mc::kSettingShortSeekSeconds),
+            std::to_string(settings.short_seek_seconds)) &&
+        database.set_setting(
+            std::string(ps5mc::kSettingLongSeekSeconds),
+            std::to_string(settings.long_seek_seconds)) &&
+        database.set_setting(
+            std::string(ps5mc::kSettingOsdDurationMs),
+            std::to_string(settings.osd_duration_ms)) &&
+        database.set_setting(
+            std::string(ps5mc::kSettingResumePlayback),
+            settings.resume_playback ? "1" : "0") &&
+        database.set_setting(
+            std::string(ps5mc::kSettingAutoSubtitles),
+            settings.auto_subtitles ? "1" : "0") &&
+        database.set_setting(
+            "video_scale_mode",
+            ps5mc::video_scale_mode_key(app.video_scale_mode)) &&
+        database.set_setting(
+            "video_aspect_mode",
+            ps5mc::video_aspect_mode_key(app.video_aspect_mode)) &&
+        database.set_setting(
+            "video_crop_mode",
+            ps5mc::video_crop_mode_key(app.video_crop_mode));
+    if (!saved) {
+        ps5mc::diagnostics_log(
+            ps5mc::DiagnosticLevel::error,
+            "player-settings live-save failed error=%s",
+            database.error().c_str());
+        return false;
+    }
+    app.settings = settings;
+    app.volume_percent = settings.volume_percent;
+    if (app.volume_percent > 0) {
+        app.previous_volume_percent = app.volume_percent;
+    }
+    app.osd.set_default_duration(
+        static_cast<std::uint64_t>(settings.osd_duration_ms));
+    ps5mc::diagnostics_log(
+        ps5mc::DiagnosticLevel::info,
+        "player-settings live-save volume=%d short_seek=%d long_seek=%d osd_ms=%d resume=%d auto_subtitles=%d scale=%s aspect=%s crop=%s",
+        settings.volume_percent,
+        settings.short_seek_seconds,
+        settings.long_seek_seconds,
+        settings.osd_duration_ms,
+        settings.resume_playback ? 1 : 0,
+        settings.auto_subtitles ? 1 : 0,
+        ps5mc::video_scale_mode_name(app.video_scale_mode),
+        ps5mc::video_aspect_mode_name(app.video_aspect_mode),
+        ps5mc::video_crop_mode_name(app.video_crop_mode));
+    return true;
+}
+
 void refresh_playback_overlay(App& app) {
     if (app.playback_overlay == PlaybackOverlay::none) {
         app.osd.hide_panel();
@@ -1080,11 +1143,42 @@ void refresh_playback_overlay(App& app) {
             -1);
         return;
     }
+    if (app.playback_overlay == PlaybackOverlay::settings) {
+        app.osd.show_panel(
+            "Playback settings - changes save automatically",
+            {
+                "Default volume                  " +
+                    std::to_string(app.settings.volume_percent) + "%",
+                "Short seek step                 " +
+                    std::to_string(app.settings.short_seek_seconds) +
+                    " seconds",
+                "Long seek step                  " +
+                    std::to_string(app.settings.long_seek_seconds) +
+                    " seconds",
+                "On-screen display               " +
+                    std::to_string(app.settings.osd_duration_ms / 1000) +
+                    " seconds",
+                std::string("Video scaling                   ") +
+                    ps5mc::video_scale_mode_name(app.video_scale_mode),
+                std::string("Display aspect                  ") +
+                    ps5mc::video_aspect_mode_name(app.video_aspect_mode),
+                std::string("Crop                            ") +
+                    ps5mc::video_crop_mode_name(app.video_crop_mode),
+                std::string("Resume where I stopped         ") +
+                    (app.settings.resume_playback ? "On" : "Off"),
+                std::string("Automatically select subtitles  ") +
+                    (app.settings.auto_subtitles ? "On" : "Off"),
+                "Restore playback defaults",
+            },
+            app.playback_overlay_selected);
+        return;
+    }
     app.osd.show_panel(
         "Playback menu",
         {
             "Resume playback",
             "View all controls",
+            "Playback settings",
             "Subtitle timing        " +
                 std::to_string(app.subtitle_delay_ms) +
                 " ms   (Left / Right)",
@@ -1100,7 +1194,11 @@ void open_playback_overlay(App& app, PlaybackOverlay overlay) {
     ps5mc::diagnostics_log(
         ps5mc::DiagnosticLevel::info,
         "playback-overlay open=%s",
-        overlay == PlaybackOverlay::menu ? "menu" : "controls");
+        overlay == PlaybackOverlay::menu
+            ? "menu"
+            : (overlay == PlaybackOverlay::controls
+                   ? "controls"
+                   : "settings"));
 }
 
 bool handle_playback_overlay_button(
@@ -1115,7 +1213,7 @@ bool handle_playback_overlay_button(
         return true;
     }
     if (button == SDL_CONTROLLER_BUTTON_B) {
-        if (app.playback_overlay == PlaybackOverlay::controls) {
+        if (app.playback_overlay != PlaybackOverlay::menu) {
             open_playback_overlay(app, PlaybackOverlay::menu);
         } else {
             app.playback_overlay = PlaybackOverlay::none;
@@ -1126,16 +1224,134 @@ bool handle_playback_overlay_button(
     if (app.playback_overlay == PlaybackOverlay::controls) {
         return true;
     }
+    if (app.playback_overlay == PlaybackOverlay::settings) {
+        if (button == SDL_CONTROLLER_BUTTON_DPAD_UP ||
+            button == SDL_CONTROLLER_BUTTON_DPAD_DOWN) {
+            const int direction =
+                button == SDL_CONTROLLER_BUTTON_DPAD_UP ? -1 : 1;
+            app.playback_overlay_selected =
+                (app.playback_overlay_selected + 10 + direction) % 10;
+            refresh_playback_overlay(app);
+            return true;
+        }
+        if (button == SDL_CONTROLLER_BUTTON_X) {
+            const ps5mc::PlayerSettings previous = app.settings;
+            const ps5mc::VideoScaleMode previous_scale =
+                app.video_scale_mode;
+            const ps5mc::VideoAspectMode previous_aspect =
+                app.video_aspect_mode;
+            const ps5mc::VideoCropMode previous_crop =
+                app.video_crop_mode;
+            app.settings = {};
+            app.video_scale_mode = ps5mc::VideoScaleMode::fit;
+            app.video_aspect_mode =
+                ps5mc::VideoAspectMode::default_ratio;
+            app.video_crop_mode =
+                ps5mc::VideoCropMode::default_crop;
+            if (!persist_active_player_settings(app)) {
+                app.settings = previous;
+                app.video_scale_mode = previous_scale;
+                app.video_aspect_mode = previous_aspect;
+                app.video_crop_mode = previous_crop;
+            }
+            refresh_playback_overlay(app);
+            return true;
+        }
+        if (button != SDL_CONTROLLER_BUTTON_A &&
+            button != SDL_CONTROLLER_BUTTON_DPAD_LEFT &&
+            button != SDL_CONTROLLER_BUTTON_DPAD_RIGHT) {
+            return true;
+        }
+        const int direction =
+            button == SDL_CONTROLLER_BUTTON_DPAD_LEFT ? -1 : 1;
+        const ps5mc::PlayerSettings previous = app.settings;
+        const ps5mc::VideoScaleMode previous_scale =
+            app.video_scale_mode;
+        const ps5mc::VideoAspectMode previous_aspect =
+            app.video_aspect_mode;
+        const ps5mc::VideoCropMode previous_crop =
+            app.video_crop_mode;
+        switch (app.playback_overlay_selected) {
+            case 0:
+                app.settings.volume_percent = std::clamp(
+                    app.settings.volume_percent + direction * 5,
+                    0,
+                    100);
+                break;
+            case 1:
+                app.settings.short_seek_seconds =
+                    ps5mc::next_short_seek_seconds(
+                        app.settings.short_seek_seconds,
+                        direction);
+                break;
+            case 2:
+                app.settings.long_seek_seconds =
+                    ps5mc::next_long_seek_seconds(
+                        app.settings.long_seek_seconds,
+                        direction);
+                break;
+            case 3:
+                app.settings.osd_duration_ms =
+                    ps5mc::next_osd_duration_ms(
+                        app.settings.osd_duration_ms,
+                        direction);
+                break;
+            case 4:
+                app.video_scale_mode =
+                    ps5mc::step_video_scale_mode(
+                        app.video_scale_mode,
+                        direction);
+                break;
+            case 5:
+                app.video_aspect_mode =
+                    ps5mc::step_video_aspect_mode(
+                        app.video_aspect_mode,
+                        direction);
+                break;
+            case 6:
+                app.video_crop_mode =
+                    ps5mc::step_video_crop_mode(
+                        app.video_crop_mode,
+                        direction);
+                break;
+            case 7:
+                app.settings.resume_playback =
+                    !app.settings.resume_playback;
+                break;
+            case 8:
+                app.settings.auto_subtitles =
+                    !app.settings.auto_subtitles;
+                break;
+            case 9:
+                app.settings = {};
+                app.video_scale_mode = ps5mc::VideoScaleMode::fit;
+                app.video_aspect_mode =
+                    ps5mc::VideoAspectMode::default_ratio;
+                app.video_crop_mode =
+                    ps5mc::VideoCropMode::default_crop;
+                break;
+            default:
+                return true;
+        }
+        if (!persist_active_player_settings(app)) {
+            app.settings = previous;
+            app.video_scale_mode = previous_scale;
+            app.video_aspect_mode = previous_aspect;
+            app.video_crop_mode = previous_crop;
+        }
+        refresh_playback_overlay(app);
+        return true;
+    }
     if (button == SDL_CONTROLLER_BUTTON_DPAD_UP ||
         button == SDL_CONTROLLER_BUTTON_DPAD_DOWN) {
         const int direction =
             button == SDL_CONTROLLER_BUTTON_DPAD_UP ? -1 : 1;
         app.playback_overlay_selected =
-            (app.playback_overlay_selected + 4 + direction) % 4;
+            (app.playback_overlay_selected + 5 + direction) % 5;
         refresh_playback_overlay(app);
         return true;
     }
-    if (app.playback_overlay_selected == 2 &&
+    if (app.playback_overlay_selected == 3 &&
         (button == SDL_CONTROLLER_BUTTON_DPAD_LEFT ||
          button == SDL_CONTROLLER_BUTTON_DPAD_RIGHT)) {
         adjust_subtitle_delay(
@@ -1156,10 +1372,13 @@ bool handle_playback_overlay_button(
             open_playback_overlay(app, PlaybackOverlay::controls);
             break;
         case 2:
+            open_playback_overlay(app, PlaybackOverlay::settings);
+            break;
+        case 3:
             app.subtitle_delay_ms = 0;
             refresh_playback_overlay(app);
             break;
-        case 3:
+        case 4:
             app.playback_running = false;
             ps5mc::diagnostics_log(
                 ps5mc::DiagnosticLevel::info,
@@ -1309,6 +1528,8 @@ void pump_events(App& app) {
                         on_controller_button(app, SDL_CONTROLLER_BUTTON_A);
                     } else if (event.key.keysym.sym == SDLK_BACKSPACE) {
                         on_controller_button(app, SDL_CONTROLLER_BUTTON_B);
+                    } else if (event.key.keysym.sym == SDLK_x) {
+                        on_controller_button(app, SDL_CONTROLLER_BUTTON_X);
                     }
                 } else if (event.key.keysym.sym == SDLK_SPACE) {
                     toggle_pause(app);

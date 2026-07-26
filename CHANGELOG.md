@@ -1,5 +1,34 @@
 # Changelog
 
+## 0.1.0-alpha.15 - responsive import test build
+
+### Non-blocking library import
+
+- Moved whole-library discovery to a dedicated cancellable worker so large
+  folders no longer freeze controller navigation or rendering.
+- Added live checked-entry, Movie, TV Show, and current-path progress to Add
+  Media.
+- Pressing Square during discovery now requests cancellation; canceled partial
+  results are discarded and never mistaken for a completed import.
+- Preserved fatal-I/O aborts, traversal budgets, no-follow behavior, and the
+  removable-storage `lstat` fallback in the worker path.
+
+### First-run experience
+
+- Made the empty library a full-width focused start screen instead of showing
+  an unused artwork panel.
+- Cross now opens Add Media directly whenever the current library view is
+  genuinely empty, with a matching focused call to action and footer. Empty
+  searches and categories now explain how to recover instead of pretending the
+  whole library is empty.
+- Added Search/Clear Search to the controller Options menu so the PS5 IME and
+  every library workflow are reachable without a keyboard.
+- Added Playback Settings to the in-player Options menu, with live volume,
+  seek-step, OSD, scaling, aspect, and crop changes plus the same persisted
+  resume/subtitle defaults available from the library.
+- Made Left and Right move backward and forward through scaling, aspect, and
+  crop values instead of both directions advancing.
+
 ## 0.1.0-alpha.14 - import and complete-player test build
 
 ### Add Media repair

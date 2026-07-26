@@ -74,6 +74,25 @@ Mode next_ratio_mode(
     return std::next(found)->mode;
 }
 
+template <typename Mode, std::size_t Size>
+Mode step_ratio_mode(
+    Mode mode,
+    int direction,
+    const std::array<RatioEntry<Mode, Size>, Size>& entries) noexcept {
+    const auto found = std::find_if(
+        entries.begin(), entries.end(),
+        [mode](const auto& entry) { return entry.mode == mode; });
+    if (found == entries.end()) {
+        return entries.front().mode;
+    }
+    const std::size_t index =
+        static_cast<std::size_t>(found - entries.begin());
+    const std::size_t next_index = direction < 0
+        ? (index + entries.size() - 1) % entries.size()
+        : (index + 1) % entries.size();
+    return entries[next_index].mode;
+}
+
 double valid_stream_aspect(
     int frame_width,
     int frame_height,
@@ -163,6 +182,26 @@ VideoScaleMode next_video_scale_mode(VideoScaleMode mode) noexcept {
     }
 }
 
+VideoScaleMode step_video_scale_mode(
+    VideoScaleMode mode,
+    int direction) noexcept {
+    constexpr std::array<VideoScaleMode, 3> modes{
+        VideoScaleMode::fit,
+        VideoScaleMode::fill,
+        VideoScaleMode::stretch,
+    };
+    const auto found = std::find(modes.begin(), modes.end(), mode);
+    if (found == modes.end()) {
+        return modes.front();
+    }
+    const std::size_t index =
+        static_cast<std::size_t>(found - modes.begin());
+    const std::size_t next_index = direction < 0
+        ? (index + modes.size() - 1) % modes.size()
+        : (index + 1) % modes.size();
+    return modes[next_index];
+}
+
 const char* video_aspect_mode_name(VideoAspectMode mode) noexcept {
     return find_entry(mode, kAspectModes).name;
 }
@@ -180,6 +219,12 @@ VideoAspectMode next_video_aspect_mode(VideoAspectMode mode) noexcept {
     return next_ratio_mode(mode, kAspectModes);
 }
 
+VideoAspectMode step_video_aspect_mode(
+    VideoAspectMode mode,
+    int direction) noexcept {
+    return step_ratio_mode(mode, direction, kAspectModes);
+}
+
 const char* video_crop_mode_name(VideoCropMode mode) noexcept {
     return find_entry(mode, kCropModes).name;
 }
@@ -195,6 +240,12 @@ std::optional<VideoCropMode> parse_video_crop_mode(
 
 VideoCropMode next_video_crop_mode(VideoCropMode mode) noexcept {
     return next_ratio_mode(mode, kCropModes);
+}
+
+VideoCropMode step_video_crop_mode(
+    VideoCropMode mode,
+    int direction) noexcept {
+    return step_ratio_mode(mode, direction, kCropModes);
 }
 
 VideoLayout compute_video_layout(

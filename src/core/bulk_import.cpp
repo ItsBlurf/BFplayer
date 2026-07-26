@@ -26,6 +26,22 @@ namespace {
 constexpr std::size_t kMaximumDirectEntries = 10000;
 constexpr std::size_t kMaximumBulkEntries = 200000;
 
+void report_progress(
+    const BulkImportResult& output,
+    std::size_t direct_entries,
+    const std::string& path,
+    const BulkImportProgressVisitor& visitor) {
+    if (!visitor) {
+        return;
+    }
+    visitor({
+        direct_entries,
+        output.entries_checked,
+        output.loose_movies,
+        output.tv_folders,
+        path});
+}
+
 #if !defined(_WIN32)
 bool fatal_io_errno(int value) {
     if (value == EIO || value == EBADF || value == EFAULT) {
@@ -40,7 +56,12 @@ bool fatal_io_errno(int value) {
 }
 #endif
 
-bool folder_contains_video(const std::string& path, BulkImportResult& output) {
+bool folder_contains_video(
+    const std::string& path,
+    BulkImportResult& output,
+    std::size_t direct_entries,
+    const BulkImportCancelCheck& cancelled,
+    const BulkImportProgressVisitor& progress) {
     if (output.entries_checked >= kMaximumBulkEntries) {
         output.fatal_errno = EOVERFLOW;
         output.fatal_path = path;
@@ -58,10 +79,16 @@ bool folder_contains_video(const std::string& path, BulkImportResult& output) {
             }
             return true;
         },
-        ScanLimits{32, remaining_entries, 75000});
+        ScanLimits{32, remaining_entries, 75000},
+        cancelled);
     output.entries_checked += scan.entries_seen;
     output.skipped_symlinks += scan.skipped_symlinks;
     output.skipped_devices += scan.skipped_devices;
+    report_progress(output, direct_entries, path, progress);
+    if (cancelled && cancelled()) {
+        output.cancelled = true;
+        return false;
+    }
     if (scan.fatal_errno != 0) {
         output.fatal_errno = scan.fatal_errno;
         output.fatal_path = scan.fatal_path;
@@ -132,7 +159,9 @@ bool is_reparse_point(const std::filesystem::path& path) {
 } // namespace
 
 BulkImportResult discover_bulk_media_sources(
-    const std::string& selected_root) {
+    const std::string& selected_root,
+    const BulkImportCancelCheck& cancelled,
+    const BulkImportProgressVisitor& progress) {
     BulkImportResult output{};
     const std::string root = normalize_media_source_path(selected_root);
     if (root.empty() || root == "/") {
@@ -162,6 +191,10 @@ BulkImportResult discover_bulk_media_sources(
     }
     std::size_t direct_entries = 0;
     while (current != end) {
+        if (cancelled && cancelled()) {
+            output.cancelled = true;
+            break;
+        }
         if (direct_entries >= kMaximumDirectEntries ||
             output.entries_checked >= kMaximumBulkEntries) {
             output.fatal_errno = EOVERFLOW;
@@ -172,6 +205,7 @@ BulkImportResult discover_bulk_media_sources(
         ++direct_entries;
         ++output.entries_checked;
         const std::string path = utf8_path(entry.path());
+        report_progress(output, direct_entries, path, progress);
         if (is_reparse_point(entry.path())) {
             ++output.skipped_symlinks;
         } else if (entry.is_regular_file(error) && !error) {
@@ -179,12 +213,18 @@ BulkImportResult discover_bulk_media_sources(
                 add_movie(output, path);
             }
         } else if (!error && entry.is_directory(error) && !error &&
-                   folder_contains_video(path, output)) {
+                   folder_contains_video(
+                       path,
+                       output,
+                       direct_entries,
+                       cancelled,
+                       progress)) {
             add_show(output, path);
         }
-        if (!output.ok()) {
+        if (!output.ok() || output.cancelled) {
             return output;
         }
+        report_progress(output, direct_entries, path, progress);
         error.clear();
         current.increment(error);
         if (error) {
@@ -235,6 +275,10 @@ BulkImportResult discover_bulk_media_sources(
     }
     std::size_t direct_entries = 0;
     for (;;) {
+        if (cancelled && cancelled()) {
+            output.cancelled = true;
+            break;
+        }
         errno = 0;
         dirent* item = readdir(directory);
         if (!item) {
@@ -259,6 +303,7 @@ BulkImportResult discover_bulk_media_sources(
             path.push_back('/');
         }
         path += item->d_name;
+        report_progress(output, direct_entries, path, progress);
         struct stat status {};
         if (fstatat(
                 descriptor,
@@ -296,15 +341,21 @@ BulkImportResult discover_bulk_media_sources(
         }
         if (S_ISREG(status.st_mode)) {
             if (classify_media_path(path) == MediaKind::video) {
-                add_movie(output, std::move(path));
+                add_movie(output, path);
             }
         } else if (S_ISDIR(status.st_mode) &&
-                   folder_contains_video(path, output)) {
-            add_show(output, std::move(path));
+                   folder_contains_video(
+                       path,
+                       output,
+                       direct_entries,
+                       cancelled,
+                       progress)) {
+            add_show(output, path);
         }
-        if (!output.ok()) {
+        if (!output.ok() || output.cancelled) {
             break;
         }
+        report_progress(output, direct_entries, path, progress);
     }
     closedir(directory);
 #endif
