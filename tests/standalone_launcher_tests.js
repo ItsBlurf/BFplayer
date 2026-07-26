@@ -53,6 +53,13 @@ assert(launcher.includes('htonl(INADDR_LOOPBACK)'));
 assert(launcher.includes('ps5mc_request_is_launch'));
 assert(launcher.includes('ps5mc_request_is_shutdown'));
 assert(launcher.includes('create_loopback_listener_with_takeover'));
+assert(launcher.includes('acquire_instance_lock'));
+assert(launcher.includes('flock(descriptor, LOCK_EX | LOCK_NB)'));
+assert(launcher.includes('PS5MC_INSTANCE_LOCK_PATH'));
+assert(launcher.includes('serialized takeover lock acquired'));
+assert(launcher.includes('regular_file_matches'));
+assert(launcher.includes('update_file_atomic'));
+assert(launcher.includes('runtime assets version=%s changed_files=%d'));
 assert(launcher.includes('request route=/shutdown action=exit'));
 assert(launcher.includes('hbldr_launch_buffer'));
 assert(launcher.includes('build/ps5/ps5-media-center.elf.gz'));
@@ -62,6 +69,8 @@ assert(launcher.includes('assets/fonts/NotoSans-Regular.ttf'));
 assert(launcher.includes('assets/tile/param.json'));
 assert(launcher.includes('assets/icon0.png'));
 assert(launcher.includes('remove_legacy_bigapp_host_registration'));
+assert(launcher.includes('PS5MC_LEGACY_CLEAN_MARKER'));
+assert(launcher.includes('legacy host cleanup already complete; skipping'));
 assert(launcher.includes('sceAppInstUtilAppUnInstall'));
 assert(launcher.includes('hbldr_prepare_host'));
 assert(launcher.includes('PSMR00001'));
@@ -82,6 +91,23 @@ assert(launcher.includes('history.back()'));
 assert(!launcher.includes('microhttpd'));
 assert(!launcher.includes('#include "websrv'));
 assert(!launcher.includes('8080'));
+const launcherMain = launcher.slice(launcher.indexOf('int main(void)'));
+assert(
+    launcherMain.indexOf('acquire_instance_lock()') <
+        launcherMain.indexOf('install_runtime_assets()'),
+    'reinjection must own the singleton lock before updating runtime files');
+assert(
+    launcherMain.indexOf('create_loopback_listener_with_takeover()') <
+        launcherMain.indexOf('install_runtime_assets()'),
+    'reinjection must complete resident-service handover before updating');
+assert(
+    launcherMain.indexOf('loopback handover complete; applying serialized update') <
+        launcherMain.indexOf('install_runtime_assets()'),
+    'serialized update begins only after the prior listener is gone');
+assert(
+    launcherMain.lastIndexOf('create_loopback_listener()') >
+        launcherMain.indexOf('install_dashboard_tile()'),
+    'final service listener must bind only after the update completes');
 
 assert(hbldr.includes('hbldr_launch_buffer'));
 assert(hbldr.includes('hbldr_prepare_host'));
@@ -111,6 +137,10 @@ assert(libraryUi.includes('"Clear search"'));
 assert(libraryUi.includes('"Cross      Open folder / add movie"'));
 assert(libraryUi.includes('"Square     Import as mixed library"'));
 assert(libraryUi.includes('"Saves only after import completes"'));
+assert(libraryUi.includes('"R3"'));
+assert(libraryUi.includes('std::string("Sort: ")'));
+assert(libraryUi.includes('library_item_name_less'));
+assert(libraryUi.includes('previous_series'));
 assert(libraryUi.includes('const bool empty = impl_->entries.empty();'));
 assert(!libraryUi.includes(
     'const bool empty = impl_->entries.empty() && !impl_->scanning;'));

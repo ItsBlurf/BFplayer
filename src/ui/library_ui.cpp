@@ -278,6 +278,26 @@ std::string series_display_name(const MediaEntry& entry) {
         : media_source_default_title(group);
 }
 
+std::string library_item_display_name(const MediaEntry& entry) {
+    return series_group_key(entry).empty()
+        ? (entry.title.empty() ? entry.name : entry.title)
+        : series_display_name(entry);
+}
+
+bool library_item_name_less(
+    const MediaEntry& left,
+    const MediaEntry& right) {
+    const std::string left_name = library_item_display_name(left);
+    const std::string right_name = library_item_display_name(right);
+    if (natural_path_less(left_name, right_name)) {
+        return true;
+    }
+    if (natural_path_less(right_name, left_name)) {
+        return false;
+    }
+    return natural_path_less(left.path, right.path);
+}
+
 const char* entry_kind_name(const MediaEntry& entry) {
     switch (entry.kind) {
         case MediaKind::video:
@@ -809,6 +829,19 @@ struct LibraryUi::Impl {
                         return !group.empty() && !seen_series.insert(group).second;
                     }),
                 filtered_cache.end());
+            const bool display_name_sort =
+                sort_mode == LibrarySortMode::name ||
+                (sort_mode == LibrarySortMode::smart &&
+                 filter != 1 && filter != 2);
+            if (display_name_sort) {
+                std::stable_sort(
+                    filtered_cache.begin(),
+                    filtered_cache.end(),
+                    [&](std::size_t left, std::size_t right) {
+                        return library_item_name_less(
+                            entries[left], entries[right]);
+                    });
+            }
         } else if (active_season_root.empty()) {
             std::unordered_set<std::string> seen_seasons;
             filtered_cache.erase(
@@ -1818,11 +1851,45 @@ struct LibraryUi::Impl {
 
     void cycle_sort_mode() {
         SDL_LockMutex(mutex);
-        const std::string previous_path = selected_path_locked();
+        const std::vector<std::size_t>& previous_filtered =
+            filtered_indices_locked();
+        std::string previous_path;
+        std::string previous_series;
+        if (selected >= 0 &&
+            selected < static_cast<int>(previous_filtered.size())) {
+            const MediaEntry& previous_entry =
+                entries[previous_filtered[static_cast<std::size_t>(selected)]];
+            previous_path = previous_entry.path;
+            if (active_series_root.empty()) {
+                previous_series = series_group_key(previous_entry);
+            }
+        }
         sort_mode = next_library_sort_mode(sort_mode);
         sort_setting_dirty = true;
         const bool scan_owns_database = scanning;
-        restore_selected_path_locked(previous_path);
+        const std::vector<std::size_t>& sorted = filtered_indices_locked();
+        bool restored = false;
+        for (std::size_t position = 0; position < sorted.size(); ++position) {
+            const MediaEntry& candidate = entries[sorted[position]];
+            if ((!previous_series.empty() &&
+                 series_group_key(candidate) == previous_series) ||
+                (previous_series.empty() &&
+                 candidate.path == previous_path)) {
+                selected = static_cast<int>(position);
+                first_visible = std::clamp(
+                    first_visible,
+                    std::max(0, selected - kVisibleRows + 1),
+                    selected);
+                restored = true;
+                break;
+            }
+        }
+        if (!restored) {
+            selected = std::clamp(
+                selected,
+                0,
+                std::max(0, static_cast<int>(sorted.size()) - 1));
+        }
         SDL_UnlockMutex(mutex);
 
         if (!scan_owns_database) {
@@ -2932,6 +2999,11 @@ struct LibraryUi::Impl {
             add_footer_hint(FooterGlyph::options, "", "Menu");
         } else if (series_root.empty()) {
             add_footer_hint(FooterGlyph::cross, "", "Play");
+            add_footer_hint(
+                FooterGlyph::text_button,
+                "R3",
+                (std::string("Sort: ") +
+                 library_sort_mode_name(active_sort_mode)).c_str());
             add_footer_hint(FooterGlyph::touchpad, "", "Add Media");
             add_footer_hint(FooterGlyph::options, "", "Menu");
         } else {

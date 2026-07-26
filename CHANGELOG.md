@@ -1,5 +1,31 @@
 # Changelog
 
+## 0.1.0-alpha.19 - library sort and clean reinjection test build
+
+### Library sort
+
+- Sort TV shows by their displayed show names instead of the filename or title
+  of whichever episode represents each collapsed show row.
+- Preserve the selected TV show when changing sort modes, even when the
+  representative episode changes under Recent, Newest, Duration, or Size.
+- Show the active shortcut and mode in the main library footer as
+  `R3 Sort: <mode>`.
+
+### Clean reinjection and update
+
+- Add a process-held exclusive launcher lock so repeated or concurrent
+  injections serialize instead of updating files or registrations twice.
+- Gracefully stop the previous resident launcher before applying the new
+  build's atomic runtime updates, then bind the replacement service only after
+  the update finishes.
+- Compare managed runtime and tile files before writing, atomically replacing
+  only files whose bytes changed and aborting on filesystem read errors.
+- Keep the same `PSMC00001` title registration, library database, settings,
+  and media sources while replacing the resident launcher with the new build.
+- Record completion of the obsolete `PSMR00001` migration cleanup so normal
+  reinjections do not repeatedly uninstall an already removed legacy title.
+- Add takeover diagnostics and structural regression checks for update order.
+
 ## 0.1.0-alpha.18 - native lifecycle test build
 
 ### Launch handoff

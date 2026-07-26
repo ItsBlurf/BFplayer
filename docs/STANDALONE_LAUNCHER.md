@@ -30,6 +30,17 @@ resources and terminates the active BigApp host through SystemService so the
 console can return to PlayStation Home. It verifies that the active title is
 `PSMC00001` first and refuses to terminate an unrelated BigApp.
 
+Reinjecting a newer standalone payload is an in-place update. The new process
+obtains an exclusive instance lock, asks the prior resident launcher to shut
+down through its loopback-only endpoint, completes that handover, refreshes
+runtime assets and the existing `PSMC00001` registration, and binds the
+replacement port 9040 service only when the update is complete. This keeps one
+resident service and one Media tile while preserving
+`/data/PS5-MediaCenter/library.db`, settings, sources, playback history, and
+logs. Concurrent injections serialize on the same lock rather than running
+the update sequence twice. Managed fonts, icons, and manifests are compared
+before writing and are atomically replaced only when their bytes differ.
+
 It does not start, link, load, or contact `ps5-payload-websrv`. It does not use
 port 8080, the websrv catalog, `homebrew.js`, or the HBL file picker. The HTTP
 listener is not reachable from the LAN and implements only `GET /launch`.

@@ -49,6 +49,9 @@
 #define PS5MC_LOG_DIR "/data/PS5-MediaCenter"
 #define PS5MC_LOG_PATH PS5MC_LOG_DIR "/standalone-launcher.log"
 #define PS5MC_PLAYER_LOG_PATH PS5MC_LOG_DIR "/player-stdio.log"
+#define PS5MC_INSTANCE_LOCK_PATH PS5MC_LOG_DIR "/standalone-launcher.lock"
+#define PS5MC_LEGACY_CLEAN_MARKER \
+    PS5MC_RUNTIME_DIR "/.legacy-registration-cleaned"
 #define PS5MC_APPINST_AUTHID UINT64_C(0x4801000000000013)
 #define PS5MC_DIAG_SKIPPED (-2147483000)
 
@@ -90,8 +93,17 @@ typedef struct ps5mc_notify_request {
 } ps5mc_notify_request_t;
 
 static int mkdir_if_needed(const char* path) {
-    if (mkdir(path, 0755) == 0 || errno == EEXIST) {
+    struct stat info;
+
+    if (mkdir(path, 0755) == 0) {
         return 0;
+    }
+    if (errno == EEXIST) {
+        if (lstat(path, &info) == 0 &&
+            S_ISDIR(info.st_mode) && !S_ISLNK(info.st_mode)) {
+            return 0;
+        }
+        return -ENOTDIR;
     }
     return -errno;
 }
@@ -201,6 +213,79 @@ static int write_file_atomic(
     return 0;
 }
 
+static int regular_file_matches(
+    const char* path,
+    const uint8_t* expected,
+    size_t expected_size) {
+    uint8_t buffer[16384];
+    struct stat info;
+    size_t offset = 0;
+    int descriptor;
+
+    if (!path || !expected) {
+        return -EINVAL;
+    }
+    if (lstat(path, &info) != 0) {
+        return errno == ENOENT ? 0 : -errno;
+    }
+    if (!S_ISREG(info.st_mode) || S_ISLNK(info.st_mode)) {
+        return -EINVAL;
+    }
+    if ((uintmax_t)info.st_size != (uintmax_t)expected_size) {
+        return 0;
+    }
+    descriptor = open(path, O_RDONLY);
+    if (descriptor < 0) {
+        return -errno;
+    }
+    while (offset < expected_size) {
+        const size_t remaining = expected_size - offset;
+        const size_t requested =
+            remaining < sizeof(buffer) ? remaining : sizeof(buffer);
+        const ssize_t got = read(descriptor, buffer, requested);
+        if (got <= 0) {
+            const int error = got == 0 ? EIO : errno;
+            close(descriptor);
+            return -error;
+        }
+        if (memcmp(expected + offset, buffer, (size_t)got) != 0) {
+            close(descriptor);
+            return 0;
+        }
+        offset += (size_t)got;
+    }
+    if (close(descriptor) != 0) {
+        return -errno;
+    }
+    return 1;
+}
+
+static int update_file_atomic(
+    const char* path,
+    const uint8_t* bytes,
+    size_t size,
+    mode_t mode,
+    int* changed) {
+    const int matches = regular_file_matches(path, bytes, size);
+    int result;
+
+    if (matches < 0) {
+        return matches;
+    }
+    if (matches > 0) {
+        (void)chmod(path, mode);
+        if (changed) {
+            *changed = 0;
+        }
+        return 0;
+    }
+    result = write_file_atomic(path, bytes, size, mode);
+    if (result == 0 && changed) {
+        *changed = 1;
+    }
+    return result;
+}
+
 uint8_t* fs_readfile(const char* path, size_t* size) {
     struct stat info;
     uint8_t* bytes = NULL;
@@ -261,6 +346,8 @@ static int install_runtime_assets(void) {
         PS5MC_SERVICE_ADDRESS,
         PS5MC_SERVICE_PORT);
     int result;
+    int changed;
+    int changed_files = 0;
 
     if (manifest_length <= 0 || manifest_length >= (int)sizeof(manifest)) {
         return -EOVERFLOW;
@@ -273,28 +360,46 @@ static int install_runtime_assets(void) {
         (result = mkdir_if_needed(PS5MC_RUNTIME_DIR "/sce_sys")) != 0) {
         return result;
     }
-    if ((result = write_file_atomic(
+    if ((result = update_file_atomic(
             PS5MC_FONT_DIR "/NotoSans-Regular.ttf",
             ps5mc_font_ttf,
             ps5mc_font_ttf_size,
-            0644)) != 0 ||
-        (result = write_file_atomic(
+            0644,
+            &changed)) != 0) {
+        return result;
+    }
+    changed_files += changed;
+    if ((result = update_file_atomic(
             PS5MC_FONT_DIR "/OFL.txt",
             ps5mc_font_license,
             ps5mc_font_license_size,
-            0644)) != 0 ||
-        (result = write_file_atomic(
+            0644,
+            &changed)) != 0) {
+        return result;
+    }
+    changed_files += changed;
+    if ((result = update_file_atomic(
             PS5MC_RUNTIME_DIR "/sce_sys/icon0.png",
             ps5mc_icon_png,
             ps5mc_icon_png_size,
-            0644)) != 0 ||
-        (result = write_file_atomic(
+            0644,
+            &changed)) != 0) {
+        return result;
+    }
+    changed_files += changed;
+    if ((result = update_file_atomic(
             PS5MC_RUNTIME_DIR "/build-manifest.json",
             (const uint8_t*)manifest,
             (size_t)manifest_length,
-            0644)) != 0) {
+            0644,
+            &changed)) != 0) {
         return result;
     }
+    changed_files += changed;
+    launcher_log(
+        "runtime assets version=%s changed_files=%d",
+        PS5MC_VERSION,
+        changed_files);
     return 0;
 }
 
@@ -306,6 +411,8 @@ static int install_dashboard_tile(void) {
     app_install_title_dir_fn install_title_dir = NULL;
     const pid_t pid = getpid();
     const uint64_t original_authid = kernel_get_ucred_authid(pid);
+    int changed;
+    int changed_files = 0;
     int title_dir_rc = PS5MC_DIAG_SKIPPED;
     int install_all_rc = PS5MC_DIAG_SKIPPED;
     int result = -1;
@@ -320,19 +427,27 @@ static int install_dashboard_tile(void) {
     snprintf(param_path, sizeof(param_path), "%s/param.json", sce_sys_dir);
     snprintf(icon_path, sizeof(icon_path), "%s/icon0.png", sce_sys_dir);
     if (mkdir_if_needed(PS5MC_APP_DIR) != 0 ||
-        mkdir_if_needed(sce_sys_dir) != 0 ||
-        write_file_atomic(
+        mkdir_if_needed(sce_sys_dir) != 0) {
+        goto terminate_appinst;
+    }
+    if (update_file_atomic(
             param_path,
             ps5mc_tile_param_json,
             ps5mc_tile_param_json_size,
-            0644) != 0 ||
-        write_file_atomic(
+            0644,
+            &changed) != 0) {
+        goto terminate_appinst;
+    }
+    changed_files += changed;
+    if (update_file_atomic(
             icon_path,
             ps5mc_icon_png,
             ps5mc_icon_png_size,
-            0644) != 0) {
+            0644,
+            &changed) != 0) {
         goto terminate_appinst;
     }
+    changed_files += changed;
     if (kernel_dynlib_handle(
             -1,
             "libSceAppInstUtil.sprx",
@@ -356,8 +471,9 @@ static int install_dashboard_tile(void) {
         result = 0;
     }
     launcher_log(
-        "tile result=%d title_dir=0x%08x install_all=0x%08x",
+        "tile result=%d changed_files=%d title_dir=0x%08x install_all=0x%08x",
         result,
+        changed_files,
         title_dir_rc,
         install_all_rc);
 
@@ -371,10 +487,22 @@ cleanup:
 }
 
 static void remove_legacy_bigapp_host_registration(void) {
+    static const uint8_t clean_marker[] = "PSMR00001 removed\n";
+    struct stat legacy_info;
+    struct stat marker_info;
     const pid_t pid = getpid();
     const uint64_t original_authid = kernel_get_ucred_authid(pid);
     int uninstall_rc = PS5MC_DIAG_SKIPPED;
 
+    if (lstat(PS5MC_LEGACY_CLEAN_MARKER, &marker_info) == 0 &&
+        S_ISREG(marker_info.st_mode) && !S_ISLNK(marker_info.st_mode) &&
+        lstat(
+            PS5MC_LEGACY_HOST_APP_DIR "/sce_sys/param.json",
+            &legacy_info) != 0 &&
+        errno == ENOENT) {
+        launcher_log("legacy host cleanup already complete; skipping");
+        return;
+    }
     if (kernel_set_ucred_authid(pid, PS5MC_APPINST_AUTHID) != 0) {
         launcher_log("legacy host uninstall authid swap failed");
         return;
@@ -416,6 +544,13 @@ static void remove_legacy_bigapp_host_registration(void) {
         PS5MC_LEGACY_HOST_TITLE_ID,
         uninstall_rc);
     (void)sceAppInstUtilTerminate();
+    if (write_file_atomic(
+            PS5MC_LEGACY_CLEAN_MARKER,
+            clean_marker,
+            sizeof(clean_marker) - 1U,
+            0600) != 0) {
+        launcher_log("legacy host cleanup marker write failed errno=%d", errno);
+    }
 cleanup:
     if (original_authid != 0) {
         (void)kernel_set_ucred_authid(pid, original_authid);
@@ -508,6 +643,76 @@ static int request_existing_launcher_shutdown(void) {
     }
     response[received] = '\0';
     return strstr(response, "HTTP/1.1 200 ") == response ? 0 : -1;
+}
+
+static int acquire_instance_lock(void) {
+    char owner[128];
+    int descriptor;
+    int attempt;
+    int length;
+
+    (void)mkdir_if_needed("/data");
+    if (mkdir_if_needed(PS5MC_LOG_DIR) != 0) {
+        return -1;
+    }
+    descriptor = open(
+        PS5MC_INSTANCE_LOCK_PATH,
+        O_RDWR | O_CREAT,
+        0600);
+    if (descriptor < 0) {
+        return -1;
+    }
+    if (flock(descriptor, LOCK_EX | LOCK_NB) != 0) {
+        if (errno != EWOULDBLOCK && errno != EAGAIN) {
+            const int error = errno;
+            close(descriptor);
+            errno = error;
+            return -1;
+        }
+        launcher_log(
+            "existing locked launcher detected; requesting serialized takeover");
+        if (request_existing_launcher_shutdown() != 0) {
+            launcher_log("locked launcher graceful shutdown request failed");
+            close(descriptor);
+            errno = EADDRINUSE;
+            return -1;
+        }
+        for (attempt = 0; attempt < 75; ++attempt) {
+            usleep(40000);
+            if (flock(descriptor, LOCK_EX | LOCK_NB) == 0) {
+                break;
+            }
+            if (errno != EWOULDBLOCK && errno != EAGAIN) {
+                const int error = errno;
+                close(descriptor);
+                errno = error;
+                return -1;
+            }
+        }
+        if (attempt == 75) {
+            launcher_log("serialized takeover lock timed out");
+            close(descriptor);
+            errno = EADDRINUSE;
+            return -1;
+        }
+        launcher_log("serialized takeover lock acquired attempts=%d", attempt + 1);
+    } else {
+        launcher_log("instance lock acquired");
+    }
+
+    length = snprintf(
+        owner,
+        sizeof(owner),
+        "pid=%ld version=%s\n",
+        (long)getpid(),
+        PS5MC_VERSION);
+    if (length > 0 && length < (int)sizeof(owner) &&
+        ftruncate(descriptor, 0) == 0 &&
+        lseek(descriptor, 0, SEEK_SET) == 0) {
+        (void)write(descriptor, owner, (size_t)length);
+        (void)fsync(descriptor);
+    }
+    return descriptor;
 }
 
 static int create_loopback_listener_with_takeover(void) {
@@ -724,6 +929,7 @@ static void serve_forever(int listener) {
 }
 
 int main(void) {
+    int instance_lock;
     int listener;
     int result;
 
@@ -740,32 +946,56 @@ int main(void) {
         launcher_log("embedded player gzip validation failed");
         return 2;
     }
+    instance_lock = acquire_instance_lock();
+    if (instance_lock < 0) {
+        launcher_log("instance ownership failed errno=%d", errno);
+        return 7;
+    }
+    listener = create_loopback_listener_with_takeover();
+    if (listener < 0) {
+        launcher_log(
+            "loopback takeover failed address=%s port=%d errno=%d",
+            PS5MC_SERVICE_ADDRESS,
+            PS5MC_SERVICE_PORT,
+            errno);
+        close(instance_lock);
+        return 5;
+    }
+    // The old service is gone and this process owns the lifetime lock. Close
+    // the temporary port reservation while updating so a simultaneous
+    // injector cannot queue a shutdown request that would be consumed only
+    // after this process becomes ready.
+    close(listener);
+    launcher_log("loopback handover complete; applying serialized update");
     if ((result = install_runtime_assets()) != 0) {
         launcher_log("runtime asset install failed rc=%d", result);
+        close(instance_lock);
         return 3;
     }
     (void)sceUserServiceInitialize(NULL);
     remove_legacy_bigapp_host_registration();
     if (hbldr_prepare_host() != 0) {
         launcher_log("BigApp system host preparation failed errno=%d", errno);
+        close(instance_lock);
         (void)sceUserServiceTerminate();
         return 4;
     }
-    listener = create_loopback_listener_with_takeover();
+    if (install_dashboard_tile() != 0) {
+        launcher_log("dashboard tile install failed");
+        close(instance_lock);
+        (void)sceUserServiceTerminate();
+        return 6;
+    }
+    listener = create_loopback_listener();
     if (listener < 0) {
         launcher_log(
-            "loopback bind failed address=%s port=%d errno=%d",
+            "final loopback bind failed address=%s port=%d errno=%d",
             PS5MC_SERVICE_ADDRESS,
             PS5MC_SERVICE_PORT,
             errno);
+        close(instance_lock);
         (void)sceUserServiceTerminate();
         return 5;
-    }
-    if (install_dashboard_tile() != 0) {
-        launcher_log("dashboard tile install failed");
-        close(listener);
-        (void)sceUserServiceTerminate();
-        return 6;
     }
     launcher_log(
         "ready address=%s port=%d routes=/launch,/shutdown websrv=unused",
@@ -774,6 +1004,8 @@ int main(void) {
     send_ready_notification();
     serve_forever(listener);
     close(listener);
+    (void)flock(instance_lock, LOCK_UN);
+    close(instance_lock);
     (void)sceUserServiceTerminate();
     payload_exit(0);
     return 0;
