@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.0-beta.1 - first public beta
+
+- Keep the active sort mode in the library status line and simplify the footer
+  shortcut to `R3 Sort`.
+- Rewrite the project README for the first public beta.
+- Carry forward the alpha.19 TV-show sorting and clean reinjection fixes.
+
 ## 0.1.0-alpha.19 - library sort and clean reinjection test build
 
 ### Library sort

@@ -3002,8 +3002,7 @@ struct LibraryUi::Impl {
             add_footer_hint(
                 FooterGlyph::text_button,
                 "R3",
-                (std::string("Sort: ") +
-                 library_sort_mode_name(active_sort_mode)).c_str());
+                "Sort");
             add_footer_hint(FooterGlyph::touchpad, "", "Add Media");
             add_footer_hint(FooterGlyph::options, "", "Menu");
         } else {
