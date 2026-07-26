@@ -709,6 +709,28 @@ bool LibraryDatabase::set_setting(const std::string& key, const std::string& val
     return success;
 }
 
+bool LibraryDatabase::set_settings(
+    const std::vector<std::pair<std::string, std::string>>& values) {
+    if (!database_ || scan_active_ || values.empty()) {
+        error_ = "set_settings: invalid state";
+        return false;
+    }
+    if (!execute("BEGIN IMMEDIATE;")) {
+        return false;
+    }
+    for (const auto& [key, value] : values) {
+        if (!set_setting(key, value)) {
+            (void)execute("ROLLBACK;");
+            return false;
+        }
+    }
+    if (!execute("COMMIT;")) {
+        (void)execute("ROLLBACK;");
+        return false;
+    }
+    return true;
+}
+
 bool LibraryDatabase::get_setting(const std::string& key, std::string& value) {
     if (!database_ || !valid_key(key)) {
         error_ = "get_setting: invalid state";

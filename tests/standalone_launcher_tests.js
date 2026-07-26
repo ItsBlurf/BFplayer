@@ -13,11 +13,17 @@ const launcher = fs.readFileSync(
 const hbldr = fs.readFileSync(
     path.join(root, 'src', 'launcher', 'core', 'hbldr.c'),
     'utf8');
+const ptraceCore = fs.readFileSync(
+    path.join(root, 'src', 'launcher', 'core', 'pt.c'),
+    'utf8');
 const libraryUi = fs.readFileSync(
     path.join(root, 'src', 'ui', 'library_ui.cpp'),
     'utf8');
 const player = fs.readFileSync(
     path.join(root, 'src', 'main.cpp'),
+    'utf8');
+const playbackOsd = fs.readFileSync(
+    path.join(root, 'src', 'ui', 'playback_osd.cpp'),
     'utf8');
 const build = fs.readFileSync(path.join(root, 'build.ps1'), 'utf8');
 
@@ -97,6 +103,17 @@ assert(libraryUi.includes('Import Selected Folder'));
 assert(libraryUi.includes('notice_label'));
 assert(libraryUi.includes('"Search library"'));
 assert(libraryUi.includes('"Clear search"'));
+assert(libraryUi.includes('"Cross      Open folder / add movie"'));
+assert(libraryUi.includes('"Square     Import as mixed library"'));
+assert(libraryUi.includes('"Saves only after import completes"'));
+assert(libraryUi.includes('const bool empty = impl_->entries.empty();'));
+assert(!libraryUi.includes(
+    'const bool empty = impl_->entries.empty() && !impl_->scanning;'));
+assert(libraryUi.includes(
+    '"Square       Add Media: Import folder             Audio track"'));
+assert(libraryUi.includes('if (browsing && event.type == SDL_KEYDOWN)'));
+assert(libraryUi.includes(
+    '"Finish or cancel the current library import first"'));
 assert(libraryUi.includes('SDL_CreateThread('));
 assert(libraryUi.includes('"ps5mc-bulk-import"'));
 assert(libraryUi.includes('"Cancel Import"'));
@@ -110,11 +127,17 @@ assert(player.includes('PlaybackOverlay::menu'));
 assert(player.includes('PlaybackOverlay::controls'));
 assert(player.includes('PlaybackOverlay::settings'));
 assert(player.includes('persist_active_player_settings'));
+assert(player.includes('void toggle_mute(App& app)'));
+assert(player.includes('"Unmute audio" : "Mute audio"'));
 assert(player.includes('kSettingShortSeekSeconds'));
 assert(player.includes('app.settings.short_seek_seconds'));
 assert(player.includes('app.settings.long_seek_seconds'));
 assert(!player.includes('subtitle_delay_mode'),
     'D-pad seeking must not be captured by a hidden subtitle-delay mode');
+assert(playbackOsd.includes('maximum_message_width'));
+assert(playbackOsd.includes('fit_text_to_width('));
+assert(ptraceCore.includes('snprintf(buf, sizeof(buf)'));
+assert(!ptraceCore.includes('strcpy(buf, s)'));
 assert(build.includes('ps5-media-center-standalone.elf'));
 assert(build.includes("'--strip-all'"));
 assert(build.includes('GZipStream'));

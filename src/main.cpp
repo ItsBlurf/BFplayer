@@ -986,6 +986,15 @@ void set_volume(App& app, int percent) {
     app.osd.show("Volume: " + std::to_string(app.volume_percent) + "%");
 }
 
+void toggle_mute(App& app) {
+    if (app.volume_percent == 0) {
+        set_volume(app, app.previous_volume_percent);
+    } else {
+        app.previous_volume_percent = app.volume_percent;
+        set_volume(app, 0);
+    }
+}
+
 void adjust_subtitle_delay(App& app, std::int64_t delta_ms) {
     app.subtitle_delay_ms = std::clamp<std::int64_t>(
         app.subtitle_delay_ms + delta_ms, -10000, 10000);
@@ -1061,33 +1070,26 @@ bool persist_active_player_settings(App& app) {
     ps5mc::LibraryDatabase database;
     const bool saved =
         database.open("/data/PS5-MediaCenter/library.db") &&
-        database.set_setting(
-            std::string(ps5mc::kSettingVolumePercent),
-            std::to_string(settings.volume_percent)) &&
-        database.set_setting(
-            std::string(ps5mc::kSettingShortSeekSeconds),
-            std::to_string(settings.short_seek_seconds)) &&
-        database.set_setting(
-            std::string(ps5mc::kSettingLongSeekSeconds),
-            std::to_string(settings.long_seek_seconds)) &&
-        database.set_setting(
-            std::string(ps5mc::kSettingOsdDurationMs),
-            std::to_string(settings.osd_duration_ms)) &&
-        database.set_setting(
-            std::string(ps5mc::kSettingResumePlayback),
-            settings.resume_playback ? "1" : "0") &&
-        database.set_setting(
-            std::string(ps5mc::kSettingAutoSubtitles),
-            settings.auto_subtitles ? "1" : "0") &&
-        database.set_setting(
-            "video_scale_mode",
-            ps5mc::video_scale_mode_key(app.video_scale_mode)) &&
-        database.set_setting(
-            "video_aspect_mode",
-            ps5mc::video_aspect_mode_key(app.video_aspect_mode)) &&
-        database.set_setting(
-            "video_crop_mode",
-            ps5mc::video_crop_mode_key(app.video_crop_mode));
+        database.set_settings({
+            {std::string(ps5mc::kSettingVolumePercent),
+             std::to_string(settings.volume_percent)},
+            {std::string(ps5mc::kSettingShortSeekSeconds),
+             std::to_string(settings.short_seek_seconds)},
+            {std::string(ps5mc::kSettingLongSeekSeconds),
+             std::to_string(settings.long_seek_seconds)},
+            {std::string(ps5mc::kSettingOsdDurationMs),
+             std::to_string(settings.osd_duration_ms)},
+            {std::string(ps5mc::kSettingResumePlayback),
+             settings.resume_playback ? "1" : "0"},
+            {std::string(ps5mc::kSettingAutoSubtitles),
+             settings.auto_subtitles ? "1" : "0"},
+            {"video_scale_mode",
+             ps5mc::video_scale_mode_key(app.video_scale_mode)},
+            {"video_aspect_mode",
+             ps5mc::video_aspect_mode_key(app.video_aspect_mode)},
+            {"video_crop_mode",
+             ps5mc::video_crop_mode_key(app.video_crop_mode)},
+        });
     if (!saved) {
         ps5mc::diagnostics_log(
             ps5mc::DiagnosticLevel::error,
@@ -1138,16 +1140,16 @@ void refresh_playback_overlay(App& app) {
                 "R2 + Triangle     Aspect ratio",
                 "L2+R2+Triangle    Scale mode",
                 "Touchpad          Show this controls page",
-                "Options           Playback menu",
+                "Options           Menu, mute, settings, return",
             },
             -1);
         return;
     }
     if (app.playback_overlay == PlaybackOverlay::settings) {
         app.osd.show_panel(
-            "Playback settings - changes save automatically",
+            "Playback settings - Left/Right change | Square reset | Circle back",
             {
-                "Default volume                  " +
+                "Volume                          " +
                     std::to_string(app.settings.volume_percent) + "%",
                 "Short seek step                 " +
                     std::to_string(app.settings.short_seek_seconds) +
@@ -1179,6 +1181,7 @@ void refresh_playback_overlay(App& app) {
             "Resume playback",
             "View all controls",
             "Playback settings",
+            app.volume_percent == 0 ? "Unmute audio" : "Mute audio",
             "Subtitle timing        " +
                 std::to_string(app.subtitle_delay_ms) +
                 " ms   (Left / Right)",
@@ -1253,6 +1256,7 @@ bool handle_playback_overlay_button(
                 app.video_scale_mode = previous_scale;
                 app.video_aspect_mode = previous_aspect;
                 app.video_crop_mode = previous_crop;
+                app.osd.show("Unable to save playback settings", 8000);
             }
             refresh_playback_overlay(app);
             return true;
@@ -1338,6 +1342,7 @@ bool handle_playback_overlay_button(
             app.video_scale_mode = previous_scale;
             app.video_aspect_mode = previous_aspect;
             app.video_crop_mode = previous_crop;
+            app.osd.show("Unable to save playback settings", 8000);
         }
         refresh_playback_overlay(app);
         return true;
@@ -1347,11 +1352,11 @@ bool handle_playback_overlay_button(
         const int direction =
             button == SDL_CONTROLLER_BUTTON_DPAD_UP ? -1 : 1;
         app.playback_overlay_selected =
-            (app.playback_overlay_selected + 5 + direction) % 5;
+            (app.playback_overlay_selected + 6 + direction) % 6;
         refresh_playback_overlay(app);
         return true;
     }
-    if (app.playback_overlay_selected == 3 &&
+    if (app.playback_overlay_selected == 4 &&
         (button == SDL_CONTROLLER_BUTTON_DPAD_LEFT ||
          button == SDL_CONTROLLER_BUTTON_DPAD_RIGHT)) {
         adjust_subtitle_delay(
@@ -1375,10 +1380,14 @@ bool handle_playback_overlay_button(
             open_playback_overlay(app, PlaybackOverlay::settings);
             break;
         case 3:
-            app.subtitle_delay_ms = 0;
+            toggle_mute(app);
             refresh_playback_overlay(app);
             break;
         case 4:
+            app.subtitle_delay_ms = 0;
+            refresh_playback_overlay(app);
+            break;
+        case 5:
             app.playback_running = false;
             ps5mc::diagnostics_log(
                 ps5mc::DiagnosticLevel::info,
@@ -1464,12 +1473,7 @@ void on_controller_button(App& app, SDL_GameControllerButton button) {
             break;
 #if !defined(PS5MC_PS5)
         case SDL_CONTROLLER_BUTTON_BACK:
-            if (app.volume_percent == 0) {
-                set_volume(app, app.previous_volume_percent);
-            } else {
-                app.previous_volume_percent = app.volume_percent;
-                set_volume(app, 0);
-            }
+            toggle_mute(app);
             break;
 #endif
         case ps5mc::kControllerOptionsButton:
@@ -1976,22 +1980,36 @@ PlaybackOutcome run_player(
             current.last_played_unix = static_cast<std::int64_t>(std::time(nullptr));
             current.completed = playback_completed(
                 current.position_ms, current.duration_ms);
-            resume_database.save_resume(path, current);
+            if (!resume_database.save_resume(path, current)) {
+                ps5mc::diagnostics_log(
+                    ps5mc::DiagnosticLevel::error,
+                    "final-resume-save failed error=%s",
+                    resume_database.error().c_str());
+            }
             const ps5mc::TrackPreferences preferences = current_track_preferences(app);
-            if (!ps5mc::uri_has_sensitive_components(preferences.external_subtitle)) {
-                resume_database.save_track_preferences(path, preferences);
+            if (!ps5mc::uri_has_sensitive_components(
+                    preferences.external_subtitle) &&
+                !resume_database.save_track_preferences(path, preferences)) {
+                ps5mc::diagnostics_log(
+                    ps5mc::DiagnosticLevel::error,
+                    "final-track-preference-save failed error=%s",
+                    resume_database.error().c_str());
             }
         }
-        resume_database.set_setting("volume_percent", std::to_string(app.volume_percent));
-        resume_database.set_setting(
-            "video_scale_mode",
-            ps5mc::video_scale_mode_key(app.video_scale_mode));
-        resume_database.set_setting(
-            "video_aspect_mode",
-            ps5mc::video_aspect_mode_key(app.video_aspect_mode));
-        resume_database.set_setting(
-            "video_crop_mode",
-            ps5mc::video_crop_mode_key(app.video_crop_mode));
+        if (!resume_database.set_settings({
+                {"volume_percent", std::to_string(app.volume_percent)},
+                {"video_scale_mode",
+                 ps5mc::video_scale_mode_key(app.video_scale_mode)},
+                {"video_aspect_mode",
+                 ps5mc::video_aspect_mode_key(app.video_aspect_mode)},
+                {"video_crop_mode",
+                 ps5mc::video_crop_mode_key(app.video_crop_mode)},
+            })) {
+            ps5mc::diagnostics_log(
+                ps5mc::DiagnosticLevel::error,
+                "playback-setting-save failed error=%s",
+                resume_database.error().c_str());
+        }
     }
     ps5mc::diagnostics_log(
         ps5mc::DiagnosticLevel::info,
@@ -2059,6 +2077,32 @@ int run_library(
         bool play_queue = false;
         std::string selected_path;
         while (SDL_PollEvent(&event)) {
+            if (event.type == SDL_CONTROLLERDEVICEADDED &&
+                !app.controller &&
+                SDL_IsGameController(event.cdevice.which)) {
+                app.controller =
+                    SDL_GameControllerOpen(event.cdevice.which);
+                ps5mc::diagnostics_log(
+                    app.controller
+                        ? ps5mc::DiagnosticLevel::info
+                        : ps5mc::DiagnosticLevel::warning,
+                    "library-controller added id=%d opened=%d error=%s",
+                    event.cdevice.which,
+                    app.controller ? 1 : 0,
+                    app.controller ? "<none>" : SDL_GetError());
+            } else if (
+                event.type == SDL_CONTROLLERDEVICEREMOVED &&
+                app.controller &&
+                SDL_JoystickInstanceID(
+                    SDL_GameControllerGetJoystick(app.controller)) ==
+                    event.cdevice.which) {
+                SDL_GameControllerClose(app.controller);
+                app.controller = nullptr;
+                ps5mc::diagnostics_log(
+                    ps5mc::DiagnosticLevel::info,
+                    "library-controller removed id=%d",
+                    event.cdevice.which);
+            }
             const ps5mc::LibraryAction action = library.handle_event(event, selected_path);
             if (action == ps5mc::LibraryAction::exit) {
                 app.running = false;

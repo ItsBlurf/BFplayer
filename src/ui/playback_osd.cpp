@@ -17,6 +17,41 @@ namespace {
 constexpr int kScreenWidth = 1920;
 constexpr int kScreenHeight = 1080;
 
+void erase_last_utf8_codepoint(std::string& value) {
+    if (value.empty()) {
+        return;
+    }
+    value.pop_back();
+    while (!value.empty() &&
+           (static_cast<unsigned char>(value.back()) & 0xc0U) == 0x80U) {
+        value.pop_back();
+    }
+}
+
+std::string fit_text_to_width(
+    TTF_Font* font,
+    std::string text,
+    int maximum_width) {
+    int width = 0;
+    int height = 0;
+    if (font &&
+        TTF_SizeUTF8(font, text.c_str(), &width, &height) == 0 &&
+        width <= maximum_width) {
+        return text;
+    }
+    constexpr const char* suffix = "...";
+    while (!text.empty()) {
+        erase_last_utf8_codepoint(text);
+        const std::string candidate = text + suffix;
+        if (font &&
+            TTF_SizeUTF8(font, candidate.c_str(), &width, &height) == 0 &&
+            width <= maximum_width) {
+            return candidate;
+        }
+    }
+    return suffix;
+}
+
 std::string format_time(double seconds) {
     if (!std::isfinite(seconds) || seconds <= 0.0) {
         seconds = 0.0;
@@ -214,17 +249,23 @@ void PlaybackOsd::show_panel(
         return texture;
     };
     impl_->panel_title_texture = make_texture(
-        title,
+        fit_text_to_width(impl_->font, std::move(title), 1236),
         impl_->panel_title_width,
         impl_->panel_title_height);
     impl_->panel_row_textures.reserve(rows.size());
     impl_->panel_row_widths.reserve(rows.size());
     impl_->panel_row_heights.reserve(rows.size());
-    for (const std::string& row : rows) {
+    for (std::string& row : rows) {
         int width = 0;
         int height = 0;
         impl_->panel_row_textures.push_back(
-            make_texture(row, width, height));
+            make_texture(
+                fit_text_to_width(
+                    impl_->font,
+                    std::move(row),
+                    1232),
+                width,
+                height));
         impl_->panel_row_widths.push_back(width);
         impl_->panel_row_heights.push_back(height);
     }
@@ -277,19 +318,25 @@ void PlaybackOsd::render(double position_seconds, double duration_seconds, bool 
     const SDL_Color white{244, 247, 255, 255};
     const SDL_Color muted{185, 196, 218, 255};
     impl_->update_texture(
-        paused ? "Paused - " + impl_->message : impl_->message,
-        impl_->rendered_message,
-        impl_->message_texture,
-        impl_->message_width,
-        impl_->message_height,
-        white);
-    impl_->update_texture(
         time,
         impl_->rendered_time,
         impl_->time_texture,
         impl_->time_width,
         impl_->time_height,
         muted);
+    const int maximum_message_width = std::max(
+        64,
+        kScreenWidth - 58 - 58 - impl_->time_width - 48);
+    impl_->update_texture(
+        fit_text_to_width(
+            impl_->font,
+            paused ? "Paused - " + impl_->message : impl_->message,
+            maximum_message_width),
+        impl_->rendered_message,
+        impl_->message_texture,
+        impl_->message_width,
+        impl_->message_height,
+        white);
     if (impl_->message_texture) {
         SDL_Rect target{58, kScreenHeight - 145, impl_->message_width, impl_->message_height};
         SDL_RenderCopy(impl_->renderer, impl_->message_texture, nullptr, &target);

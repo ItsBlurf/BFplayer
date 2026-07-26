@@ -5,6 +5,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <string>
+#include <utility>
 #include <vector>
 
 struct sqlite3;
@@ -56,6 +57,8 @@ public:
     bool load_track_preferences(const std::string& path, TrackPreferences& preferences);
     bool set_favorite(const std::string& path, bool favorite);
     bool set_setting(const std::string& key, const std::string& value);
+    bool set_settings(
+        const std::vector<std::pair<std::string, std::string>>& values);
     bool get_setting(const std::string& key, std::string& value);
 
     [[nodiscard]] std::vector<MediaEntry> list_media(

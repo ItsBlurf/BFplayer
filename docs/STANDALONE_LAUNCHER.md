@@ -55,7 +55,7 @@ Logs are written to:
 ## Runtime boundary
 
 The BigApp transition is based on the GPL-3.0-or-later loader core from
-John Törnblom's `ps5-payload-websrv`, but the web server application itself is
+John Tornblom's `ps5-payload-websrv`, but the web server application itself is
 not embedded. Only the process-launch, ptrace, and in-memory ELF replacement
 modules are retained. PS5 Media Center's launcher supplies its own narrow
 loopback listener and launches the player directly from the bytes embedded in

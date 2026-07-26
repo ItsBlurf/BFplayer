@@ -66,7 +66,7 @@ with source, modification notes, and the complete license.
 The original screenshot had a large unstructured empty field, oversized status
 and control text, and a generic glossy icon. The redesign uses:
 
-- a fixed 1920×1080 grid with compact header and footer rails;
+- a fixed 1920x1080 grid with compact header and footer rails;
 - dark navy panel hierarchy with blue outlines and restrained gold accents;
 - a selected-row bar instead of a full bright rectangle;
 - a real empty-library instruction and artwork placeholder;

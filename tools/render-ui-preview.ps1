@@ -1,12 +1,23 @@
 [CmdletBinding()]
 param(
-    [string]$OutFile = (Join-Path $PSScriptRoot '..\docs\ui-preview.png')
+    [ValidateSet('Empty', 'AddMedia')]
+    [string]$View = 'Empty',
+    [string]$OutFile = ''
 )
 
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.Drawing
 
 $root = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
+if (-not $OutFile) {
+    $relativeOutFile = if ($View -eq 'AddMedia') {
+        'docs\ui-add-media-preview.png'
+    }
+    else {
+        'docs\ui-preview.png'
+    }
+    $OutFile = Join-Path $root $relativeOutFile
+}
 $fontCollection = [Drawing.Text.PrivateFontCollection]::new()
 $fontCollection.AddFontFile((Join-Path $root 'assets\fonts\NotoSans-Regular.ttf'))
 $family = $fontCollection.Families[0]
@@ -96,33 +107,77 @@ try {
     $white = Brush '#f0f4ff'
     $muted = Brush '#9daac4'
 
-    $graphics.DrawString('Library', $titleFont, $white, 58, 38)
-    $graphics.DrawString('ALL MEDIA  |  0 ITEMS  |  SORT: SMART', $rowFont, $muted, 58, 119)
-
-    Fill '#09101e' 42 214 1836 744
     $border = [Drawing.Pen]::new([Drawing.ColorTranslator]::FromHtml('#192a47'), 1)
-    $graphics.DrawRectangle($border, 42, 214, 1836, 744)
-
-    $emptyTitle = 'Your library is empty'
-    $emptyHelp = 'Press Cross to choose a movie or TV-show folder.'
-    $titleSize = $graphics.MeasureString($emptyTitle, $titleFont)
-    $helpSize = $graphics.MeasureString($emptyHelp, $rowFont)
-    $graphics.DrawString($emptyTitle, $titleFont, $white, 960 - $titleSize.Width / 2, 486)
-    Fill '#1a4984' ([int](960 - ($helpSize.Width + 76) / 2)) 574 ([int]($helpSize.Width + 76)) 64
-    $actionBorder = [Drawing.Pen]::new([Drawing.ColorTranslator]::FromHtml('#53a4ff'), 1)
-    $graphics.DrawRectangle(
-        $actionBorder,
-        [int](960 - ($helpSize.Width + 76) / 2),
-        574,
-        [int]($helpSize.Width + 76),
-        64)
-    $graphics.DrawString($emptyHelp, $rowFont, $white, 960 - $helpSize.Width / 2, 587)
 
     Fill '#0a1221' 0 990 1920 90
     Fill '#1c3050' 0 990 1920 2
     $hintX = 48
-    $hintX = Draw-Hint 'X' 'Add Media' $hintX $footerFont $muted
-    $null = Draw-Hint 'OPTIONS' 'Menu' $hintX $footerFont $muted
+    if ($View -eq 'AddMedia') {
+        $graphics.DrawString('Add Media Source', $titleFont, $white, 58, 38)
+        $graphics.DrawString('/mnt  |  2 ITEMS', $rowFont, $muted, 58, 119)
+
+        Fill '#09101e' 42 214 1228 744
+        Fill '#0b1425' 1310 214 552 744
+        $graphics.DrawRectangle($border, 42, 214, 1228, 744)
+        $graphics.DrawRectangle($border, 1310, 214, 552, 744)
+
+        Fill '#1a4984' 56 226 1200 60
+        Fill '#f4b22a' 56 226 7 60
+        $graphics.DrawString('FOLDER   usb0', $rowFont, $white, 84, 241)
+        Fill '#0d192c' 56 292 1200 60
+        $graphics.DrawString('FOLDER   usb1', $rowFont, $white, 84, 307)
+
+        $helpRows = @(
+            'SELECTED ITEM',
+            'Cross      Open folder / add movie',
+            'Triangle   Add as one TV show',
+            'Square     Import as mixed library',
+            'Whole-library import is opt-in'
+        )
+        $helpY = 352
+        foreach ($helpRow in $helpRows) {
+            $helpBrush = if ($helpY -eq 352) { $white } else { $muted }
+            $graphics.DrawString($helpRow, $rowFont, $helpBrush, 1364, $helpY)
+            $helpY += 82
+        }
+        $graphics.DrawString(
+            'SELECT A SOURCE ON THE LEFT',
+            $rowFont,
+            $muted,
+            1400,
+            897)
+
+        $hintX = Draw-Hint 'X' 'Open / Add Movie' $hintX $footerFont $muted
+        $hintX = Draw-Hint 'TRIANGLE' 'Add TV Folder' $hintX $footerFont $muted
+        $hintX = Draw-Hint 'SQUARE' 'Import Selected Folder' $hintX $footerFont $muted
+        $hintX = Draw-Hint 'O' 'Up' $hintX $footerFont $muted
+        $null = Draw-Hint 'OPTIONS' 'Close' $hintX $footerFont $muted
+    }
+    else {
+        $graphics.DrawString('Library', $titleFont, $white, 58, 38)
+        $graphics.DrawString('ALL MEDIA  |  0 ITEMS  |  SORT: SMART', $rowFont, $muted, 58, 119)
+
+        Fill '#09101e' 42 214 1836 744
+        $graphics.DrawRectangle($border, 42, 214, 1836, 744)
+
+        $emptyTitle = 'Your library is empty'
+        $emptyHelp = 'Press Cross to choose a movie or TV-show folder.'
+        $titleSize = $graphics.MeasureString($emptyTitle, $titleFont)
+        $helpSize = $graphics.MeasureString($emptyHelp, $rowFont)
+        $graphics.DrawString($emptyTitle, $titleFont, $white, 960 - $titleSize.Width / 2, 486)
+        Fill '#1a4984' ([int](960 - ($helpSize.Width + 76) / 2)) 574 ([int]($helpSize.Width + 76)) 64
+        $actionBorder = [Drawing.Pen]::new([Drawing.ColorTranslator]::FromHtml('#53a4ff'), 1)
+        $graphics.DrawRectangle(
+            $actionBorder,
+            [int](960 - ($helpSize.Width + 76) / 2),
+            574,
+            [int]($helpSize.Width + 76),
+            64)
+        $graphics.DrawString($emptyHelp, $rowFont, $white, 960 - $helpSize.Width / 2, 587)
+
+        $hintX = Draw-Hint 'X' 'Add Media' $hintX $footerFont $muted
+        $null = Draw-Hint 'OPTIONS' 'Menu' $hintX $footerFont $muted
+    }
 
     $target = [IO.Path]::GetFullPath($OutFile)
     $directory = Split-Path -Parent $target

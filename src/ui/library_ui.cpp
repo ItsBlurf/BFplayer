@@ -438,6 +438,7 @@ struct LibraryUi::Impl {
     int saved_library_first_visible = 0;
     std::array<bool, SDL_CONTROLLER_BUTTON_MAX> controller_buttons_down{};
     std::vector<Label> row_labels;
+    std::vector<Label> browser_help_labels;
     Label title_label;
     Label status_label;
     Label notice_label;
@@ -568,24 +569,20 @@ struct LibraryUi::Impl {
         LibraryDatabase database;
         const bool saved =
             database.open(database_path) &&
-            database.set_setting(
-                std::string(kSettingVolumePercent),
-                std::to_string(snapshot.volume_percent)) &&
-            database.set_setting(
-                std::string(kSettingShortSeekSeconds),
-                std::to_string(snapshot.short_seek_seconds)) &&
-            database.set_setting(
-                std::string(kSettingLongSeekSeconds),
-                std::to_string(snapshot.long_seek_seconds)) &&
-            database.set_setting(
-                std::string(kSettingOsdDurationMs),
-                std::to_string(snapshot.osd_duration_ms)) &&
-            database.set_setting(
-                std::string(kSettingResumePlayback),
-                snapshot.resume_playback ? "1" : "0") &&
-            database.set_setting(
-                std::string(kSettingAutoSubtitles),
-                snapshot.auto_subtitles ? "1" : "0");
+            database.set_settings({
+                {std::string(kSettingVolumePercent),
+                 std::to_string(snapshot.volume_percent)},
+                {std::string(kSettingShortSeekSeconds),
+                 std::to_string(snapshot.short_seek_seconds)},
+                {std::string(kSettingLongSeekSeconds),
+                 std::to_string(snapshot.long_seek_seconds)},
+                {std::string(kSettingOsdDurationMs),
+                 std::to_string(snapshot.osd_duration_ms)},
+                {std::string(kSettingResumePlayback),
+                 snapshot.resume_playback ? "1" : "0"},
+                {std::string(kSettingAutoSubtitles),
+                 snapshot.auto_subtitles ? "1" : "0"},
+            });
         if (!saved) {
             last_error =
                 "Unable to save playback settings: " + database.error();
@@ -701,6 +698,7 @@ struct LibraryUi::Impl {
             player_settings = {};
             if (!persist_player_settings()) {
                 player_settings = previous;
+                set_notice("Unable to save playback settings", 8000);
             }
             SDL_LockMutex(mutex);
             ++published_generation;
@@ -757,6 +755,7 @@ struct LibraryUi::Impl {
         }
         if (!persist_player_settings()) {
             player_settings = previous;
+            set_notice("Unable to save playback settings", 8000);
         }
         SDL_LockMutex(mutex);
         ++published_generation;
@@ -881,9 +880,16 @@ struct LibraryUi::Impl {
     bool load_browser_directory(const std::string& requested_path) {
         const std::string path = normalize_media_source_path(requested_path);
         struct stat root_status {};
-        if (path.empty() || lstat(path.c_str(), &root_status) != 0 ||
-            !S_ISDIR(root_status.st_mode) || S_ISLNK(root_status.st_mode)) {
-            last_error = "Unable to open folder: " + path;
+        errno = 0;
+        const bool root_exists =
+            !path.empty() && lstat(path.c_str(), &root_status) == 0;
+        if (!root_exists || !S_ISDIR(root_status.st_mode) ||
+            S_ISLNK(root_status.st_mode)) {
+            const int value =
+                !root_exists && errno != 0 ? errno : ENOTDIR;
+            last_error = "Unable to open folder: " +
+                (path.empty() ? std::string("<empty>") : path) +
+                " (errno " + std::to_string(value) + ")";
             return false;
         }
         int open_flags = O_RDONLY;
@@ -926,6 +932,13 @@ struct LibraryUi::Impl {
         int entry_error = 0;
         std::string entry_error_path;
         std::size_t entries_seen = 0;
+        std::size_t directory_items = 0;
+        std::size_t media_items = 0;
+        std::size_t stat_fallbacks = 0;
+        std::size_t unreadable_entries = 0;
+        std::size_t skipped_symlinks = 0;
+        std::size_t filtered_entries = 0;
+        std::size_t nonregular_entries = 0;
         for (;;) {
             errno = 0;
             dirent* item = readdir(directory);
@@ -963,14 +976,17 @@ struct LibraryUi::Impl {
                         value = errno;
                     }
                     if (!fatal_browser_io_errno(value)) {
+                        ++unreadable_entries;
                         continue;
                     }
                     entry_error = value != 0 ? value : EIO;
                     entry_error_path = item_path;
                     break;
                 }
+                ++stat_fallbacks;
             }
             if (S_ISLNK(status.st_mode)) {
+                ++skipped_symlinks;
                 continue;
             }
             // This is an interactive one-directory-at-a-time picker. Mount
@@ -984,6 +1000,7 @@ struct LibraryUi::Impl {
                     folded == ".spotlight-v100" ||
                     folded == ".trashes" ||
                     folded == "lost+found") {
+                    ++filtered_entries;
                     continue;
                 }
                 updated.push_back({
@@ -991,6 +1008,7 @@ struct LibraryUi::Impl {
                     std::move(item_path),
                     true,
                     MediaKind::unknown});
+                ++directory_items;
                 if (updated.size() > kMaxBrowserItems) {
                     entry_error = EOVERFLOW;
                     entry_error_path = path;
@@ -999,6 +1017,7 @@ struct LibraryUi::Impl {
                 continue;
             }
             if (!S_ISREG(status.st_mode)) {
+                ++nonregular_entries;
                 continue;
             }
             const MediaKind kind = classify_media_path(item_path);
@@ -1009,14 +1028,17 @@ struct LibraryUi::Impl {
                     std::move(item_path),
                     false,
                     kind});
+                ++media_items;
                 if (updated.size() > kMaxBrowserItems) {
                     entry_error = EOVERFLOW;
                     entry_error_path = path;
                     break;
                 }
+            } else {
+                ++filtered_entries;
             }
         }
-        closedir(directory);
+        const int close_error = closedir(directory) == 0 ? 0 : errno;
         if (entry_error != 0) {
             last_error =
                 (entry_error == EOVERFLOW
@@ -1029,6 +1051,11 @@ struct LibraryUi::Impl {
         if (read_error != 0) {
             last_error = "Folder read failed: " + path +
                 " (errno " + std::to_string(read_error) + ")";
+            return false;
+        }
+        if (close_error != 0) {
+            last_error = "Folder close failed: " + path +
+                " (errno " + std::to_string(close_error) + ")";
             return false;
         }
         std::sort(
@@ -1051,9 +1078,17 @@ struct LibraryUi::Impl {
         SDL_UnlockMutex(mutex);
         diagnostics_log(
             DiagnosticLevel::info,
-            "source-browser folder=%s entries=%zu",
+            "source-browser folder=%s shown=%zu entries_seen=%zu directories=%zu media=%zu stat_fallbacks=%zu unreadable=%zu symlinks=%zu filtered=%zu nonregular=%zu",
             path.c_str(),
-            updated_count);
+            updated_count,
+            entries_seen,
+            directory_items,
+            media_items,
+            stat_fallbacks,
+            unreadable_entries,
+            skipped_symlinks,
+            filtered_entries,
+            nonregular_entries);
         return true;
     }
 
@@ -1162,6 +1197,7 @@ struct LibraryUi::Impl {
             annotate_media_sources(entries, sources);
             SDL_UnlockMutex(mutex);
             set_notice("IMPORT FAILED  |  " + last_error, 8000);
+            (void)start_scan();
             return;
         }
         diagnostics_log(
@@ -1386,9 +1422,20 @@ struct LibraryUi::Impl {
     }
 
     void add_source(MediaSourceKind kind, const std::string& raw_path) {
+        SDL_LockMutex(mutex);
+        const bool import_active =
+            import_running || import_result_ready || import_thread != nullptr;
+        SDL_UnlockMutex(mutex);
+        if (import_active) {
+            set_notice(
+                "Finish or cancel the current library import first",
+                5000);
+            return;
+        }
         stop_scan();
         const std::string path = normalize_media_source_path(raw_path);
         struct stat status {};
+        errno = 0;
         const bool valid =
             lstat(path.c_str(), &status) == 0 &&
             !S_ISLNK(status.st_mode) &&
@@ -1396,9 +1443,19 @@ struct LibraryUi::Impl {
              (kind == MediaSourceKind::movie_file && S_ISREG(status.st_mode) &&
               classify_media_path(path) != MediaKind::unknown &&
               classify_media_path(path) != MediaKind::subtitle));
+        const int validation_errno = errno;
         if (!valid) {
             last_error = "Selected media source is no longer available";
+            diagnostics_log(
+                DiagnosticLevel::error,
+                "media-source invalid kind=%s path=%s errno=%d",
+                kind == MediaSourceKind::tv_folder
+                    ? "tv-folder"
+                    : "movie-file",
+                path.c_str(),
+                validation_errno);
             report_browser_failure();
+            (void)start_scan();
             return;
         }
 
@@ -1432,6 +1489,7 @@ struct LibraryUi::Impl {
             annotate_media_sources(entries, sources);
             SDL_UnlockMutex(mutex);
             report_browser_failure();
+            (void)start_scan();
             return;
         }
         diagnostics_log(
@@ -1511,6 +1569,7 @@ struct LibraryUi::Impl {
             sources = std::move(previous_sources);
             SDL_UnlockMutex(mutex);
             set_notice("Unable to save library removal");
+            (void)start_scan();
             return;
         }
 
@@ -1520,8 +1579,19 @@ struct LibraryUi::Impl {
             SDL_LockMutex(mutex);
             sources = std::move(previous_sources);
             SDL_UnlockMutex(mutex);
-            (void)persist_sources();
-            set_notice("Unable to remove source from library database");
+            if (!persist_sources()) {
+                diagnostics_log(
+                    DiagnosticLevel::error,
+                    "media-source removal rollback-save failed path=%s error=%s",
+                    target.path.c_str(),
+                    last_error.c_str());
+                set_notice(
+                    "Removal failed and source rollback could not be saved",
+                    8000);
+            } else {
+                set_notice("Unable to remove source from library database");
+            }
+            (void)start_scan();
             return;
         }
         std::vector<MediaEntry> remaining = database.list_media();
@@ -1539,6 +1609,7 @@ struct LibraryUi::Impl {
                 : "movie-file",
             target.path.c_str());
         set_notice("Removed from library: " + display);
+        (void)start_scan();
     }
 
     void browser_parent() {
@@ -1793,6 +1864,10 @@ struct LibraryUi::Impl {
             destroy_label(label);
         }
         row_labels.clear();
+        for (Label& label : browser_help_labels) {
+            destroy_label(label);
+        }
+        browser_help_labels.clear();
         destroy_label(title_label);
         destroy_label(status_label);
         destroy_label(notice_label);
@@ -2520,8 +2595,13 @@ struct LibraryUi::Impl {
                         kUiWidth - 180),
                     white);
             }
-            add_footer_hint(FooterGlyph::cross, "", "Open / Add Movie");
-            add_footer_hint(FooterGlyph::triangle, "", "Add TV Folder");
+            add_footer_hint(
+                FooterGlyph::cross,
+                "",
+                is_importing ? "Browse" : "Open / Add Movie");
+            if (!is_importing) {
+                add_footer_hint(FooterGlyph::triangle, "", "Add TV Folder");
+            }
             add_footer_hint(
                 FooterGlyph::square,
                 "",
@@ -2539,9 +2619,35 @@ struct LibraryUi::Impl {
                     row_font,
                     is_importing && !progress_path.empty()
                         ? "CHECKING  " + progress_path
-                        : "SELECT A MOVIE FILE OR TV-SHOW FOLDER",
+                        : "SELECT A SOURCE ON THE LEFT",
                     kArtworkPanelWidth - 28),
                 muted);
+            const std::vector<std::string> browser_help = is_importing
+                ? std::vector<std::string>{
+                      "IMPORT IN PROGRESS",
+                      "Loose video files become Movies",
+                      "Child folders become TV Shows",
+                      "Square cancels safely",
+                      "Saves only after import completes",
+                  }
+                : std::vector<std::string>{
+                      "SELECTED ITEM",
+                      "Cross      Open folder / add movie",
+                      "Triangle   Add as one TV show",
+                      "Square     Import as mixed library",
+                      "Whole-library import is opt-in",
+                  };
+            browser_help_labels.reserve(browser_help.size());
+            for (std::size_t index = 0; index < browser_help.size(); ++index) {
+                browser_help_labels.push_back(make_label(
+                    renderer,
+                    row_font,
+                    fit_text_to_width(
+                        row_font,
+                        browser_help[index],
+                        kArtworkPanelWidth - 88),
+                    index == 0 ? white : muted));
+            }
             for (const BrowserEntry& item : visible_browser) {
                 std::string text = item.directory
                     ? "FOLDER   " + item.name
@@ -2619,8 +2725,8 @@ struct LibraryUi::Impl {
                     rows = {
                         "Cross        Open or play                         Play / pause",
                         "Circle       Queue or go back                     Subtitle track",
-                        "Square       Import selected library              Audio track",
-                        "Triangle     Add or remove a TV show              Video track",
+                        "Square       Add Media: Import folder             Audio track",
+                        "Triangle     Add TV / remove source               Video track",
                         "D-pad        Navigate and change category         Seek short / long",
                         "L1 / R1      Previous or next page                 Previous / next chapter",
                         "L3 / R3      Favorite / sort                      Volume down / up",
@@ -3102,6 +3208,19 @@ LibraryAction LibraryUi::handle_event(const SDL_Event& event, std::string& selec
         return LibraryAction::exit;
     }
 
+    if (event.type == SDL_CONTROLLERDEVICEADDED ||
+        event.type == SDL_CONTROLLERDEVICEREMOVED) {
+        SDL_LockMutex(impl_->mutex);
+        impl_->controller_buttons_down.fill(false);
+        SDL_UnlockMutex(impl_->mutex);
+        diagnostics_log(
+            DiagnosticLevel::info,
+            "library-controller state-reset event=%s id=%d",
+            event.type == SDL_CONTROLLERDEVICEADDED ? "added" : "removed",
+            event.cdevice.which);
+        return LibraryAction::none;
+    }
+
     if (event.type == SDL_CONTROLLERBUTTONUP) {
         SDL_LockMutex(impl_->mutex);
         if (event.cbutton.button < impl_->controller_buttons_down.size()) {
@@ -3141,6 +3260,46 @@ LibraryAction LibraryUi::handle_event(const SDL_Event& event, std::string& selec
             impl_->handle_browser_button(event.cbutton.button);
             return LibraryAction::none;
         }
+    }
+
+    if (browsing && event.type == SDL_KEYDOWN) {
+        int button = -1;
+        switch (event.key.keysym.sym) {
+            case SDLK_RETURN:
+            case SDLK_KP_ENTER:
+                button = SDL_CONTROLLER_BUTTON_A;
+                break;
+            case SDLK_BACKSPACE:
+                button = SDL_CONTROLLER_BUTTON_B;
+                break;
+            case SDLK_ESCAPE:
+                button = kControllerOptionsButton;
+                break;
+            case SDLK_UP:
+                button = SDL_CONTROLLER_BUTTON_DPAD_UP;
+                break;
+            case SDLK_DOWN:
+                button = SDL_CONTROLLER_BUTTON_DPAD_DOWN;
+                break;
+            case SDLK_PAGEUP:
+                button = SDL_CONTROLLER_BUTTON_LEFTSHOULDER;
+                break;
+            case SDLK_PAGEDOWN:
+                button = SDL_CONTROLLER_BUTTON_RIGHTSHOULDER;
+                break;
+            case SDLK_x:
+                button = SDL_CONTROLLER_BUTTON_X;
+                break;
+            case SDLK_y:
+                button = SDL_CONTROLLER_BUTTON_Y;
+                break;
+            default:
+                break;
+        }
+        if (button >= 0) {
+            impl_->handle_browser_button(static_cast<Uint8>(button));
+        }
+        return LibraryAction::none;
     }
 
     if (overlay_open && event.type == SDL_KEYDOWN) {
@@ -3223,7 +3382,7 @@ LibraryAction LibraryUi::handle_event(const SDL_Event& event, std::string& selec
 
     const auto open_browser_for_empty_library = [&]() {
         SDL_LockMutex(impl_->mutex);
-        const bool empty = impl_->entries.empty() && !impl_->scanning;
+        const bool empty = impl_->entries.empty();
         SDL_UnlockMutex(impl_->mutex);
         if (empty) {
             impl_->open_browser();
@@ -3514,12 +3673,17 @@ void LibraryUi::render() {
     }
 
     const bool overlay_open = impl_->overlay != LibraryOverlay::none;
+    const bool selectable_overlay =
+        impl_->overlay == LibraryOverlay::menu ||
+        impl_->overlay == LibraryOverlay::settings;
     const bool empty_library_view =
         !overlay_open &&
         !impl_->browser_mode &&
         impl_->row_labels.empty();
     const int active_selection =
-        overlay_open ? impl_->overlay_selected : impl_->selected;
+        overlay_open
+            ? (selectable_overlay ? impl_->overlay_selected : -1)
+            : impl_->selected;
     const int active_first = overlay_open ? 0 : impl_->first_visible;
     const int content_width =
         overlay_open || empty_library_view
@@ -3644,7 +3808,9 @@ void LibraryUi::render() {
         SDL_Rect frame{target.x - 8, target.y - 8, target.w + 16, target.h + 16};
         SDL_RenderFillRect(impl_->renderer, &frame);
         SDL_RenderCopy(impl_->renderer, impl_->artwork_texture, nullptr, &target);
-    } else if (!overlay_open && !empty_library_view) {
+    } else if (!overlay_open &&
+               !empty_library_view &&
+               !impl_->browser_mode) {
         SDL_SetRenderDrawColor(impl_->renderer, 15, 28, 51, 255);
         SDL_Rect empty_art{
             kArtworkPanelX + 34,
@@ -3654,6 +3820,27 @@ void LibraryUi::render() {
         SDL_RenderFillRect(impl_->renderer, &empty_art);
         SDL_SetRenderDrawColor(impl_->renderer, 28, 49, 82, 255);
         SDL_RenderDrawRect(impl_->renderer, &empty_art);
+    }
+    if (!overlay_open &&
+        impl_->browser_mode &&
+        !impl_->browser_help_labels.empty()) {
+        const int help_x = kArtworkPanelX + 54;
+        int help_y = kRowsTop + 126;
+        for (const Label& label : impl_->browser_help_labels) {
+            if (label.texture) {
+                SDL_Rect target{
+                    help_x,
+                    help_y,
+                    label.width,
+                    label.height};
+                SDL_RenderCopy(
+                    impl_->renderer,
+                    label.texture,
+                    nullptr,
+                    &target);
+            }
+            help_y += 82;
+        }
     }
     if (!overlay_open &&
         !empty_library_view &&

@@ -472,9 +472,7 @@ pt_perror(pid_t pid, const char *s) {
   int err = pt_getint(pid, addr);
   char buf[255];
 
-  strcpy(buf, s);
-  strcat(buf, ": ");
-  strcat(buf, strerror(err));
+  snprintf(buf, sizeof(buf), "%s: %s", s ? s : "", strerror(err));
   puts(buf);
 }
 

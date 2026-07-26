@@ -167,6 +167,24 @@ int main() {
           "empty preference path is rejected");
     std::string setting;
     check(database.get_setting("sort", setting) && setting == "natural", "setting loads");
+    check(
+        database.set_settings({
+            {"settings.first", "before"},
+            {"settings.second", "two"},
+        }),
+        "settings batch saves atomically");
+    const std::string invalid_key("bad\0key", 7);
+    check(
+        !database.set_settings({
+            {"settings.first", "after"},
+            {invalid_key, "invalid"},
+        }),
+        "invalid settings batch fails");
+    setting.clear();
+    check(
+        database.get_setting("settings.first", setting) &&
+            setting == "before",
+        "failed settings batch rolls back earlier writes");
 
     check(database.set_favorite("/media/A.mkv", true), "favorite saves");
     database.close();

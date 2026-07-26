@@ -1,5 +1,56 @@
 # Changelog
 
+## 0.1.0-alpha.16 - full offline-audit test build
+
+### Add Media reliability
+
+- Made first-run Cross open Add Media even while the initial library worker is
+  settling, removing a short interval where the focused action could appear
+  unresponsive.
+- Added a clear in-screen action legend for opening one movie, adding one TV
+  folder, or explicitly importing a mixed library; long instructions are
+  width-checked and no longer clip in the artwork panel.
+- Added correct keyboard routing for the Add Media browser instead of letting
+  keyboard events fall through to the hidden library selection.
+- Prevented movie/TV-source mutations from racing a running or not-yet-applied
+  bulk import. Import cancellation still discards every partial result.
+- Restored background scanning after every failed add, import-save, or removal
+  path, and after a successful source removal.
+- Reports a source-removal rollback-save failure instead of silently ignoring
+  a second database error.
+- Expanded root/source-browser logs with shown, visited, directory, media,
+  fallback, unreadable, symlink, filtered, and non-regular counts.
+- Preserved fatal-I/O precedence over simultaneous cancellation so a storage
+  failure cannot be mislabeled as a harmless user cancel.
+
+### Player and settings audit
+
+- Made multi-field playback settings writes atomic; a failed database write
+  now rolls back every field and the UI restores the previous live values.
+- Added a tested rollback case for a settings batch that fails after an
+  earlier value was written.
+- Added PS5-reachable mute/unmute to the playback Options menu and removed
+  inaccurate Create-button claims.
+- Corrected the complete in-app shortcut page so Square is explicitly scoped
+  to Add Media rather than the normal library.
+- Stopped static Controls/About pages from drawing a misleading selected row.
+- Pixel-bounded playback messages and modal text so long decoder/file errors
+  cannot overlap the timestamp or render off-screen.
+- Final resume, track-preference, and playback-setting save failures now
+  produce explicit diagnostics.
+- Reset held-button state on controller hot-plug and keep the main controller
+  handle synchronized while the library is active.
+- Made launcher error formatting bounded instead of concatenating into a fixed
+  buffer.
+
+### Offline verification
+
+- Added and visually inspected a deterministic Add Media preview alongside the
+  empty-library preview.
+- Rechecked the current SDK v0.41/PacBrew v0.37 inputs, host unit suite, GCC
+  analyzer, PS5 compile/link/package, standalone ELF structure, embedded
+  English-only Media metadata, secret scan, and release contents.
+
 ## 0.1.0-alpha.15 - responsive import test build
 
 ### Non-blocking library import

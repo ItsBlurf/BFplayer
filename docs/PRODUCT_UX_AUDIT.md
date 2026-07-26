@@ -3,7 +3,7 @@
 This audit covers the PS5 Media Center library, Add Media flow, playback
 controls, settings, diagnostics, and current build inputs.
 
-## Findings fixed for alpha.14 and alpha.15
+## Findings fixed for alpha.14 through alpha.16
 
 - Add Media could enumerate a removable exFAT entry but silently discard it
   when descriptor-relative `fstatat` failed. Bulk import now uses the same
@@ -38,6 +38,25 @@ controls, settings, diagnostics, and current build inputs.
   distinct recovery guidance and do not masquerade as a first-run library.
 - Search and Clear Search are now available in the controller Options menu;
   Left/Right also move display settings in the direction shown.
+- First-run Cross no longer waits for the initial scanner flag to clear before
+  opening Add Media. The browser now has its own keyboard route as well as the
+  PS5 controller route, so inputs cannot fall through to the hidden library.
+- Add Media now carries a compact, width-checked action legend. Cross handles
+  a folder or one movie, Triangle adds one TV folder, and Square opts into a
+  mixed-library import; the checked-in Add Media preview verifies this layout.
+- Source-browser diagnostics now record the complete disposition of a folder
+  listing, including visible directories/media, descriptor-stat fallbacks,
+  unreadable entries, symlinks, filtered metadata, and non-regular entries.
+- A library mutation cannot race an active or pending import. Failed
+  persistence/removal paths restart the last-good scan instead of leaving the
+  scanner stopped.
+- All playback setting fields are now persisted in one SQLite transaction.
+  Failed saves roll back on disk and restore the prior live values.
+- Mute is reachable from the PS5 playback Options menu. Controller hot-plug
+  clears held-button state and updates the controller handle used by playback.
+- Fixed-size launcher error text uses bounded formatting.
+- Long playback messages, panel titles, and panel rows are fitted to their
+  actual pixel bounds without cutting a UTF-8 codepoint.
 
 ## Interaction model
 

@@ -85,13 +85,16 @@ bool folder_contains_video(
     output.skipped_symlinks += scan.skipped_symlinks;
     output.skipped_devices += scan.skipped_devices;
     report_progress(output, direct_entries, path, progress);
-    if (cancelled && cancelled()) {
-        output.cancelled = true;
-        return false;
-    }
     if (scan.fatal_errno != 0) {
         output.fatal_errno = scan.fatal_errno;
         output.fatal_path = scan.fatal_path;
+        return false;
+    }
+    // A fatal filesystem error always wins over a simultaneous cancel request.
+    // Cancellation is a user-facing non-error; masking EIO/ESTALE/EBADF/EFAULT
+    // as cancellation would hide the condition that must abort traversal.
+    if (cancelled && cancelled()) {
+        output.cancelled = true;
         return false;
     }
     // The scanner reports incomplete when our visitor intentionally stops at

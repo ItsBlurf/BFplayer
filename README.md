@@ -7,6 +7,8 @@ evidence and references.
 
 ![PS5 Media Center library preview](docs/ui-preview.png)
 
+![PS5 Media Center Add Media preview](docs/ui-add-media-preview.png)
+
 ## Current foundation
 
 - One standalone resident payload containing the player, dashboard-tile
@@ -135,9 +137,8 @@ Controller mappings during direct-file playback:
 | D-pad Down/Up | Seek by the configurable long step (60 seconds by default) |
 | L1/R1 | Previous/next chapter, or -/+600 seconds when none exist |
 | L3/R3 | Volume down/up |
-| Create | Mute/unmute |
 | Touchpad | Show the complete playback control map |
-| Options | Open the playback menu (controls, subtitle timing, return to library) |
+| Options | Open the playback menu (mute, controls, settings, subtitle timing, return to library) |
 
 Controller mappings in the media library:
 
@@ -148,7 +149,6 @@ Controller mappings in the media library:
 | Triangle | Remove the selected Movie/TV Show source (press twice) |
 | D-pad Left/Right | Previous/next library category |
 | Touchpad | Open the Add Media Source browser |
-| Create | Clear the active search |
 | L3 | Add/remove the selected item from Favorites |
 | R3 | Cycle and persist the library sort mode |
 | D-pad Up/Down | Move one item |
@@ -183,8 +183,9 @@ acceptance gates are tracked in
 [docs/COMPLETION_MATRIX.md](docs/COMPLETION_MATRIX.md).
 The current alpha is exhaustively offline-verified. Earlier library/playback
 paths and alpha.13 launcher installation have partial console evidence, while
-the alpha.15 background USB-import interaction still requires controller
+the alpha.16 Add Media and background USB-import interaction still requires controller
 acceptance. See
+[docs/ALPHA16_OFFLINE_VERIFICATION.md](docs/ALPHA16_OFFLINE_VERIFICATION.md),
 [docs/ALPHA15_HARDWARE_IMPORT_PROBE.md](docs/ALPHA15_HARDWARE_IMPORT_PROBE.md),
 [docs/ALPHA13_OFFLINE_VERIFICATION.md](docs/ALPHA13_OFFLINE_VERIFICATION.md),
 [docs/FULL_VERIFICATION_AUDIT.md](docs/FULL_VERIFICATION_AUDIT.md), and
