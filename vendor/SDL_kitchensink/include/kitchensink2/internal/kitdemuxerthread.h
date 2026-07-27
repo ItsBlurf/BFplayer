@@ -6,6 +6,7 @@
 #include "kitchensink2/internal/kitpacketbuffer.h"
 #include "kitchensink2/kitconfig.h"
 #include "kitchensink2/kitsource.h"
+#include <SDL_atomic.h>
 #include <SDL_thread.h>
 #include <stdbool.h>
 
@@ -14,6 +15,7 @@ typedef struct Kit_DemuxerThread {
     SDL_Thread *thread;
     SDL_atomic_t run;
     SDL_atomic_t seek;
+    SDL_SpinLock seek_lock;
     int64_t seek_target;
 } Kit_DemuxerThread;
 

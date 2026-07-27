@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.0-alpha.31 - responsive seek and track switching
+
+- Wake the demuxer immediately for seeks instead of waiting for full buffers
+- Keep the newest seek request when inputs arrive close together
+- Refresh audio and subtitle packets around the current playback position
+- Stop rebuilding the video texture when only the subtitle track changes
+
 ## 0.1.0-alpha.30 - low-memory standalone launch
 
 - Stream the embedded compressed player to an atomically replaced runtime file

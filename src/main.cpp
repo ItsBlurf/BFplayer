@@ -899,6 +899,27 @@ void destroy_video_textures(App& app) {
     app.video = nullptr;
 }
 
+bool create_subtitle_texture(App& app) {
+    SDL_DestroyTexture(app.subtitles);
+    app.subtitles = nullptr;
+    if (Kit_GetPlayerSubtitleStream(app.player) < 0) {
+        return true;
+    }
+    SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "nearest");
+    app.subtitles = SDL_CreateTexture(
+        app.renderer,
+        SDL_PIXELFORMAT_RGBA32,
+        SDL_TEXTUREACCESS_STATIC,
+        kSubtitleAtlasSize,
+        kSubtitleAtlasSize);
+    if (!app.subtitles) {
+        log_sdl("SDL_CreateTexture(subtitle atlas)");
+        return false;
+    }
+    SDL_SetTextureBlendMode(app.subtitles, SDL_BLENDMODE_BLEND);
+    return true;
+}
+
 bool create_video_textures(App& app) {
     destroy_video_textures(app);
     Kit_PlayerInfo info{};
@@ -919,21 +940,7 @@ bool create_video_textures(App& app) {
         SDL_RenderSetLogicalSize(app.renderer, kWindowWidth, kWindowHeight);
     }
 
-    if (Kit_GetPlayerSubtitleStream(app.player) >= 0) {
-        SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "nearest");
-        app.subtitles = SDL_CreateTexture(
-            app.renderer,
-            SDL_PIXELFORMAT_RGBA32,
-            SDL_TEXTUREACCESS_STATIC,
-            kSubtitleAtlasSize,
-            kSubtitleAtlasSize);
-        if (!app.subtitles) {
-            log_sdl("SDL_CreateTexture(subtitle atlas)");
-            return false;
-        }
-        SDL_SetTextureBlendMode(app.subtitles, SDL_BLENDMODE_BLEND);
-    }
-    return true;
+    return create_subtitle_texture(app);
 }
 
 double player_display_aspect(
@@ -976,6 +983,7 @@ bfplayer::VideoLayout player_video_layout(App& app) {
 
 bool set_stream(App& app, Kit_StreamType type, int index) {
     const int previous = Kit_GetPlayerStream(app.player, type);
+    const double refresh_position = Kit_GetPlayerPosition(app.player);
     if (previous == index) {
         return true;
     }
@@ -992,8 +1000,10 @@ bool set_stream(App& app, Kit_StreamType type, int index) {
     bool resources_ready = true;
     if (type == KIT_STREAMTYPE_AUDIO) {
         resources_ready = open_audio(app);
-    } else if (type == KIT_STREAMTYPE_VIDEO || type == KIT_STREAMTYPE_SUBTITLE) {
+    } else if (type == KIT_STREAMTYPE_VIDEO) {
         resources_ready = create_video_textures(app);
+    } else if (type == KIT_STREAMTYPE_SUBTITLE) {
+        resources_ready = create_subtitle_texture(app);
     }
     if (!resources_ready) {
         bfplayer::diagnostics_log(
@@ -1007,7 +1017,9 @@ bool set_stream(App& app, Kit_StreamType type, int index) {
         const bool resources_restored = decoder_restored &&
             (type == KIT_STREAMTYPE_AUDIO
                  ? open_audio(app)
-                 : create_video_textures(app));
+                 : type == KIT_STREAMTYPE_SUBTITLE
+                     ? create_subtitle_texture(app)
+                     : create_video_textures(app));
         if (!resources_restored) {
             bfplayer::diagnostics_log(
                 bfplayer::DiagnosticLevel::error,
@@ -1025,6 +1037,27 @@ bool set_stream(App& app, Kit_StreamType type, int index) {
         app.source_display_aspect = inspect_video_source(
             static_cast<const AVFormatContext*>(app.source->format_ctx),
             index).display_aspect;
+    }
+    if (index >= 0 &&
+        (type == KIT_STREAMTYPE_AUDIO || type == KIT_STREAMTYPE_SUBTITLE) &&
+        std::isfinite(refresh_position)) {
+        /*
+         * The demuxer may already be several seconds ahead of the playback
+         * clock. Refresh packets around the current scene so the new track is
+         * visible/audible immediately without changing the viewing position.
+         */
+        const double refresh_from = std::max(0.0, refresh_position);
+        if (Kit_PlayerSeek(app.player, refresh_from) == 0) {
+            if (app.audio != 0) {
+                SDL_ClearQueuedAudio(app.audio);
+            }
+            bfplayer::diagnostics_log(
+                bfplayer::DiagnosticLevel::info,
+                "track-switch refresh type=%d position=%.3f seek=%.3f",
+                type,
+                refresh_position,
+                refresh_from);
+        }
     }
 
     bfplayer::diagnostics_log(

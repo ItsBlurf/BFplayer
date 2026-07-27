@@ -22,6 +22,15 @@ const libraryUi = fs.readFileSync(
 const player = fs.readFileSync(
     path.join(root, 'src', 'main.cpp'),
     'utf8');
+const demuxThread = fs.readFileSync(
+    path.join(
+        root,
+        'vendor',
+        'SDL_kitchensink',
+        'src',
+        'internal',
+        'kitdemuxerthread.c'),
+    'utf8');
 const playbackOsd = fs.readFileSync(
     path.join(root, 'src', 'ui', 'playback_osd.cpp'),
     'utf8');
@@ -234,6 +243,19 @@ assert(player.includes('"Unmute audio" : "Mute audio"'));
 assert(player.includes('kSettingShortSeekSeconds'));
 assert(player.includes('app.settings.short_seek_seconds'));
 assert(player.includes('app.settings.long_seek_seconds'));
+assert(player.includes('create_subtitle_texture'),
+    'subtitle switching updates only the subtitle texture');
+assert(player.includes('track-switch refresh'),
+    'audio and subtitle switches refresh around the current position');
+assert(!player.includes(
+    'type == KIT_STREAMTYPE_VIDEO || type == KIT_STREAMTYPE_SUBTITLE'),
+    'subtitle switching does not rebuild the video texture');
+assert(demuxThread.includes(
+    'Kit_SignalDemuxer(demuxer_thread->demuxer)'),
+    'seek wakes a demuxer blocked by full packet buffers');
+assert(!demuxThread.includes(
+    'if(SDL_AtomicGet(&demuxer_thread->seek))\n        return;'),
+    'a newer seek replaces a pending target instead of being discarded');
 assert(player.includes(
     'Kit_SetHint(KIT_HINT_THREAD_COUNT, kVideoDecoderThreads)'));
 assert(player.includes('constexpr int kVideoDecoderThreads = 16'));

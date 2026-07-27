@@ -8,8 +8,12 @@ static int Kit_DemuxMain(void *ptr) {
     Kit_DemuxerThread *thread = ptr;
     while(SDL_AtomicGet(&thread->run)) {
         if(SDL_AtomicGet(&thread->seek)) {
-            Kit_DemuxerSeek(thread->demuxer, thread->seek_target);
+            int64_t seek_target;
+            SDL_AtomicLock(&thread->seek_lock);
+            seek_target = thread->seek_target;
             SDL_AtomicSet(&thread->seek, 0);
+            SDL_AtomicUnlock(&thread->seek_lock);
+            Kit_DemuxerSeek(thread->demuxer, seek_target);
         }
         if(!Kit_RunDemuxer(thread->demuxer))
             break;
@@ -28,6 +32,7 @@ Kit_DemuxerThread *Kit_CreateDemuxerThread(Kit_Demuxer *demuxer) {
 
     demuxer_thread->thread = NULL;
     demuxer_thread->demuxer = demuxer;
+    demuxer_thread->seek_lock = 0;
     demuxer_thread->seek_target = 0;
     SDL_AtomicSet(&demuxer_thread->run, 0);
     SDL_AtomicSet(&demuxer_thread->seek, 0);
@@ -38,10 +43,17 @@ exit_0:
 }
 
 void Kit_SeekDemuxerThread(Kit_DemuxerThread *demuxer_thread, int64_t seek_target) {
-    if(SDL_AtomicGet(&demuxer_thread->seek))
-        return;
+    SDL_AtomicLock(&demuxer_thread->seek_lock);
     demuxer_thread->seek_target = seek_target;
     SDL_AtomicSet(&demuxer_thread->seek, 1);
+    SDL_AtomicUnlock(&demuxer_thread->seek_lock);
+
+    /*
+     * Wake a demuxer blocked by a full packet buffer so it observes the seek
+     * immediately. The demux thread remains the sole owner of the actual seek
+     * and flush, including the decoder control packets.
+     */
+    Kit_SignalDemuxer(demuxer_thread->demuxer);
 }
 
 void Kit_StartDemuxerThread(Kit_DemuxerThread *demuxer_thread) {
