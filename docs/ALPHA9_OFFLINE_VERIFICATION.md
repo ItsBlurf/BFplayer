@@ -17,7 +17,7 @@ Scope: host and PS5-target checks only; the PS5 was not contacted.
 | Player privilege boundary | Player has no `libSceAppInstUtil` or `libkernel_sys`; installer has both | Pass |
 | UI redesign | SDL source compiled; deterministic 1920×1080 preview inspected | Offline pass |
 | Pixel-art icon | PNG integrity/dimensions inspected; package hash matches source | Pass |
-| Private repository/release | Private `ItsBlurf/PS5-Media-Center`, prerelease `v0.1.0-alpha.9`, uploaded assets, and two successful GitHub Actions runs | Pass |
+| Private repository/release | Repository now named `ItsBlurf/BFplayer`; prerelease `v0.1.0-alpha.9`, uploaded assets, and two successful GitHub Actions runs | Pass |
 
 ## Host tests
 

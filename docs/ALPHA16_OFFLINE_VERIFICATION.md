@@ -24,7 +24,7 @@ interaction as proven.
 | Visual QA | Empty-library and Add Media 1920x1080 previews regenerated and inspected without clipped action text | Pass |
 | Package contents | One standalone ELF plus manifest, install note, license, and third-party notices | Pass |
 | Local hygiene | No tracked token/private-key pattern, console IP, `strcpy`, `strcat`, or `sprintf` in active source | Pass |
-| Repository | GitHub repository remains private; authenticated remote is `ItsBlurf/PS5-Media-Center` | Pass |
+| Repository | Repository now named `ItsBlurf/BFplayer`; authenticated remote verified | Pass |
 
 The GCC analyzer also examined the host SQLite amalgamation and reported one
 path-sensitive warning inside that generated third-party source. The project
