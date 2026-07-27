@@ -1,6 +1,6 @@
 # Product and UX audit
 
-This audit covers the PS5 Media Center library, Add Media flow, playback
+This audit covers the BFplayer library, Add Media flow, playback
 controls, settings, diagnostics, and current build inputs.
 
 ## Findings fixed for alpha.14 through alpha.16

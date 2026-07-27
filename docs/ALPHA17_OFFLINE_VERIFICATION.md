@@ -30,8 +30,8 @@ and the SQLite regression suite passes.
 
 | File | Bytes | SHA-256 |
 | --- | ---: | --- |
-| `ps5-media-center-standalone.elf` | 17,640,688 | `ef986e2d18ea6e9bde0a654631b9b1a9059761844cfe43a85508bd90cfff3bb3` |
-| `PS5-MediaCenter-standalone.zip` | 17,188,994 | `adfa265d6e5dfb840cf53fd6fb035660b57956e2765d56412f0b16e6cd4c5a10` |
+| `bfplayer-standalone.elf` | 17,640,688 | `ef986e2d18ea6e9bde0a654631b9b1a9059761844cfe43a85508bd90cfff3bb3` |
+| `BFplayer-standalone.zip` | 17,188,994 | `adfa265d6e5dfb840cf53fd6fb035660b57956e2765d56412f0b16e6cd4c5a10` |
 | Embedded stripped player | 36,177,808 | `2db9d98483f0d7979ba03c8c374b29abbc8994b373740828adbdf559cb4d121b` |
 
 The remaining gate is a PS5 controller/media acceptance run covering one

@@ -1,5 +1,5 @@
 /*
- * PS5 Media Center standalone launcher.
+ * BFplayer standalone launcher.
  *
  * One resident payload contains the player ELF, installs the dashboard tile
  * and runtime assets, then serves one loopback-only launch route. It does not
@@ -43,10 +43,10 @@
 #define PS5MC_LEGACY_HOST_TITLE_ID "PSMR00001"
 #define PS5MC_LEGACY_HOST_APP_DIR \
     PS5MC_APP_ROOT "/" PS5MC_LEGACY_HOST_TITLE_ID
-#define PS5MC_RUNTIME_DIR "/data/homebrew/PS5-MediaCenter"
+#define PS5MC_RUNTIME_DIR "/data/homebrew/BFplayer"
 #define PS5MC_FONT_DIR PS5MC_RUNTIME_DIR "/assets/fonts"
-#define PS5MC_PLAYER_PATH PS5MC_RUNTIME_DIR "/ps5-media-center.elf"
-#define PS5MC_LOG_DIR "/data/PS5-MediaCenter"
+#define PS5MC_PLAYER_PATH PS5MC_RUNTIME_DIR "/bfplayer.elf"
+#define PS5MC_LOG_DIR "/data/BFplayer"
 #define PS5MC_LOG_PATH PS5MC_LOG_DIR "/standalone-launcher.log"
 #define PS5MC_PLAYER_LOG_PATH PS5MC_LOG_DIR "/player-stdio.log"
 #define PS5MC_INSTANCE_LOCK_PATH PS5MC_LOG_DIR "/standalone-launcher.lock"
@@ -68,7 +68,7 @@
     extern const uint8_t name[];                                               \
     extern const unsigned long name##_size
 
-INCASSET(ps5mc_embedded_player_gzip, "build/ps5/ps5-media-center.elf.gz");
+INCASSET(ps5mc_embedded_player_gzip, "build/ps5/bfplayer.elf.gz");
 INCASSET(ps5mc_tile_param_json, "assets/tile/param.json");
 INCASSET(ps5mc_icon_png, "assets/icon0.png");
 INCASSET(ps5mc_font_ttf, "assets/fonts/NotoSans-Regular.ttf");
@@ -150,7 +150,7 @@ static void send_ready_notification(void) {
     (void)snprintf(
         request.message,
         sizeof(request.message),
-        "PS5 Media Center %s loaded. Open it from Media.",
+        "BFplayer %s loaded. Open it from Media.",
         PS5MC_VERSION);
     result = sceKernelSendNotificationRequest(
         0, &request, sizeof(request), 0);
@@ -336,7 +336,7 @@ static int install_runtime_assets(void) {
         manifest,
         sizeof(manifest),
         "{\n"
-        "  \"name\": \"PS5 Media Center\",\n"
+        "  \"name\": \"BFplayer\",\n"
         "  \"version\": \"%s\",\n"
         "  \"launch\": \"embedded-standalone\",\n"
         "  \"loopback\": \"%s:%d\",\n"
@@ -771,6 +771,7 @@ static void send_response(
 }
 
 static int launch_embedded_player(void) {
+    static struct timespec last_successful_launch = {0, 0};
     char* argv[] = {NULL};
     char* envp[] = {NULL};
     uint8_t* player = NULL;
@@ -781,7 +782,24 @@ static int launch_embedded_player(void) {
         O_WRONLY | O_CREAT | O_APPEND,
         0600);
     pid_t player_pid;
+    struct timespec now = {0, 0};
 
+    (void)clock_gettime(CLOCK_MONOTONIC, &now);
+    const int64_t elapsed_ms =
+        last_successful_launch.tv_sec == 0
+            ? INT64_MAX
+            : ((int64_t)now.tv_sec -
+               (int64_t)last_successful_launch.tv_sec) *
+                      1000 +
+                  ((int64_t)now.tv_nsec -
+                   (int64_t)last_successful_launch.tv_nsec) /
+                      1000000;
+    if (elapsed_ms >= 0 && elapsed_ms < 5000) {
+        launcher_log(
+            "launch coalesced reason=duplicate-request elapsed_ms=%lld",
+            (long long)elapsed_ms);
+        return 0;
+    }
     if (install_runtime_assets() != 0) {
         launcher_log(
             "runtime asset refresh before launch failed errno=%d",
@@ -846,6 +864,9 @@ static int launch_embedded_player(void) {
         (long)player_pid,
         ps5mc_embedded_player_gzip_size,
         (unsigned long)PS5MC_PLAYER_UNCOMPRESSED_SIZE);
+    if (player_pid > 0) {
+        (void)clock_gettime(CLOCK_MONOTONIC, &last_successful_launch);
+    }
     return player_pid > 0 ? 0 : -1;
 }
 
@@ -854,7 +875,7 @@ static void serve_forever(int listener) {
         "<!doctype html><html><head>"
         "<meta charset=\"utf-8\">"
         "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
-        "<title>PS5 Media Center</title>"
+        "<title>BFplayer</title>"
         "<style>"
         "html,body{height:100%;margin:0;background:#050913;color:#f0f4ff;"
         "font-family:Arial,sans-serif}body{display:flex;align-items:center;"
@@ -865,12 +886,12 @@ static void serve_forever(int listener) {
         "p{font-size:24px;color:#9daac4;line-height:1.5}.count{color:#f4b22a;"
         "font-size:72px;font-weight:bold;margin:18px}</style></head><body>"
         "<main class=\"card\"><div class=\"accent\"></div>"
-        "<h1>Launching PS5 Media Center</h1>"
+        "<h1>Launching BFplayer</h1>"
         "<p>The player is starting. Closing this window automatically...</p>"
-        "<div class=\"count\" id=\"count\">2</div>"
+        "<div class=\"count\" id=\"count\">5</div>"
         "<p id=\"fallback\">If this window remains, press O to close it.</p>"
         "</main><script>"
-        "let n=2;const e=document.getElementById('count');"
+        "let n=5;const e=document.getElementById('count');"
         "function leave(){"
         "try{window.open('','_self')}catch(x){};"
         "try{window.close()}catch(x){};"
@@ -880,7 +901,7 @@ static void serve_forever(int listener) {
         "}"
         "const t=setInterval(()=>{n--;e.textContent=n>0?n:'Ready';"
         "if(n<=0){clearInterval(t);leave();"
-        "setInterval(leave,750)}},750);"
+        "setInterval(leave,1000)}},1000);"
         "</script></body></html>";
     for (;;) {
         char request[2048];

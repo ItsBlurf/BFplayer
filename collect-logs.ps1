@@ -17,22 +17,22 @@ New-Item -ItemType Directory -Force -Path $OutputDirectory | Out-Null
 $files = @(
     @{
         Name = 'standalone-launcher.log'
-        Remote = '/data/PS5-MediaCenter/standalone-launcher.log'
+        Remote = '/data/BFplayer/standalone-launcher.log'
         Required = $true
     },
     @{
         Name = 'player-stdio.log'
-        Remote = '/data/PS5-MediaCenter/player-stdio.log'
+        Remote = '/data/BFplayer/player-stdio.log'
         Required = $false
     },
     @{
         Name = 'latest.log'
-        Remote = '/data/PS5-MediaCenter/logs/latest.log'
+        Remote = '/data/BFplayer/logs/latest.log'
         Required = $false
     },
     @{
         Name = 'previous.log'
-        Remote = '/data/PS5-MediaCenter/logs/previous.log'
+        Remote = '/data/BFplayer/logs/previous.log'
         Required = $false
     }
 )

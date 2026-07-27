@@ -10,7 +10,7 @@ Run exactly one new variable per step and collect the standalone launcher and
 player logs. Stop on a console disconnect, black screen that does not recover,
 or a fatal filesystem error.
 
-1. With HBL uninstalled and `/data/homebrew/PS5-MediaCenter` absent, inject only
+1. With HBL uninstalled and `/data/homebrew/BFplayer` absent, inject only
    the alpha.15 standalone payload. Verify it removes the obsolete Games
    entry, recreates its files, leaves exactly one dashboard tile in Media, and
    shows the

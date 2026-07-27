@@ -36,7 +36,7 @@ assert.deepStrictEqual(Object.keys(param.localizedParameters).sort(), [
 assert.strictEqual(param.localizedParameters.defaultLanguage, 'en-US');
 assert.strictEqual(
     param.localizedParameters['en-US'].titleName,
-    'PS5 Media Center');
+    'BFplayer');
 
 const uri = new URL(param.deeplinkUri);
 assert.strictEqual(uri.protocol, 'http:');
@@ -62,7 +62,7 @@ assert(launcher.includes('update_file_atomic'));
 assert(launcher.includes('runtime assets version=%s changed_files=%d'));
 assert(launcher.includes('request route=/shutdown action=exit'));
 assert(launcher.includes('hbldr_launch_buffer'));
-assert(launcher.includes('build/ps5/ps5-media-center.elf.gz'));
+assert(launcher.includes('build/ps5/bfplayer.elf.gz'));
 assert(launcher.includes('inflateInit2'));
 assert(launcher.includes('PS5MC_PLAYER_UNCOMPRESSED_SIZE'));
 assert(launcher.includes('assets/fonts/NotoSans-Regular.ttf'));
@@ -79,11 +79,14 @@ assert(!launcher.includes('install_bigapp_host_registration'));
 assert(launcher.includes('install_title_dir'));
 assert(launcher.includes('Wudg3Xe3heE'));
 assert(launcher.includes('Content-Type: %s; charset=utf-8'));
-assert(launcher.includes('Launching PS5 Media Center'));
+assert(launcher.includes('Launching BFplayer'));
 assert(launcher.includes('window.close()'));
 assert(launcher.includes('self.close()'));
 assert(launcher.includes('history.go(-1)'));
 assert(launcher.includes('press O to close it'));
+assert(launcher.includes('let n=5'));
+assert(launcher.includes('elapsed_ms < 5000'));
+assert(launcher.includes('reason=duplicate-request'));
 assert(!launcher.includes('press the PS button'));
 assert(launcher.includes('sceKernelSendNotificationRequest'));
 assert(launcher.includes('Open it from Media'));
@@ -139,6 +142,8 @@ assert(libraryUi.includes('"Square     Import as mixed library"'));
 assert(libraryUi.includes('"Saves only after import completes"'));
 assert(libraryUi.includes('"R3"'));
 assert(libraryUi.includes('"Sort"'));
+assert(libraryUi.includes('FooterGlyph::triangle, "", "Remove"'));
+assert(libraryUi.includes('draw_logo(impl_->renderer, impl_->logo_texture'));
 assert(!libraryUi.includes('std::string("Sort: ")'));
 assert(libraryUi.includes('library_item_name_less'));
 assert(libraryUi.includes('previous_series'));
@@ -179,6 +184,11 @@ assert(player.includes('app.settings.short_seek_seconds'));
 assert(player.includes('app.settings.long_seek_seconds'));
 assert(player.includes(
     'Kit_SetHint(KIT_HINT_THREAD_COUNT, kVideoDecoderThreads)'));
+assert(player.includes('constexpr int kVideoDecoderThreads = 16'));
+assert(player.includes('make_video_format_request'));
+assert(player.includes(
+    'video-output-request source=%dx%d output=%dx%d downscale=%d'));
+assert(player.includes('migrate_legacy_library_database()'));
 assert(player.includes(
     'Kit_SetHint(KIT_HINT_VIDEO_BUFFER_PACKETS, kVideoPacketBufferCount)'));
 assert(player.includes(
@@ -200,11 +210,14 @@ assert(playbackOsd.includes('maximum_message_width'));
 assert(playbackOsd.includes('fit_text_to_width('));
 assert(ptraceCore.includes('snprintf(buf, sizeof(buf)'));
 assert(!ptraceCore.includes('strcpy(buf, s)'));
-assert(build.includes('ps5-media-center-standalone.elf'));
+assert(build.includes('bfplayer-standalone.elf'));
+assert(build.includes(
+    'vendor\\SDL_kitchensink\\src\\internal\\video\\kitvideo.c'));
+assert(!build.includes("'lib\\libSDL_kitchensink.a'"));
 assert(build.includes("'--strip-all'"));
 assert(build.includes('GZipStream'));
 assert(!build.includes(
-    "$zip = Join-Path $distDir 'PS5-MediaCenter-websrv.zip'"));
+    "$zip = Join-Path $distDir 'BFplayer-websrv.zip'"));
 assert(!build.includes(
     "$tileInstaller = Join-Path $distDir 'ps5mc-tile-installer.elf'"));
 

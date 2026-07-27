@@ -13,7 +13,7 @@ It does not embed or depend on the websrv application, libmicrohttpd, port
 8080, the catalog, `homebrew.js`, or the HBL picker.
 
 ```text
-standalone payload -> loopback :9040 <- PS5 Media Center tile
+standalone payload -> loopback :9040 <- BFplayer tile
         |                 |
  compressed player   PSMC00001 BigApp transition
         |                 |
@@ -143,7 +143,7 @@ decoder objects are pulled from the static SDL_image archive.
 The supported release is one injectable payload:
 
 ```text
-ps5-media-center-standalone.elf
+bfplayer-standalone.elf
 ```
 
 At startup it writes only the small font, icon, and runtime manifest required

@@ -3,7 +3,7 @@
 Generated files are staged in:
 
 ```text
-payloads/test/ps5-media-center/
+payloads/test/bfplayer/
 ```
 
 The MKV is 10.021 seconds at 1280x720/30 fps and contains:

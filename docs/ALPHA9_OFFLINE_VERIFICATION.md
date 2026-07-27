@@ -57,15 +57,15 @@ SystemService/UserService, libc, and wrapper-provided web/net stubs.
 ## Package listing
 
 ```text
-PS5-MediaCenter/
-PS5-MediaCenter/assets/
-PS5-MediaCenter/assets/fonts/NotoSans-Regular.ttf
-PS5-MediaCenter/assets/fonts/OFL.txt
-PS5-MediaCenter/build-manifest.json
-PS5-MediaCenter/homebrew.js
-PS5-MediaCenter/ps5-media-center.elf
-PS5-MediaCenter/sce_sys/icon0.png
-PS5-MediaCenter/THIRD_PARTY_NOTICES.md
+BFplayer/
+BFplayer/assets/
+BFplayer/assets/fonts/NotoSans-Regular.ttf
+BFplayer/assets/fonts/OFL.txt
+BFplayer/build-manifest.json
+BFplayer/homebrew.js
+BFplayer/bfplayer.elf
+BFplayer/sce_sys/icon0.png
+BFplayer/THIRD_PARTY_NOTICES.md
 INSTALL-DIRECT-TILE.md
 ps5mc-tile-installer.elf
 ```
@@ -77,9 +77,9 @@ The dashboard tile does not execute it.
 
 | Artifact | Bytes | SHA-256 |
 | --- | ---: | --- |
-| `ps5-media-center.elf` | 56,268,760 | `33ee6b9bd8de1eed709d056a9c817aef0dd6940a289de84620ce58c7d0897b20` |
+| `bfplayer.elf` | 56,268,760 | `33ee6b9bd8de1eed709d056a9c817aef0dd6940a289de84620ce58c7d0897b20` |
 | `ps5mc-tile-installer.elf` | 1,519,880 | `6e9ca682c57c9589c780743d3536f144006fb8b4d293babcac39e9073dcdb318` |
-| `PS5-MediaCenter-direct-tile.zip` | 25,896,387 | `f6421e2a05ff2733f88eecd40b194f3d7aa741982dcc681a77ddde4d7ae79bd9` |
+| `BFplayer-direct-tile.zip` | 25,896,387 | `f6421e2a05ff2733f88eecd40b194f3d7aa741982dcc681a77ddde4d7ae79bd9` |
 | `assets/icon0.png` | 1,412,512 | `8c46982a3ee41c21ffce3b71fa52dcd50e61475a619bae58accee06603f5449b` |
 | `docs/ui-preview.png` | 48,416 | `317ffd30bcbde70ac5d4ecbf4df0a57e32f9545926ee6b9fae2f7dfc11243cad` |
 

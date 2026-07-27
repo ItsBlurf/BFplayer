@@ -196,6 +196,23 @@ void draw_footer_glyph(
     }
 }
 
+void draw_logo(
+    SDL_Renderer* renderer,
+    SDL_Texture* texture,
+    int center_x,
+    int center_y,
+    int size) {
+    if (!renderer || !texture || size < 1) {
+        return;
+    }
+    SDL_Rect target{
+        center_x - size / 2,
+        center_y - size / 2,
+        size,
+        size};
+    SDL_RenderCopy(renderer, texture, nullptr, &target);
+}
+
 std::string fit_text_to_width(TTF_Font* font, std::string text, int max_width) {
     int width = 0;
     int height = 0;
@@ -469,6 +486,7 @@ struct LibraryUi::Impl {
     Label empty_help_label;
     bool empty_action_enabled = false;
     SDL_Texture* artwork_texture = nullptr;
+    SDL_Texture* logo_texture = nullptr;
     int artwork_width = 0;
     int artwork_height = 0;
     int artwork_generation = -1;
@@ -484,7 +502,7 @@ struct LibraryUi::Impl {
     bool artwork_is_video_frame = false;
     std::int64_t artwork_position_ms = 0;
     std::string last_error;
-    std::string database_path = "/data/PS5-MediaCenter/library.db";
+    std::string database_path = "/data/BFplayer/library.db";
     int selected = 0;
     int first_visible = 0;
     int published_generation = 0;
@@ -2835,12 +2853,12 @@ struct LibraryUi::Impl {
                     add_footer_hint(FooterGlyph::circle, "", "Back");
                     break;
                 case LibraryOverlay::about:
-                    title = "About PS5 Media Center";
+                    title = "About BFplayer";
                     subtitle = "Private test software for your jailbroken PS5";
                     rows = {
                         "Standalone native PS5 payload",
                         "FFmpeg 7.0.1 with SDL_kitchensink and SDL2",
-                        "Library and logs: /data/PS5-MediaCenter",
+                        "Library and logs: /data/BFplayer",
                         "Dashboard title: PSMC00001 (Media)",
                         "Build: " PS5MC_VERSION,
                     };
@@ -2999,10 +3017,16 @@ struct LibraryUi::Impl {
             add_footer_hint(FooterGlyph::options, "", "Menu");
         } else if (series_root.empty()) {
             add_footer_hint(FooterGlyph::cross, "", "Play");
+            add_footer_hint(FooterGlyph::triangle, "", "Remove");
+            add_footer_hint(
+                FooterGlyph::text_button,
+                "L3",
+                "Favorite");
             add_footer_hint(
                 FooterGlyph::text_button,
                 "R3",
                 "Sort");
+            add_footer_hint(FooterGlyph::dpad, "", "Category");
             add_footer_hint(FooterGlyph::touchpad, "", "Add Media");
             add_footer_hint(FooterGlyph::options, "", "Menu");
         } else {
@@ -3011,6 +3035,11 @@ struct LibraryUi::Impl {
                 "",
                 season_root.empty() ? "Open / Play" : "Play Episode");
             add_footer_hint(FooterGlyph::circle, "", "Back");
+            add_footer_hint(FooterGlyph::triangle, "", "Remove");
+            add_footer_hint(
+                FooterGlyph::text_button,
+                "L3",
+                "Favorite");
             add_footer_hint(FooterGlyph::touchpad, "", "Add Media");
             add_footer_hint(FooterGlyph::options, "", "Menu");
         }
@@ -3176,11 +3205,10 @@ bool LibraryUi::open(
     const std::vector<MediaSource>& initial_sources) {
     close();
     impl_->renderer = renderer;
-    if (!renderer || font_path.empty()) {
+    if (!renderer || font_path.empty() || logo_path.empty()) {
         impl_->last_error = "LibraryUi::open: invalid argument";
         return false;
     }
-    (void)logo_path;
     if (TTF_Init() != 0) {
         impl_->last_error = std::string("TTF_Init: ") + TTF_GetError();
         return false;
@@ -3193,13 +3221,32 @@ bool LibraryUi::open(
         close();
         return false;
     }
+    SDL_RWops* logo_source = SDL_RWFromFile(logo_path.c_str(), "rb");
+    SDL_Surface* logo_surface =
+        logo_source ? IMG_LoadPNG_RW(logo_source) : nullptr;
+    if (logo_source) {
+        SDL_RWclose(logo_source);
+    }
+    if (!logo_surface) {
+        impl_->last_error = std::string("Logo load: ") + IMG_GetError();
+        close();
+        return false;
+    }
+    impl_->logo_texture =
+        SDL_CreateTextureFromSurface(renderer, logo_surface);
+    SDL_FreeSurface(logo_surface);
+    if (!impl_->logo_texture) {
+        impl_->last_error = std::string("Logo texture: ") + SDL_GetError();
+        close();
+        return false;
+    }
     impl_->mutex = SDL_CreateMutex();
     if (!impl_->mutex) {
         impl_->last_error = std::string("SDL_CreateMutex: ") + SDL_GetError();
         close();
         return false;
     }
-    if (mkdir("/data/PS5-MediaCenter", 0777) != 0 && errno != EEXIST) {
+    if (mkdir("/data/BFplayer", 0777) != 0 && errno != EEXIST) {
         diagnostics_log(
             DiagnosticLevel::error,
             "library-data-directory failed errno=%d",
@@ -3302,6 +3349,8 @@ void LibraryUi::close() {
     }
     impl_->clear_labels();
     impl_->clear_artwork();
+    SDL_DestroyTexture(impl_->logo_texture);
+    impl_->logo_texture = nullptr;
     if (impl_->title_font) {
         TTF_CloseFont(impl_->title_font);
         impl_->title_font = nullptr;
@@ -3816,14 +3865,15 @@ void LibraryUi::render() {
     SDL_SetRenderDrawColor(impl_->renderer, 25, 44, 78, 255);
     SDL_Rect header_shadow{0, 190, kUiWidth, 2};
     SDL_RenderFillRect(impl_->renderer, &header_shadow);
+    draw_logo(impl_->renderer, impl_->logo_texture, 82, 94, 112);
 
     if (impl_->title_label.texture) {
-        SDL_Rect target{58, 40, impl_->title_label.width, impl_->title_label.height};
+        SDL_Rect target{150, 40, impl_->title_label.width, impl_->title_label.height};
         SDL_RenderCopy(impl_->renderer, impl_->title_label.texture, nullptr, &target);
     }
     if (impl_->status_label.texture) {
         SDL_Rect target{
-            58,
+            150,
             119,
             impl_->status_label.width,
             impl_->status_label.height};
@@ -3896,10 +3946,11 @@ void LibraryUi::render() {
     }
 
     if (impl_->row_labels.empty()) {
+        draw_logo(impl_->renderer, impl_->logo_texture, kUiWidth / 2, 390, 150);
         if (impl_->empty_title_label.texture) {
             SDL_Rect target{
                 kUiWidth / 2 - impl_->empty_title_label.width / 2,
-                486,
+                500,
                 impl_->empty_title_label.width,
                 impl_->empty_title_label.height};
             SDL_RenderCopy(
@@ -3909,7 +3960,7 @@ void LibraryUi::render() {
                 &target);
         }
         if (impl_->empty_help_label.texture) {
-            const int help_y = impl_->empty_action_enabled ? 574 : 590;
+            const int help_y = impl_->empty_action_enabled ? 588 : 604;
             SDL_Rect action{
                 kUiWidth / 2 - (impl_->empty_help_label.width + 76) / 2,
                 help_y,

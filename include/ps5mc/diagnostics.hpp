@@ -12,7 +12,7 @@ enum class DiagnosticLevel {
     error,
 };
 
-// Opens /data/PS5-MediaCenter/logs/latest.log, rotates the previous session,
+// Opens /data/BFplayer/logs/latest.log, rotates the previous session,
 // installs crash markers, and records process/build context. Safe to call
 // before SDL or Kitchensink initialization.
 void diagnostics_init(int argc, char** argv) noexcept;

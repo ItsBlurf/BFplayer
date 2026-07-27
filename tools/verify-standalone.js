@@ -9,10 +9,10 @@ const zlib = require('zlib');
 const root = path.join(__dirname, '..');
 const dist = path.join(root, 'dist');
 const standalone = fs.readFileSync(
-    path.join(dist, 'ps5-media-center-standalone.elf'));
-const player = fs.readFileSync(path.join(dist, 'ps5-media-center.elf'));
+    path.join(dist, 'bfplayer-standalone.elf'));
+const player = fs.readFileSync(path.join(dist, 'bfplayer.elf'));
 const compressedPlayer = fs.readFileSync(
-    path.join(root, 'build', 'ps5', 'ps5-media-center.elf.gz'));
+    path.join(root, 'build', 'ps5', 'bfplayer.elf.gz'));
 const assets = [
     ['compressed player ELF', compressedPlayer],
     ['tile param', fs.readFileSync(path.join(root, 'assets', 'tile', 'param.json'))],

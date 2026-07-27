@@ -23,6 +23,6 @@ forward.
 
 | File | Bytes | SHA-256 |
 | --- | ---: | --- |
-| `ps5-media-center-standalone.elf` | 17,657,480 | `210afa7fedd5ebe6fd3f046f3d5b3f6a5c178a5a9dcb4124ba06867a8034c9b6` |
-| `PS5-MediaCenter-standalone.zip` | 17,194,154 | `4ab3e83f8d202fe8de054a276e9265be744ba38bbe0bcbc314a19c16d9e34a34` |
+| `bfplayer-standalone.elf` | 17,657,480 | `210afa7fedd5ebe6fd3f046f3d5b3f6a5c178a5a9dcb4124ba06867a8034c9b6` |
+| `BFplayer-standalone.zip` | 17,194,154 | `4ab3e83f8d202fe8de054a276e9265be744ba38bbe0bcbc314a19c16d9e34a34` |
 | Embedded stripped player | 36,194,192 | `22eb028e7af44fd9f98ace5d71019ffbbdd56b06e1c6d8a48b66b3dc730e7ae0` |

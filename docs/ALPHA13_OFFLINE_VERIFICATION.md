@@ -25,14 +25,14 @@ hardware validation.
 
 | Artifact | Bytes | SHA-256 |
 | --- | ---: | --- |
-| `ps5-media-center.elf` | 36,128,656 | `739a95c2b1409fd63cf040fde87f33b197611e49431b941f6cd1f98872d26b86` |
-| `ps5-media-center.elf.gz` (embedded intermediate) | 15,440,108 | `9725da508d94753ede85395d74138bcb49ac0fd74dbb6c1c825bd4731cd6db41` |
-| `ps5-media-center-standalone.elf` | 17,607,712 | `3e077c79ddfedbdab041f827c249033452a6f0aa09a0c4d5182d03f7cc660ef7` |
-| `PS5-MediaCenter-standalone.zip` | 17,161,635 | `c30da2db8337e86f6628bfdef0d7f357da8967d03d7f2d4a56a58c388a9cfbd0` |
+| `bfplayer.elf` | 36,128,656 | `739a95c2b1409fd63cf040fde87f33b197611e49431b941f6cd1f98872d26b86` |
+| `bfplayer.elf.gz` (embedded intermediate) | 15,440,108 | `9725da508d94753ede85395d74138bcb49ac0fd74dbb6c1c825bd4731cd6db41` |
+| `bfplayer-standalone.elf` | 17,607,712 | `3e077c79ddfedbdab041f827c249033452a6f0aa09a0c4d5182d03f7cc660ef7` |
+| `BFplayer-standalone.zip` | 17,161,635 | `c30da2db8337e86f6628bfdef0d7f357da8967d03d7f2d4a56a58c388a9cfbd0` |
 
 ## Hardware gate
 
 End the resident alpha.12 launcher before injecting alpha.13. Confirm that
-`PSMR00001` disappears from Games, exactly one PS5 Media Center tile remains
+`PSMR00001` disappears from Games, exactly one BFplayer tile remains
 in Media, and that launching the consolidated `PSMC00001` BigApp host still
 opens and exits the player correctly.

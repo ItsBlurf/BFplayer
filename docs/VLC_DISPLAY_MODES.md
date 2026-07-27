@@ -1,6 +1,6 @@
 # VLC-compatible display modes
 
-PS5 Media Center keeps resizing, display-aspect override, and source cropping
+BFplayer keeps resizing, display-aspect override, and source cropping
 as three separate operations. This matches VLC Desktop's distinction between
 the **Aspect Ratio** and **Crop** menus and prevents a 4:3 crop from silently
 becoming a distorted 16:9 stretch.

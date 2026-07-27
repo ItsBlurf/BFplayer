@@ -10,7 +10,7 @@ this verification.
 
 | Requirement | Evidence | Result |
 | --- | --- | --- |
-| One PS5 payload | Release archive contains one `.elf`: `ps5-media-center-standalone.elf` | Pass |
+| One PS5 payload | Release archive contains one `.elf`: `bfplayer-standalone.elf` | Pass |
 | Player embedded | Byte-for-byte verifier found the complete 56,268,760-byte player ELF exactly once inside the standalone ELF | Pass |
 | Runtime assets embedded | Tile JSON, icon, Noto Sans font, and OFL text each occur byte-for-byte exactly once | Pass |
 | No websrv runtime | No websrv source/header, libmicrohttpd link, websrv package, `homebrew.js`, or separate tile installer remains in the active build | Pass |
@@ -44,9 +44,9 @@ modification note, complete license, and source are included.
 
 | Artifact | Bytes | SHA-256 |
 | --- | ---: | --- |
-| `ps5-media-center.elf` (embedded player intermediate) | 56,268,760 | `cf5c4e194a60f4ed0586cb1434e9688da9cebf2b1d60996140cb4a9ca104468a` |
-| `ps5-media-center-standalone.elf` | 58,401,352 | `8408ad0c2ce920b3e5ec0824c9a372bc3646851c6231a4372318f51dfd1d7681` |
-| `PS5-MediaCenter-standalone.zip` | 24,530,266 | `2d38568988824187297a070edce2ba46905f8303b5738db393608d304d24a1d3` |
+| `bfplayer.elf` (embedded player intermediate) | 56,268,760 | `cf5c4e194a60f4ed0586cb1434e9688da9cebf2b1d60996140cb4a9ca104468a` |
+| `bfplayer-standalone.elf` | 58,401,352 | `8408ad0c2ce920b3e5ec0824c9a372bc3646851c6231a4372318f51dfd1d7681` |
+| `BFplayer-standalone.zip` | 24,530,266 | `2d38568988824187297a070edce2ba46905f8303b5738db393608d304d24a1d3` |
 | `build-manifest.json` | 1,563 | `81a0726501754fc85c14460ae8924cc53896deec4ac82756c51550edf42c03f1` |
 
 ## Unverified hardware boundary

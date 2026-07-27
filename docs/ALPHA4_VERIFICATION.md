@@ -36,8 +36,8 @@ Build date: 2026-07-23
   - `libSceNet.sprx`
 
 ```text
-d444842478ca707bad61a53aeeca898b7d08dd01e4d0d3d9c007b7786c788474  ps5-media-center.elf
-f74d51a749ecc265c6aa37e2f4b56efac947b5d7fc94a5daced4be93bee83c86  PS5-MediaCenter-websrv.zip
+d444842478ca707bad61a53aeeca898b7d08dd01e4d0d3d9c007b7786c788474  bfplayer.elf
+f74d51a749ecc265c6aa37e2f4b56efac947b5d7fc94a5daced4be93bee83c86  BFplayer-websrv.zip
 ```
 
 The ZIP contains exactly the six documented files. Each entry's SHA-256 was

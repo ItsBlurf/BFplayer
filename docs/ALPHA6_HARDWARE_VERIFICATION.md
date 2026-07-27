@@ -6,7 +6,7 @@
 - PS5 ELF SHA-256:
   `1f63d6311145c8e1f1ffd7553d2b4e6352458ca149588f568f61a57e4e5702e4`
 - Package: websrv/HBL BigApp at
-  `/data/homebrew/PS5-MediaCenter`
+  `/data/homebrew/BFplayer`
 - Installed `build-manifest.json` hash field matched the local package.
 
 The target ELF passed architecture and dependency inspection. All ten host

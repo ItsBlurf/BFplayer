@@ -6,7 +6,7 @@ The `PSMC00001` Media-category tile now targets:
 http://127.0.0.1:9040/launch
 ```
 
-That endpoint belongs to `ps5-media-center-standalone.elf`, not websrv. It is
+That endpoint belongs to `bfplayer-standalone.elf`, not websrv. It is
 bound to loopback only, implements one route, and is not reachable from the
 LAN. Selecting the tile immediately launches the player ELF embedded inside
 the resident standalone payload.

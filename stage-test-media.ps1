@@ -16,7 +16,7 @@ if (-not $ConsoleHost) {
     throw 'No console host was supplied and PS5_HOST is empty.'
 }
 
-$corpus = Join-Path $workspaceRoot 'payloads\test\ps5-media-center'
+$corpus = Join-Path $workspaceRoot 'payloads\test\bfplayer'
 $files = [ordered]@{
     'ps5mc-multitrack-test.mkv' = 'bcdd343024479a1ab631c1385363a9b17b00ede4bd70d499150745f5c76983de'
     'ps5mc-multitrack-test.en.srt' = 'f8d4d77521274aaa5b6603e7cb740e644eb7ea85b3f08132197730484978e796'
@@ -76,7 +76,7 @@ foreach ($item in $files.GetEnumerator()) {
 $logDir = Join-Path $workspaceRoot 'logs\deploy'
 New-Item -ItemType Directory -Force -Path $logDir | Out-Null
 [IO.File]::WriteAllLines(
-    (Join-Path $logDir 'ps5-media-center-test-corpus-latest.log'),
+    (Join-Path $logDir 'bfplayer-test-corpus-latest.log'),
     $logLines)
 
 Write-Host 'Test corpus staged at /data/media/PS5MC-Test.'

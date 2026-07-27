@@ -2,10 +2,10 @@
 
 The standalone launcher and player write:
 
-    /data/PS5-MediaCenter/standalone-launcher.log
-    /data/PS5-MediaCenter/player-stdio.log
-    /data/PS5-MediaCenter/logs/latest.log
-    /data/PS5-MediaCenter/logs/previous.log
+    /data/BFplayer/standalone-launcher.log
+    /data/BFplayer/player-stdio.log
+    /data/BFplayer/logs/latest.log
+    /data/BFplayer/logs/previous.log
 
 The launcher log records asset installation, tile registration, loopback bind,
 launch requests, embedded byte count, and the resulting player PID or failure.

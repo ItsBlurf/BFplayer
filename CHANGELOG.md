@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.1.0-alpha.24 - BFplayer rename and 4K WebM optimization
+
+- Renamed the product, runtime paths, logs, packages, and visible tile metadata
+  to BFplayer while preserving title ID `PSMC00001` to update the existing tile.
+- Preserve an existing library by atomically migrating the legacy database on
+  first launch.
+- Vendor SDL_kitchensink so decoder fixes are reproducible, enable its actual
+  frame/slice threading checks, and use all 16 logical processors reported by
+  SDL.
+- Convert video larger than 1920x1080 to a proportional even-sized output,
+  reducing 4K conversion and presentation cost without distorting its ratio.
+- Restore the BFplayer logo in the library header and empty-library view.
+- Show the complete library shortcut bar, including `Triangle Remove`.
+- Use a five-second launch countdown, coalesce duplicate launch requests, and
+  retain clean serialized reinjection.
+
 ## 0.1.0-alpha.23 - original aspect calculation fix
 
 - Correctly convert SDL_kitchensink's sample/pixel aspect ratio into the final
@@ -249,7 +265,7 @@
 - Changed the repaired `/system_ex/app/PSMC00001` host metadata to the
   Prospero Native Media App category.
 - Removed the separate `PSMR00001` native-Game registration that caused a
-  duplicate PS5 Media Center entry in Games.
+  duplicate BFplayer entry in Games.
 - Added a startup migration that uninstalls the legacy `PSMR00001`
   registration and removes its old `/user/app` metadata before registering the
   single Media entry.
@@ -300,7 +316,7 @@
   repair before the dashboard tile is published.
 - Rewrites missing, zero-length, partial, symlinked, or invalid host artifacts
   safely instead of treating any existing path as usable.
-- Recreates all required `/data/homebrew/PS5-MediaCenter` runtime assets; the
+- Recreates all required `/data/homebrew/BFplayer` runtime assets; the
   folder is not required to remain on the console.
 - Uses the Media Center icon and title for the active BigApp host so the PS
   switcher can identify the running app correctly.
@@ -324,7 +340,7 @@
 ### Self-contained dashboard launch
 
 - Replaced the websrv/port-8080 launch path with one resident
-  `ps5-media-center-standalone.elf`.
+  `bfplayer-standalone.elf`.
 - Embedded the complete player ELF, Noto Sans runtime font, icon, tile data,
   AppInst setup, and minimal BigApp/ELF-loader core into that single payload.
 - Added a loopback-only listener on `127.0.0.1:9040` with exactly one

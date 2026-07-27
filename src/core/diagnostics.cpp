@@ -35,9 +35,9 @@ namespace {
 
 constexpr std::size_t kMaximumLogBytes = 8U * 1024U * 1024U;
 constexpr std::size_t kMaximumMessageBytes = 4096U;
-constexpr char kLogDirectory[] = "/data/PS5-MediaCenter/logs";
-constexpr char kLatestLog[] = "/data/PS5-MediaCenter/logs/latest.log";
-constexpr char kPreviousLog[] = "/data/PS5-MediaCenter/logs/previous.log";
+constexpr char kLogDirectory[] = "/data/BFplayer/logs";
+constexpr char kLatestLog[] = "/data/BFplayer/logs/latest.log";
+constexpr char kPreviousLog[] = "/data/BFplayer/logs/previous.log";
 
 std::atomic_flag g_lock = ATOMIC_FLAG_INIT;
 FILE* g_file = nullptr;
@@ -185,7 +185,7 @@ void diagnostics_init(int argc, char** argv) noexcept {
     (void)_mkdir("logs");
     (void)_mkdir("logs/diagnostics");
 #else
-    (void)::mkdir("/data/PS5-MediaCenter", 0777);
+    (void)::mkdir("/data/BFplayer", 0777);
     (void)::mkdir(kLogDirectory, 0777);
     (void)::remove(kPreviousLog);
     (void)::rename(kLatestLog, kPreviousLog);
@@ -194,7 +194,7 @@ void diagnostics_init(int argc, char** argv) noexcept {
     if (!g_file) {
         // Host builds and unusual launch directories still retain stderr
         // diagnostics; the PS5 path above is the persistent path.
-        g_file = std::fopen("ps5-media-center-latest.log", "wb");
+        g_file = std::fopen("bfplayer-latest.log", "wb");
     }
 #if !defined(_WIN32)
     if (g_file) {

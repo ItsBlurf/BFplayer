@@ -41,8 +41,8 @@ changed during this source audit.
 
 | File | Bytes | SHA-256 |
 | --- | ---: | --- |
-| `ps5-media-center-standalone.elf` | 17,640,688 | `43feecd9ca3c77d6794d0d4630575a9e8659b436f7746f8e23cd8cc9eb199b92` |
-| `PS5-MediaCenter-standalone.zip` | 17,181,863 | `7b980ab2fec4075ef33d3d274b53cb246115bd4edaecef1f2cc853f48d21507b` |
+| `bfplayer-standalone.elf` | 17,640,688 | `43feecd9ca3c77d6794d0d4630575a9e8659b436f7746f8e23cd8cc9eb199b92` |
+| `BFplayer-standalone.zip` | 17,181,863 | `7b980ab2fec4075ef33d3d274b53cb246115bd4edaecef1f2cc853f48d21507b` |
 | Embedded stripped player | 36,177,808 | `a82321ed6a5ece268583ba04c9c18b016c91bf8b6b2166e043127ce8437d34e4` |
 
 The installed SDK release line was rechecked against official SDK v0.41, and

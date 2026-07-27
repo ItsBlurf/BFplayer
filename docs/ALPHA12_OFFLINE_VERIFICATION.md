@@ -28,10 +28,10 @@ verification, so new runtime behavior still requires the hardware ladder.
 
 | Artifact | Bytes | SHA-256 |
 | --- | ---: | --- |
-| `ps5-media-center.elf` | 36,128,656 | `e229101d2fd9a154221550ce0b8d6c2a684e0a0d226bea1aa6ef57cd942bf307` |
-| `ps5-media-center.elf.gz` (embedded intermediate) | 15,439,867 | `4c5e0cbb16bc82723d66626365c3b08872c7a2058e4ac334c9d32bd60a03777a` |
-| `ps5-media-center-standalone.elf` | 17,607,752 | `ebf075116ef964db47380e5d0c32d7b71dd4f845922e94b3195e9b0f5a2d71a7` |
-| `PS5-MediaCenter-standalone.zip` | 17,160,843 | `c2bb06fc4f091e1c9f0a882da841f920bd7358c7f13561c8f492b9bc98811dc0` |
+| `bfplayer.elf` | 36,128,656 | `e229101d2fd9a154221550ce0b8d6c2a684e0a0d226bea1aa6ef57cd942bf307` |
+| `bfplayer.elf.gz` (embedded intermediate) | 15,439,867 | `4c5e0cbb16bc82723d66626365c3b08872c7a2058e4ac334c9d32bd60a03777a` |
+| `bfplayer-standalone.elf` | 17,607,752 | `ebf075116ef964db47380e5d0c32d7b71dd4f845922e94b3195e9b0f5a2d71a7` |
+| `BFplayer-standalone.zip` | 17,160,843 | `c2bb06fc4f091e1c9f0a882da841f920bd7358c7f13561c8f492b9bc98811dc0` |
 
 ## Hardware gate
 

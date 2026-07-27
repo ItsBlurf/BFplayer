@@ -1,6 +1,6 @@
 # Third-party notices
 
-PS5 Media Center is built with open-source libraries distributed by
+BFplayer is built with open-source libraries distributed by
 PacBrew v0.37. The release ELF statically links the components selected by the
 linker from the archives listed below. This file records their upstream project
 and license family; the upstream projects remain authoritative for complete

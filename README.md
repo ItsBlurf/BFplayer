@@ -1,6 +1,6 @@
-# PS5 Media Center
+# BFplayer
 
-PS5 Media Center is a native media library and player for jailbroken
+BFplayer is a native media library and player for jailbroken
 PlayStation 5 consoles. It runs as a single payload, installs its own tile in
 the Media section, and does not require websrv or Homebrew Launcher.
 
@@ -24,8 +24,9 @@ is currently software-based, so demanding 4K HEVC or AV1 files may not play
 smoothly.
 
 The same limitation applies to 4K 50/60 fps VP9 WebM, especially 10-bit HDR
-files. The player uses eight decoder threads and enlarged video buffers, but
-these formats can still exceed the PS5 homebrew software-decoding budget.
+files. The player uses the 16 logical processors reported by SDL, enlarged
+video buffers, and proportional 1080p output conversion for oversized sources,
+but these formats can still exceed the PS5 homebrew software-decoding budget.
 
 Every video starts in **Original** aspect mode. The player uses the display
 ratio reported by the stream, including anamorphic pixel-ratio metadata, and
@@ -34,9 +35,9 @@ Manual aspect overrides apply only to the current video.
 
 ## Install
 
-Download `ps5-media-center-standalone.elf` from the latest release and inject
-that payload after each jailbreak. It installs or updates the **PS5 Media
-Center** tile in the Media section and stays resident to launch the player.
+Download `bfplayer-standalone.elf` from the latest release and inject
+that payload after each jailbreak. It installs or updates the **BFplayer**
+tile in the Media section and stays resident to launch the player.
 
 Nothing needs to be copied to `/data/homebrew` beforehand. The payload creates
 and maintains its own runtime folder. Reinjection preserves the library,
@@ -85,7 +86,7 @@ shortcuts, including scaling, aspect ratio, and crop mode.
 Runtime logs are stored under:
 
 ```text
-/data/PS5-MediaCenter/logs
+/data/BFplayer/logs
 ```
 
 The repository includes `collect-logs.ps1` for copying the current and previous

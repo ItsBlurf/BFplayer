@@ -13,7 +13,7 @@ Source:
 [VLC Desktop Video documentation](https://docs.videolan.me/vlc-user/desktop/3.0/en/basic/video.html).
 
 VLC for Android additionally describes Best fit, Fit screen, Fill, 16:9, 4:3,
-and Center as screen-ratio presets. PS5 Media Center expresses the useful
+and Center as screen-ratio presets. BFplayer expresses the useful
 fullscreen behaviors without conflating them with exact aspect overrides:
 Best fit, Fill screen (crop), and Fullscreen stretch. Exact 16:9 and 4:3 remain
 in the aspect list.

@@ -15,7 +15,7 @@ along with this program; see the file COPYING. If not, see
 <http://www.gnu.org/licenses/>.  */
 
 /*
- * Modified for PS5 Media Center in 2026:
+ * Modified for BFplayer in 2026:
  * - removed websrv-specific dependencies;
  * - uses the standalone launcher's narrow file reader;
  * - keeps the upstream BigApp transition and ELF replacement sequence.
@@ -68,7 +68,7 @@ static const char param_json[] = "{\n"
   "  \"localizedParameters\": {\n"
   "    \"defaultLanguage\": \"en-US\",\n"
   "    \"en-US\": {\n"
-  "      \"titleName\": \"PS5 Media Center\"\n"
+  "      \"titleName\": \"BFplayer\"\n"
   "    }\n"
   "  }\n"
   "}\n";

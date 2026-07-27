@@ -26,7 +26,6 @@ $required = @(
     'include\SDL2\SDL_image.h',
     'lib\libSDL2.a',
     'lib\libSDL2_image.a',
-    'lib\libSDL_kitchensink.a',
     'lib\libavformat.a',
     'lib\libass.a'
 )
@@ -41,20 +40,26 @@ $linker = Join-Path $workspaceRoot 'tools\bin\ps5-clang.cmd'
 $buildDir = Join-Path $projectRoot 'build\ps5'
 $distDir = Join-Path $projectRoot 'dist'
 $packageRoot = Join-Path $projectRoot 'build\package'
-$packageDir = Join-Path $packageRoot 'PS5-MediaCenter-standalone'
+$packageDir = Join-Path $packageRoot 'BFplayer-standalone'
 New-Item -ItemType Directory -Force -Path $buildDir, $distDir | Out-Null
 $obsoleteDistEntries = @(
     'homebrew.js',
-    'PS5-MediaCenter-direct-tile.zip',
-    'PS5-MediaCenter-direct-tile.zip.sha256',
-    'PS5-MediaCenter-websrv.zip',
-    'PS5-MediaCenter-websrv.zip.sha256',
+    'BFplayer-direct-tile.zip',
+    'BFplayer-direct-tile.zip.sha256',
+    'BFplayer-websrv.zip',
+    'BFplayer-websrv.zip.sha256',
+    'ps5-media-center.elf',
+    'ps5-media-center.sha256',
+    'ps5-media-center-standalone.elf',
+    'ps5-media-center-standalone.sha256',
+    'PS5-MediaCenter-standalone.zip',
+    'PS5-MediaCenter-standalone.zip.sha256',
     'ps5mc-tile-installer.elf',
     'ps5mc-tile-installer.sha256',
     'THIRD_PARTY_NOTICES.md',
     'assets',
     'sce_sys',
-    'PS5-MediaCenter-websrv'
+    'BFplayer-websrv'
 )
 $distPrefix = [IO.Path]::GetFullPath($distDir) + [IO.Path]::DirectorySeparatorChar
 foreach ($entry in $obsoleteDistEntries) {
@@ -79,6 +84,7 @@ $common = @(
     '-Wextra',
     '-Wpedantic',
     '-DPS5MC_PS5=1',
+    '-Ivendor\SDL_kitchensink\include',
     "-I$($pacbrewHome)\include",
     "-I$($pacbrewHome)\include\SDL2",
     '-Iinclude',
@@ -124,7 +130,31 @@ try {
     }
     $cSources = @(
         'src\playback\kitsubimage_safe.c',
-        'src\playback\kitchensink_subtitle_timing.c'
+        'src\playback\kitchensink_subtitle_timing.c',
+        'vendor\SDL_kitchensink\src\kiterror.c',
+        'vendor\SDL_kitchensink\src\kitformat.c',
+        'vendor\SDL_kitchensink\src\kitlib.c',
+        'vendor\SDL_kitchensink\src\kitplayer.c',
+        'vendor\SDL_kitchensink\src\kitsource.c',
+        'vendor\SDL_kitchensink\src\kitutils.c',
+        'vendor\SDL_kitchensink\src\internal\kitdecoder.c',
+        'vendor\SDL_kitchensink\src\internal\kitdecoderthread.c',
+        'vendor\SDL_kitchensink\src\internal\kitdemuxer.c',
+        'vendor\SDL_kitchensink\src\internal\kitdemuxerthread.c',
+        'vendor\SDL_kitchensink\src\internal\kitlibstate.c',
+        'vendor\SDL_kitchensink\src\internal\kitpacketbuffer.c',
+        'vendor\SDL_kitchensink\src\internal\kittimer.c',
+        'vendor\SDL_kitchensink\src\internal\libass.c',
+        'vendor\SDL_kitchensink\src\internal\audio\kitaudio.c',
+        'vendor\SDL_kitchensink\src\internal\audio\kitaudioutils.c',
+        'vendor\SDL_kitchensink\src\internal\subtitle\kitatlas.c',
+        'vendor\SDL_kitchensink\src\internal\subtitle\kitsubtitle.c',
+        'vendor\SDL_kitchensink\src\internal\subtitle\kitsubtitlepacket.c',
+        'vendor\SDL_kitchensink\src\internal\subtitle\renderers\kitsubass.c',
+        'vendor\SDL_kitchensink\src\internal\subtitle\renderers\kitsubrenderer.c',
+        'vendor\SDL_kitchensink\src\internal\utils\kithelpers.c',
+        'vendor\SDL_kitchensink\src\internal\video\kitvideo.c',
+        'vendor\SDL_kitchensink\src\internal\video\kitvideoutils.c'
     )
     $cCommon = @(
         '-std=c17',
@@ -132,6 +162,10 @@ try {
         '-Wextra',
         '-Wpedantic',
         '-DPS5MC_PS5=1',
+        '-DKIT_VERSION_MAJOR=2',
+        '-DKIT_VERSION_MINOR=0',
+        '-DKIT_VERSION_PATCH=0',
+        '-Ivendor\SDL_kitchensink\include',
         "-I$($pacbrewHome)\include",
         "-I$($pacbrewHome)\include\SDL2",
         '-Iinclude',
@@ -152,13 +186,12 @@ try {
         $objects += $object
     }
 
-    $unstrippedElf = Join-Path $buildDir 'ps5-media-center.unstripped.elf'
+    $unstrippedElf = Join-Path $buildDir 'bfplayer.unstripped.elf'
     $linkArgs = @(
-        '-o', 'build\ps5\ps5-media-center.unstripped.elf'
+        '-o', 'build\ps5\bfplayer.unstripped.elf'
     ) + $objects + @(
         "-L$($pacbrewHome)\lib",
         '-Wl,--start-group',
-        '-lSDL_kitchensink',
         '-lSDL2_image',
         '-lSDL2_ttf',
         '-lSDL2',
@@ -203,17 +236,17 @@ try {
         throw 'Link failed.'
     }
 
-    $elf = Join-Path $distDir 'ps5-media-center.elf'
+    $elf = Join-Path $distDir 'bfplayer.elf'
     $strip = (Get-Command llvm-strip -ErrorAction Stop).Source
     & $strip '--strip-all' '-o' $elf $unstrippedElf
     if ($LASTEXITCODE -ne 0) {
-        throw 'Strip failed: ps5-media-center.elf'
+        throw 'Strip failed: bfplayer.elf'
     }
     $playerSize = (Get-Item -LiteralPath $elf).Length
     [IO.File]::AppendAllText(
         $versionHeader,
         "#define PS5MC_PLAYER_UNCOMPRESSED_SIZE $($playerSize)UL`n")
-    $compressedPlayer = Join-Path $buildDir 'ps5-media-center.elf.gz'
+    $compressedPlayer = Join-Path $buildDir 'bfplayer.elf.gz'
     $inputStream = [IO.File]::OpenRead($elf)
     try {
         $outputStream = [IO.File]::Create($compressedPlayer)
@@ -267,9 +300,9 @@ try {
         }
         $standaloneObjects += $object
     }
-    $standalone = Join-Path $distDir 'ps5-media-center-standalone.elf'
+    $standalone = Join-Path $distDir 'bfplayer-standalone.elf'
     $standaloneLinkArgs = @(
-        '-o', 'dist\ps5-media-center-standalone.elf'
+        '-o', 'dist\bfplayer-standalone.elf'
     ) + $standaloneObjects + @(
         '-lkernel_sys',
         '-lSceSystemService',
@@ -280,17 +313,17 @@ try {
     )
     & $linker @standaloneLinkArgs
     if ($LASTEXITCODE -ne 0) {
-        throw 'Link failed: ps5-media-center-standalone.elf'
+        throw 'Link failed: bfplayer-standalone.elf'
     }
 
     $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $elf).Hash.ToLowerInvariant()
     $standaloneHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $standalone).Hash.ToLowerInvariant()
     [IO.File]::WriteAllText(
-        (Join-Path $distDir 'ps5-media-center.sha256'),
-        "$hash  ps5-media-center.elf`n")
+        (Join-Path $distDir 'bfplayer.sha256'),
+        "$hash  bfplayer.elf`n")
     [IO.File]::WriteAllText(
-        (Join-Path $distDir 'ps5-media-center-standalone.sha256'),
-        "$standaloneHash  ps5-media-center-standalone.elf`n")
+        (Join-Path $distDir 'bfplayer-standalone.sha256'),
+        "$standaloneHash  bfplayer-standalone.elf`n")
 
     $expectedPackagePrefix = [IO.Path]::GetFullPath($packageRoot) + [IO.Path]::DirectorySeparatorChar
     $resolvedPackageDir = [IO.Path]::GetFullPath($packageDir)
@@ -307,7 +340,7 @@ try {
     Copy-Item -LiteralPath (Join-Path $projectRoot 'docs\STANDALONE_LAUNCHER.md') -Destination (Join-Path $packageDir 'INSTALL.md') -Force
 
     $payloadFiles = @(
-        'ps5-media-center-standalone.elf',
+        'bfplayer-standalone.elf',
         'INSTALL.md',
         'LICENSE',
         'THIRD_PARTY_NOTICES.md'
@@ -324,7 +357,7 @@ try {
         }
     )
     $manifest = [ordered]@{
-        name = 'PS5 Media Center'
+        name = 'BFplayer'
         version = $version
         target = 'x86_64-sie-ps5'
         package = 'single standalone payload'
@@ -363,19 +396,19 @@ try {
         throw "Package staging contains a missing or unexpected file: $($packageDifference | Out-String)"
     }
 
-    $zip = Join-Path $distDir 'PS5-MediaCenter-standalone.zip'
+    $zip = Join-Path $distDir 'BFplayer-standalone.zip'
     Compress-Archive -Path $packageDir -DestinationPath $zip -CompressionLevel Optimal -Force
     $zipHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $zip).Hash.ToLowerInvariant()
     [IO.File]::WriteAllText(
-        (Join-Path $distDir 'PS5-MediaCenter-standalone.zip.sha256'),
-        "$zipHash  PS5-MediaCenter-standalone.zip`n")
+        (Join-Path $distDir 'BFplayer-standalone.zip.sha256'),
+        "$zipHash  BFplayer-standalone.zip`n")
 
     $logDir = Join-Path $workspaceRoot 'logs\build'
     New-Item -ItemType Directory -Force -Path $logDir | Out-Null
     [IO.File]::WriteAllLines(
-        (Join-Path $logDir 'ps5-media-center-latest.log'),
+        (Join-Path $logDir 'bfplayer-latest.log'),
         @(
-            "name=PS5 Media Center",
+            "name=BFplayer",
             "version=$version",
             "configuration=$Configuration",
             "pacbrew=$pacbrewHome",

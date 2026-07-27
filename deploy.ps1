@@ -16,7 +16,7 @@ if (-not $ConsoleHost) {
     throw 'No console host was supplied and PS5_HOST is empty.'
 }
 
-$payload = Join-Path $projectRoot 'dist\ps5-media-center-standalone.elf'
+$payload = Join-Path $projectRoot 'dist\bfplayer-standalone.elf'
 if (-not (Test-Path -LiteralPath $payload)) {
     throw "Missing standalone payload: $payload. Run build.ps1 first."
 }
@@ -30,7 +30,7 @@ if ($LASTEXITCODE -ne 0) {
 $logDir = Join-Path $workspaceRoot 'logs\deploy'
 New-Item -ItemType Directory -Force -Path $logDir | Out-Null
 [IO.File]::WriteAllLines(
-    (Join-Path $logDir 'ps5-media-center-latest.log'),
+    (Join-Path $logDir 'bfplayer-latest.log'),
     @(
         "deploy_utc=$([DateTime]::UtcNow.ToString('o'))",
         "host=$ConsoleHost",

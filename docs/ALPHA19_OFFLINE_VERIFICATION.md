@@ -24,15 +24,15 @@ PS5 hardware.
 
 The standalone ELF imports `flock` for the lifetime lock. The service remains
 loopback-only and the takeover still uses the exact `GET /shutdown` route.
-Runtime updates preserve `/data/PS5-MediaCenter/library.db`; no library,
+Runtime updates preserve `/data/BFplayer/library.db`; no library,
 settings, playback-history, or source-removal path was added to reinjection.
 
 ## Artifacts
 
 | File | Bytes | SHA-256 |
 | --- | ---: | --- |
-| `ps5-media-center-standalone.elf` | 17,641,096 | `76c5d39b0164270b95e11217dc462f99ef6f08340892da8e75e8cbf53073720b` |
-| `PS5-MediaCenter-standalone.zip` | 17,197,366 | `6abf8021841d95cf167ac807d410a41d780963117b8e21ae74db6266cda30093` |
+| `bfplayer-standalone.elf` | 17,641,096 | `76c5d39b0164270b95e11217dc462f99ef6f08340892da8e75e8cbf53073720b` |
+| `BFplayer-standalone.zip` | 17,197,366 | `6abf8021841d95cf167ac807d410a41d780963117b8e21ae74db6266cda30093` |
 | Embedded stripped player | 36,194,192 | `f0aa30287551112bcea131a578354a5ff4573fa64847f288b3aadfae2d749ee5` |
 
 The remaining hardware gate is to reinject alpha.19 over alpha.18 twice,

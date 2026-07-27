@@ -29,8 +29,8 @@ artifacts.
 
 | File | Bytes | SHA-256 |
 | --- | ---: | --- |
-| `ps5-media-center-standalone.elf` | 17,640,792 | `c5b3193a80b601648fd81c414508b23aabf7c866a110d937ff68e53ae68dd183` |
-| `PS5-MediaCenter-standalone.zip` | 17,189,107 | `101ea501bb2bedc317a029b983e1736d68ac268e3e0f590e0155b46cc866bd38` |
+| `bfplayer-standalone.elf` | 17,640,792 | `c5b3193a80b601648fd81c414508b23aabf7c866a110d937ff68e53ae68dd183` |
+| `BFplayer-standalone.zip` | 17,189,107 | `101ea501bb2bedc317a029b983e1736d68ac268e3e0f590e0155b46cc866bd38` |
 | Embedded stripped player | 36,177,808 | `829a599e654be3bdedc6fb660c9d8947003288d74dfe6d564c622a1bef90db68` |
 
 The hardware gate is to confirm the toast appears after injection, the launch

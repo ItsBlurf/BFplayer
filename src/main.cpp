@@ -40,8 +40,11 @@ extern "C" {
 #include <limits>
 #include <optional>
 #include <string>
+#include <sys/stat.h>
+#include <unistd.h>
 #include <utility>
 #include <vector>
+#include <fcntl.h>
 
 namespace {
 
@@ -62,7 +65,7 @@ constexpr int kWindowHeight = 1080;
 constexpr int kAudioBufferBytes = 64 * 1024;
 constexpr int kSubtitleAtlasSize = 4096;
 constexpr int kSubtitleFragments = 1024;
-constexpr int kVideoDecoderThreads = 8;
+constexpr int kVideoDecoderThreads = 16;
 constexpr int kVideoPacketBufferCount = 64;
 constexpr int kVideoFrameBufferCount = 3;
 
@@ -184,6 +187,26 @@ VideoSourceInfo inspect_video_source(
     return info;
 }
 
+Kit_VideoFormatRequest make_video_format_request(
+    const VideoSourceInfo& source) {
+    Kit_VideoFormatRequest request{};
+    Kit_ResetVideoFormatRequest(&request);
+    if (source.width < 1 || source.height < 1 ||
+        (source.width <= kWindowWidth && source.height <= kWindowHeight)) {
+        return request;
+    }
+    const double scale = std::min(
+        static_cast<double>(kWindowWidth) / source.width,
+        static_cast<double>(kWindowHeight) / source.height);
+    request.width = std::max(
+        2,
+        static_cast<int>(std::floor(source.width * scale)) & ~1);
+    request.height = std::max(
+        2,
+        static_cast<int>(std::floor(source.height * scale)) & ~1);
+    return request;
+}
+
 void sdl_log_output(
     void*,
     int category,
@@ -223,6 +246,127 @@ std::string executable_asset_path(const char* executable_path, const char* relat
         return relative_path ? relative_path : std::string{};
     }
     return directory + "/" + (relative_path ? relative_path : "");
+}
+
+void migrate_legacy_library_database() {
+    constexpr const char* legacy_database =
+        "/data/PS5-MediaCenter/library.db";
+    constexpr const char* current_directory = "/data/BFplayer";
+    constexpr const char* current_database =
+        "/data/BFplayer/library.db";
+    struct stat destination_status {};
+    if (lstat(current_database, &destination_status) == 0) {
+        return;
+    }
+    if (errno != ENOENT) {
+        return;
+    }
+    struct stat source_status {};
+    if (lstat(legacy_database, &source_status) != 0 ||
+        !S_ISREG(source_status.st_mode) ||
+        S_ISLNK(source_status.st_mode) ||
+        source_status.st_size < 1) {
+        return;
+    }
+    if ((mkdir(current_directory, 0777) != 0 && errno != EEXIST)) {
+        std::fprintf(
+            stderr,
+            "BFplayer migration: cannot create %s errno=%d\n",
+            current_directory,
+            errno);
+        return;
+    }
+    const int input = open(legacy_database, O_RDONLY | O_NOFOLLOW);
+    if (input < 0) {
+        std::fprintf(
+            stderr,
+            "BFplayer migration: cannot open legacy database errno=%d\n",
+            errno);
+        return;
+    }
+    struct stat opened_source_status {};
+    if (fstat(input, &opened_source_status) != 0 ||
+        !S_ISREG(opened_source_status.st_mode) ||
+        opened_source_status.st_dev != source_status.st_dev ||
+        opened_source_status.st_ino != source_status.st_ino) {
+        std::fprintf(
+            stderr,
+            "BFplayer migration: legacy database changed during open\n");
+        close(input);
+        return;
+    }
+    char temporary[96]{};
+    std::snprintf(
+        temporary,
+        sizeof(temporary),
+        "%s.migrate.%ld",
+        current_database,
+        static_cast<long>(getpid()));
+    const int output = open(
+        temporary,
+        O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW,
+        0600);
+    if (output < 0) {
+        std::fprintf(
+            stderr,
+            "BFplayer migration: cannot create temporary database errno=%d\n",
+            errno);
+        close(input);
+        return;
+    }
+    bool copied = true;
+    std::array<unsigned char, 64 * 1024> buffer{};
+    for (;;) {
+        const ssize_t received = read(input, buffer.data(), buffer.size());
+        if (received == 0) {
+            break;
+        }
+        if (received < 0) {
+            if (errno == EINTR) {
+                continue;
+            }
+            copied = false;
+            break;
+        }
+        ssize_t offset = 0;
+        while (offset < received) {
+            const ssize_t written = write(
+                output,
+                buffer.data() + offset,
+                static_cast<std::size_t>(received - offset));
+            if (written < 0 && errno == EINTR) {
+                continue;
+            }
+            if (written <= 0) {
+                copied = false;
+                break;
+            }
+            offset += written;
+        }
+        if (!copied) {
+            break;
+        }
+    }
+    if (copied && fsync(output) != 0) {
+        copied = false;
+    }
+    close(input);
+    if (close(output) != 0) {
+        copied = false;
+    }
+    if (!copied || rename(temporary, current_database) != 0) {
+        const int migration_errno = errno;
+        (void)unlink(temporary);
+        std::fprintf(
+            stderr,
+            "BFplayer migration: database copy failed errno=%d\n",
+            migration_errno);
+        return;
+    }
+    std::fprintf(
+        stderr,
+        "BFplayer migration: library database preserved at %s\n",
+        current_database);
 }
 
 void log_installed_manifest(const char* executable_path) {
@@ -1151,7 +1295,7 @@ bool persist_active_player_settings(App& app) {
         ps5mc::normalized_player_settings(app.settings);
     ps5mc::LibraryDatabase database;
     const bool saved =
-        database.open("/data/PS5-MediaCenter/library.db") &&
+        database.open("/data/BFplayer/library.db") &&
         database.set_settings({
             {std::string(ps5mc::kSettingVolumePercent),
              std::to_string(settings.volume_percent)},
@@ -1705,7 +1849,7 @@ PlaybackOutcome run_player(
     }
     ps5mc::LibraryDatabase resume_database;
     const bool database_available =
-        resume_database.open("/data/PS5-MediaCenter/library.db");
+        resume_database.open("/data/BFplayer/library.db");
     app.settings = database_available
         ? load_player_settings(resume_database)
         : ps5mc::PlayerSettings{};
@@ -1765,6 +1909,8 @@ PlaybackOutcome run_player(
     const VideoSourceInfo source_video = inspect_video_source(
         static_cast<const AVFormatContext*>(app.source->format_ctx),
         initial_video);
+    const Kit_VideoFormatRequest video_request =
+        make_video_format_request(source_video);
     ps5mc::diagnostics_log(
         ps5mc::DiagnosticLevel::info,
         "video-source codec=%s profile=%d pix_fmt=%s bit_depth=%d size=%dx%d fps=%.3f bitrate=%lld demanding_software_decode=%d",
@@ -1777,6 +1923,14 @@ PlaybackOutcome run_player(
         source_video.frame_rate,
         static_cast<long long>(source_video.bit_rate),
         source_video.demanding_software_decode ? 1 : 0);
+    ps5mc::diagnostics_log(
+        ps5mc::DiagnosticLevel::info,
+        "video-output-request source=%dx%d output=%dx%d downscale=%d",
+        source_video.width,
+        source_video.height,
+        video_request.width,
+        video_request.height,
+        video_request.width > 0 && video_request.height > 0 ? 1 : 0);
     // Kitchensink requires a video decoder for subtitle layout. Audio-only
     // files with timed lyrics must still open instead of failing creation.
     const int initial_subtitle =
@@ -1788,7 +1942,7 @@ PlaybackOutcome run_player(
         initial_video,
         initial_audio,
         initial_subtitle,
-        nullptr,
+        &video_request,
         &audio_request,
         kWindowWidth,
         kWindowHeight);
@@ -2452,6 +2606,7 @@ void return_to_playstation_home() {
 } // namespace
 
 int main(int argc, char** argv) {
+    migrate_legacy_library_database();
     ps5mc::diagnostics_init(argc, argv);
     ps5mc::diagnostics_install_ffmpeg();
     SDL_LogSetOutputFunction(sdl_log_output, nullptr);
@@ -2503,7 +2658,7 @@ int main(int argc, char** argv) {
         Kit_GetHint(KIT_HINT_VIDEO_BUFFER_FRAMES));
 
     app.window = SDL_CreateWindow(
-        "PS5 Media Center",
+        "BFplayer",
         SDL_WINDOWPOS_UNDEFINED,
         SDL_WINDOWPOS_UNDEFINED,
         kWindowWidth,
