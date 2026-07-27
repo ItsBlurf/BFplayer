@@ -1,4 +1,4 @@
-#include "ps5mc/playback_osd.hpp"
+#include "bfplayer/playback_osd.hpp"
 
 #include <SDL.h>
 #include <SDL_ttf.h>
@@ -11,7 +11,7 @@
 #include <utility>
 #include <vector>
 
-namespace ps5mc {
+namespace bfplayer {
 namespace {
 
 constexpr int kScreenWidth = 1920;
@@ -416,4 +416,4 @@ const std::string& PlaybackOsd::error() const noexcept {
     return impl_->last_error;
 }
 
-} // namespace ps5mc
+} // namespace bfplayer

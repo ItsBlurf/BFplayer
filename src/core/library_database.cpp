@@ -1,4 +1,4 @@
-#include "ps5mc/library_database.hpp"
+#include "bfplayer/library_database.hpp"
 
 #include <sqlite3.h>
 
@@ -8,7 +8,7 @@
 #include <limits>
 #include <string>
 
-namespace ps5mc {
+namespace bfplayer {
 namespace {
 
 constexpr int kCurrentSchemaVersion = 2;
@@ -824,4 +824,4 @@ std::vector<MediaEntry> LibraryDatabase::list_media(std::size_t limit, std::size
     return entries;
 }
 
-} // namespace ps5mc
+} // namespace bfplayer

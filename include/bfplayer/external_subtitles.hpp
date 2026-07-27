@@ -6,7 +6,7 @@
 
 struct SDL_Renderer;
 
-namespace ps5mc {
+namespace bfplayer {
 
 // External text-subtitle renderer. FFmpeg demuxes/decodes the sidecar and
 // converts supported text formats to ASS events; libass handles layout and
@@ -42,4 +42,4 @@ private:
     std::unique_ptr<Impl> impl_;
 };
 
-} // namespace ps5mc
+} // namespace bfplayer

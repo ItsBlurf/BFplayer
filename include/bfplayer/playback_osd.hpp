@@ -7,7 +7,7 @@
 
 struct SDL_Renderer;
 
-namespace ps5mc {
+namespace bfplayer {
 
 class PlaybackOsd {
 public:
@@ -36,4 +36,4 @@ private:
     std::unique_ptr<Impl> impl_;
 };
 
-} // namespace ps5mc
+} // namespace bfplayer

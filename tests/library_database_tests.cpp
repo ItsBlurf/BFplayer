@@ -1,4 +1,4 @@
-#include "ps5mc/library_database.hpp"
+#include "bfplayer/library_database.hpp"
 
 #include <sqlite3.h>
 
@@ -21,19 +21,19 @@ void check(bool condition, const char* message) {
 
 int main() {
     const std::filesystem::path database_path =
-        std::filesystem::temp_directory_path() / "ps5mc-library-test.db";
+        std::filesystem::temp_directory_path() / "bfplayer-library-test.db";
     std::error_code filesystem_error;
     std::filesystem::remove(database_path, filesystem_error);
     std::filesystem::remove(database_path.string() + "-wal", filesystem_error);
     std::filesystem::remove(database_path.string() + "-shm", filesystem_error);
 
-    ps5mc::LibraryDatabase unopened;
+    bfplayer::LibraryDatabase unopened;
     check(!unopened.set_setting("key", "value"),
           "operations before open fail without crashing");
     check(!unopened.open(""), "empty database path is rejected");
 
     const std::filesystem::path legacy_path =
-        std::filesystem::temp_directory_path() / "ps5mc-library-v1-test.db";
+        std::filesystem::temp_directory_path() / "bfplayer-library-v1-test.db";
     std::filesystem::remove(legacy_path, filesystem_error);
     sqlite3* legacy = nullptr;
     check(sqlite3_open(legacy_path.string().c_str(), &legacy) == SQLITE_OK,
@@ -60,7 +60,7 @@ int main() {
     sqlite3_free(legacy_error);
     sqlite3_close(legacy);
 
-    ps5mc::LibraryDatabase migrated;
+    bfplayer::LibraryDatabase migrated;
     check(migrated.open(legacy_path.string()), "v1 database migrates");
     const auto migrated_entries = migrated.list_media();
     check(migrated_entries.size() == 1 &&
@@ -75,26 +75,26 @@ int main() {
     std::filesystem::remove(legacy_path.string() + "-wal", filesystem_error);
     std::filesystem::remove(legacy_path.string() + "-shm", filesystem_error);
 
-    ps5mc::LibraryDatabase database;
+    bfplayer::LibraryDatabase database;
     check(database.open(database_path.string()), "database opens");
     check(database.begin_scan("/media"), "first scan begins");
-    check(database.upsert_media({"/media/A.mkv", "A.mkv", ps5mc::MediaKind::video, 100, 10}),
+    check(database.upsert_media({"/media/A.mkv", "A.mkv", bfplayer::MediaKind::video, 100, 10}),
           "first row upserts");
-    check(database.upsert_media({"/media/B.flac", "B.flac", ps5mc::MediaKind::audio, 200, 20}),
+    check(database.upsert_media({"/media/B.flac", "B.flac", bfplayer::MediaKind::audio, 200, 20}),
           "second row upserts");
     check(database.finish_scan(true), "first scan commits");
     check(database.list_media().size() == 2, "two rows listed");
     check(database.remove_root("/media"), "configured root can be removed");
     check(database.list_media().empty(), "removing root cascades indexed media");
     check(database.begin_scan("/media"), "root can be re-added after removal");
-    check(database.upsert_media({"/media/A.mkv", "A.mkv", ps5mc::MediaKind::video, 100, 10}),
+    check(database.upsert_media({"/media/A.mkv", "A.mkv", bfplayer::MediaKind::video, 100, 10}),
           "re-added movie upserts");
-    check(database.upsert_media({"/media/B.flac", "B.flac", ps5mc::MediaKind::audio, 200, 20}),
+    check(database.upsert_media({"/media/B.flac", "B.flac", bfplayer::MediaKind::audio, 200, 20}),
           "re-added audio upserts");
     check(database.finish_scan(true), "re-added root scan commits");
 
-    ps5mc::MediaEntry metadata_entry{
-        "/media/A.mkv", "A.mkv", ps5mc::MediaKind::video, 100, 10};
+    bfplayer::MediaEntry metadata_entry{
+        "/media/A.mkv", "A.mkv", bfplayer::MediaKind::video, 100, 10};
     check(database.media_needs_metadata_probe(metadata_entry),
           "new media needs metadata probe");
     metadata_entry.duration_ms = 90000;
@@ -119,9 +119,9 @@ int main() {
     }
     check(metadata_loaded, "metadata fields round-trip through listing");
 
-    ps5mc::ResumeState resume{12345, 90000, 777, false};
+    bfplayer::ResumeState resume{12345, 90000, 777, false};
     check(database.save_resume("/media/A.mkv", resume), "resume saves");
-    ps5mc::ResumeState loaded{};
+    bfplayer::ResumeState loaded{};
     check(database.load_resume("/media/A.mkv", loaded), "resume loads");
     check(loaded.position_ms == 12345 && loaded.duration_ms == 90000,
           "resume values round-trip");
@@ -138,7 +138,7 @@ int main() {
     check(database.save_resume("https://example.test/live.m3u8", resume),
           "direct URL resume does not require an indexed row");
 
-    ps5mc::TrackPreferences preferences{};
+    bfplayer::TrackPreferences preferences{};
     preferences.audio_stream = 2;
     preferences.audio_language = "jpn";
     preferences.subtitle_stream = -1;
@@ -147,7 +147,7 @@ int main() {
     preferences.subtitle_delay_ms = 750;
     check(database.save_track_preferences("/media/A.mkv", preferences),
           "track preferences save");
-    ps5mc::TrackPreferences loaded_preferences{};
+    bfplayer::TrackPreferences loaded_preferences{};
     check(database.load_track_preferences("/media/A.mkv", loaded_preferences),
           "track preferences load");
     check(loaded_preferences.audio_stream == 2 &&
@@ -208,13 +208,13 @@ int main() {
     check(favorite_removed, "favorite removal joins media listing");
 
     check(database.begin_scan("/media"), "replacement scan begins");
-    check(database.upsert_media({"/media/A.mkv", "A.mkv", ps5mc::MediaKind::video, 101, 30}),
+    check(database.upsert_media({"/media/A.mkv", "A.mkv", bfplayer::MediaKind::video, 101, 30}),
           "replacement row upserts");
     check(database.finish_scan(true), "replacement scan commits");
     const auto replaced = database.list_media();
     check(replaced.size() == 1 && replaced[0].size == 101, "stale row removed after commit");
-    const ps5mc::MediaEntry changed_entry{
-        "/media/A.mkv", "A.mkv", ps5mc::MediaKind::video, 101, 30};
+    const bfplayer::MediaEntry changed_entry{
+        "/media/A.mkv", "A.mkv", bfplayer::MediaKind::video, 101, 30};
     check(database.media_needs_metadata_probe(changed_entry),
           "changed media invalidates stale metadata");
     check(replaced[0].container.empty() && replaced[0].duration_ms == 0,

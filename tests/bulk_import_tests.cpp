@@ -1,4 +1,4 @@
-#include "ps5mc/bulk_import.hpp"
+#include "bfplayer/bulk_import.hpp"
 
 #include <filesystem>
 #include <fstream>
@@ -25,7 +25,7 @@ void touch(const std::filesystem::path& path) {
 
 int main() {
     const std::filesystem::path root =
-        std::filesystem::temp_directory_path() / "ps5mc-bulk-import-test";
+        std::filesystem::temp_directory_path() / "bfplayer-bulk-import-test";
     std::error_code error;
     std::filesystem::remove_all(root, error);
     std::filesystem::create_directories(root / "Show A" / "Season 01", error);
@@ -38,8 +38,8 @@ int main() {
     touch(root / "Show B" / "Episode 01.mp4");
     touch(root / "Not Media" / "readme.txt");
 
-    const ps5mc::BulkImportResult result =
-        ps5mc::discover_bulk_media_sources(root.string());
+    const bfplayer::BulkImportResult result =
+        bfplayer::discover_bulk_media_sources(root.string());
     check(result.ok(), "bulk import completes");
     check(result.loose_movies == 2, "loose videos become two movies");
     check(result.tv_folders == 2, "video-containing child folders become shows");
@@ -49,15 +49,15 @@ int main() {
     bool show_b = false;
     bool movie_one = false;
     bool not_media = false;
-    for (const ps5mc::MediaSource& source : result.sources) {
+    for (const bfplayer::MediaSource& source : result.sources) {
         show_a = show_a ||
-            (source.kind == ps5mc::MediaSourceKind::tv_folder &&
+            (source.kind == bfplayer::MediaSourceKind::tv_folder &&
              source.title == "Show A");
         show_b = show_b ||
-            (source.kind == ps5mc::MediaSourceKind::tv_folder &&
+            (source.kind == bfplayer::MediaSourceKind::tv_folder &&
              source.title == "Show B");
         movie_one = movie_one ||
-            (source.kind == ps5mc::MediaSourceKind::movie_file &&
+            (source.kind == bfplayer::MediaSourceKind::movie_file &&
              source.title == "Movie One.mkv");
         not_media = not_media || source.path.find("Not Media") != std::string::npos;
     }
@@ -67,11 +67,11 @@ int main() {
 
     bool cancel_requested = false;
     std::size_t progress_calls = 0;
-    const ps5mc::BulkImportResult cancelled =
-        ps5mc::discover_bulk_media_sources(
+    const bfplayer::BulkImportResult cancelled =
+        bfplayer::discover_bulk_media_sources(
             root.string(),
             [&]() { return cancel_requested; },
-            [&](const ps5mc::BulkImportProgress& progress) {
+            [&](const bfplayer::BulkImportProgress& progress) {
                 ++progress_calls;
                 check(
                     !progress.current_path.empty(),
@@ -84,8 +84,8 @@ int main() {
     check(cancelled.ok(), "cancellation is not reported as fatal I/O");
     check(progress_calls > 0, "bulk import reports progress");
 
-    const ps5mc::BulkImportResult unsafe =
-        ps5mc::discover_bulk_media_sources("/");
+    const bfplayer::BulkImportResult unsafe =
+        bfplayer::discover_bulk_media_sources("/");
     check(!unsafe.ok(), "filesystem root cannot be bulk imported");
 
     std::filesystem::remove_all(root, error);

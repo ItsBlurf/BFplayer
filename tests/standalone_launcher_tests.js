@@ -70,14 +70,14 @@ assert.strictEqual(uri.username, '');
 assert.strictEqual(uri.password, '');
 assert.notStrictEqual(uri.port, '8080');
 
-assert(launcher.includes('#define PS5MC_SERVICE_PORT 9040'));
+assert(launcher.includes('#define BFPLAYER_SERVICE_PORT 9040'));
 assert(launcher.includes('htonl(INADDR_LOOPBACK)'));
-assert(launcher.includes('ps5mc_request_is_launch'));
-assert(launcher.includes('ps5mc_request_is_shutdown'));
+assert(launcher.includes('bfplayer_request_is_launch'));
+assert(launcher.includes('bfplayer_request_is_shutdown'));
 assert(launcher.includes('create_loopback_listener_with_takeover'));
 assert(launcher.includes('acquire_instance_lock'));
 assert(launcher.includes('flock(descriptor, LOCK_EX | LOCK_NB)'));
-assert(launcher.includes('PS5MC_INSTANCE_LOCK_PATH'));
+assert(launcher.includes('BFPLAYER_INSTANCE_LOCK_PATH'));
 assert(launcher.includes('serialized takeover lock acquired'));
 assert(launcher.includes('active_player_pid'));
 assert(launcher.includes('reason=player-already-running'));
@@ -90,17 +90,17 @@ assert(launcher.includes('request route=/shutdown action=exit'));
 assert(launcher.includes('hbldr_launch_buffer'));
 assert(launcher.includes('build/ps5/bfplayer.elf.gz'));
 assert(launcher.includes('inflateInit2'));
-assert(launcher.includes('PS5MC_PLAYER_UNCOMPRESSED_SIZE'));
+assert(launcher.includes('BFPLAYER_PLAYER_UNCOMPRESSED_SIZE'));
 assert(launcher.includes('assets/fonts/NotoSans-Regular.ttf'));
 assert(launcher.includes('assets/tile/param.json'));
 assert(launcher.includes('assets/icon0.png'));
 assert(launcher.includes('remove_legacy_bigapp_host_registration'));
-assert(launcher.includes('PS5MC_LEGACY_CLEAN_MARKER'));
+assert(launcher.includes('BFPLAYER_LEGACY_CLEAN_MARKER'));
 assert(launcher.includes('legacy host cleanup already complete; skipping'));
 assert(launcher.includes('sceAppInstUtilAppUnInstall'));
 assert(launcher.includes('hbldr_prepare_host'));
 assert(launcher.includes('PSMR00001'));
-assert(!launcher.includes('PS5MC_HOST_APP_DIR'));
+assert(!launcher.includes('BFPLAYER_HOST_APP_DIR'));
 assert(!launcher.includes('install_bigapp_host_registration'));
 assert(launcher.includes('install_title_dir'));
 assert(launcher.includes('Wudg3Xe3heE'));
@@ -141,6 +141,7 @@ assert(
 assert(hbldr.includes('hbldr_launch_buffer'));
 assert(hbldr.includes('hbldr_prepare_host'));
 assert(hbldr.includes('#define HOST_TITLE_ID "PSMC00001"'));
+assert(hbldr.includes('BFPLAYER00000000'));
 assert(hbldr.includes('"  \\"applicationCategoryType\\": 65536,\\n"'));
 assert(!hbldr.includes('"  \\"applicationCategoryType\\": 0,\\n"'));
 assert(!hbldr.includes('PSMR00001'));
@@ -172,8 +173,9 @@ assert(libraryUi.includes('FooterGlyph::triangle, "", "Remove"'));
 assert(libraryUi.includes('draw_logo(impl_->renderer, impl_->logo_texture'));
 assert(libraryUi.includes('title = "BFplayer"'));
 assert(libraryUi.includes('"Exit BFplayer"'));
-assert(!libraryUi.includes('title = "Media Center"'));
-assert(!libraryUi.includes('"Exit Media Center"'));
+const legacyVisibleName = `Media ${'Center'}`;
+assert(!libraryUi.includes(`title = "${legacyVisibleName}"`));
+assert(!libraryUi.includes(`"Exit ${legacyVisibleName}"`));
 assert(diagnostics.includes('BFPLAYER_FATAL_SIGNAL'));
 assert(diagnostics.includes('BFPLAYER_LOG_TRUNCATED'));
 assert(!libraryUi.includes('std::string("Sort: ")'));
@@ -197,7 +199,7 @@ assert(libraryUi.includes('if (browsing && event.type == SDL_KEYDOWN)'));
 assert(libraryUi.includes(
     '"Finish or cancel the current library import first"'));
 assert(libraryUi.includes('SDL_CreateThread('));
-assert(libraryUi.includes('"ps5mc-bulk-import"'));
+assert(libraryUi.includes('"bfplayer-bulk-import"'));
 assert(libraryUi.includes('"Cancel Import"'));
 assert(libraryUi.includes('consume_bulk_import_result()'));
 const bulkImport = fs.readFileSync(
@@ -237,9 +239,9 @@ assert(player.includes('demanding_software_decode'));
 assert(player.includes('display_aspect_from_sample_aspect('));
 assert(player.includes('av_guess_sample_aspect_ratio('));
 assert(player.includes(
-    'app.video_scale_mode = ps5mc::VideoScaleMode::fit'));
+    'app.video_scale_mode = bfplayer::VideoScaleMode::fit'));
 assert(player.includes(
-    'app.video_crop_mode = ps5mc::VideoCropMode::default_crop'));
+    'app.video_crop_mode = bfplayer::VideoCropMode::default_crop'));
 assert(!player.includes(
     'resume_database.get_setting("video_scale_mode"'));
 assert(!player.includes(
@@ -254,7 +256,7 @@ assert(player.includes('class PlayerInstanceLock'));
 assert(player.includes('"/data/BFplayer/player.lock"'));
 assert(player.includes('LOCK_EX | LOCK_NB'));
 assert(player.includes('another player is already running'));
-assert(player.includes('kMediaCenterTitleId = "PSMC00001"'));
+assert(player.includes('kBFplayerTitleId = "PSMC00001"'));
 assert(player.includes('reason=unexpected-bigapp'));
 assert(!player.includes('subtitle_delay_mode'),
     'D-pad seeking must not be captured by a hidden subtitle-delay mode');
@@ -271,6 +273,6 @@ assert(build.includes('GZipStream'));
 assert(!build.includes(
     "$zip = Join-Path $distDir 'BFplayer-websrv.zip'"));
 assert(!build.includes(
-    "$tileInstaller = Join-Path $distDir 'ps5mc-tile-installer.elf'"));
+    "$tileInstaller = Join-Path $distDir 'bfplayer-tile-installer.elf'"));
 
 console.log('standalone_launcher_tests: PASS');

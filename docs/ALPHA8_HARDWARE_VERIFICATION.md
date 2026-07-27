@@ -17,8 +17,8 @@
 | Touchpad must not black-screen | PacBrew's PS5 SDL maps physical Touchpad to SDL Start and physical Options to SDL Back. Alpha.8 applies this mapping centrally. A physical touchpad press opened `/mnt/usb0`; the picker then navigated through `/mnt` to `/` without exiting or crashing. |
 | Browse anywhere | The native picker opened USB directories and successfully reached the filesystem root. It uses `lstat`, ignores symlinks, and does not cross device boundaries during recursive scans. |
 | USB-root media | `/mnt/usb0` completed with 15 entries, one media item, zero recoverable errors, and zero fatal errors. |
-| Folder becomes one TV Show | `/data/media/PS5MC-Test` was accepted as a TV-folder source. The scan published `shows=1 episodes=2 explicit_movies=0 total=3`. |
-| Show opens to episodes | The first Cross entered the grouped show without a play request. Navigation stayed in the episode view; the next Cross played `/data/media/PS5MC-Test/ffmpeg-pgs-supsample.mkv`. Returning from playback preserved `shows=1 episodes=2`. |
+| Folder becomes one TV Show | `/data/media/BFPLAYER-Test` was accepted as a TV-folder source. The scan published `shows=1 episodes=2 explicit_movies=0 total=3`. |
+| Show opens to episodes | The first Cross entered the grouped show without a play request. Navigation stayed in the episode view; the next Cross played `/data/media/BFPLAYER-Test/ffmpeg-pgs-supsample.mkv`. Returning from playback preserved `shows=1 episodes=2`. |
 | Selected file remains one Movie | The USB MKV was accepted as a movie-file source. The next scan published `shows=1 episodes=2 explicit_movies=1 total=3`, proving it was not absorbed into the TV group. |
 | Explicit Movie row plays | Cross on the final explicit One Pace Movie row issued a one-item request for that exact USB path. Matroska/HEVC/AAC initialization succeeded and playback heartbeats advanced. |
 | Direct HBL playback | The USB MKV opened as Matroska with HEVC 1920x1080 video and AAC 48 kHz stereo. Player creation and advancing heartbeats succeeded; the former unsupported float-sample error did not recur. |

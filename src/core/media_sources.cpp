@@ -1,10 +1,10 @@
-#include "ps5mc/media_sources.hpp"
+#include "bfplayer/media_sources.hpp"
 
 #include <algorithm>
 #include <cctype>
 #include <string_view>
 
-namespace ps5mc {
+namespace bfplayer {
 namespace {
 
 char hex_digit(unsigned int value) {
@@ -229,4 +229,4 @@ void retain_configured_media(
         entries.end());
 }
 
-} // namespace ps5mc
+} // namespace bfplayer

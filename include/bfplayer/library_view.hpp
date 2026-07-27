@@ -1,6 +1,6 @@
 #pragma once
 
-#include "ps5mc/media.hpp"
+#include "bfplayer/media.hpp"
 
 #include <cstddef>
 #include <optional>
@@ -8,7 +8,7 @@
 #include <string_view>
 #include <vector>
 
-namespace ps5mc {
+namespace bfplayer {
 
 enum class LibrarySortMode {
     smart = 0,
@@ -56,4 +56,4 @@ void sort_media_indices(
 // valid UTF-8, so malformed trailing bytes are treated as one best-effort unit.
 bool erase_last_utf8_codepoint(std::string& text) noexcept;
 
-} // namespace ps5mc
+} // namespace bfplayer

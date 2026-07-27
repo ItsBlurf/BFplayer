@@ -1,6 +1,6 @@
-#include "ps5mc/library_view.hpp"
+#include "bfplayer/library_view.hpp"
 
-#include "ps5mc/library_scanner.hpp"
+#include "bfplayer/library_scanner.hpp"
 
 #include <algorithm>
 #include <cctype>
@@ -8,7 +8,7 @@
 #include <string>
 #include <utility>
 
-namespace ps5mc {
+namespace bfplayer {
 namespace {
 
 unsigned char lower_ascii_byte(unsigned char value) {
@@ -278,4 +278,4 @@ bool erase_last_utf8_codepoint(std::string& text) noexcept {
     return true;
 }
 
-} // namespace ps5mc
+} // namespace bfplayer

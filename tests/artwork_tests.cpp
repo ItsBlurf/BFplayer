@@ -1,4 +1,4 @@
-#include "ps5mc/artwork.hpp"
+#include "bfplayer/artwork.hpp"
 
 #include <filesystem>
 #include <fstream>
@@ -74,23 +74,23 @@ int main() {
         "/media/Other.jpg",
     };
     check(
-        ps5mc::match_local_artwork("/media/Movie.mkv", candidates) == "/media/Movie.png",
+        bfplayer::match_local_artwork("/media/Movie.mkv", candidates) == "/media/Movie.png",
         "exact title artwork wins");
 
     const std::vector<std::string> generic{
         "/media/front.jpg", "/media/folder.png", "/media/cover.jpg", "/media/poster.png"};
     check(
-        ps5mc::match_local_artwork("/media/Movie.mkv", generic) == "/media/poster.png",
+        bfplayer::match_local_artwork("/media/Movie.mkv", generic) == "/media/poster.png",
         "generic poster priority");
     check(
-        ps5mc::match_local_artwork("Movie.mkv", {"Movie.webp"}).empty(),
+        bfplayer::match_local_artwork("Movie.mkv", {"Movie.webp"}).empty(),
         "unsupported artwork extension ignored");
     check(
-        ps5mc::find_local_artwork("https://example.invalid/movie.mkv").empty(),
+        bfplayer::find_local_artwork("https://example.invalid/movie.mkv").empty(),
         "network sources do not scan local sidecars");
 
     const std::filesystem::path root =
-        std::filesystem::temp_directory_path() / "ps5mc-artwork-test";
+        std::filesystem::temp_directory_path() / "bfplayer-artwork-test";
     std::error_code filesystem_error;
     std::filesystem::remove_all(root, filesystem_error);
     std::filesystem::create_directories(root);
@@ -100,39 +100,39 @@ int main() {
     write_bytes(root / "Movie.webp", {0x00, 0x01});
 
     const std::string media_path = utf8_path(root / "Movie.mkv");
-    const std::string artwork_path = ps5mc::find_local_artwork(media_path);
+    const std::string artwork_path = bfplayer::find_local_artwork(media_path);
     check(
         artwork_path == utf8_path(root / "Movie.png"),
         "immediate-directory discovery and ranking");
 
-    ps5mc::ArtworkData artwork;
+    bfplayer::ArtworkData artwork;
     std::string error;
     check(
-        ps5mc::load_local_artwork(artwork_path, artwork, error),
+        bfplayer::load_local_artwork(artwork_path, artwork, error),
         "bounded PNG header load");
     check(
-        artwork.format == ps5mc::ArtworkFormat::png &&
+        artwork.format == bfplayer::ArtworkFormat::png &&
         artwork.width == 1200 && artwork.height == 1800,
         "PNG dimensions");
 
     const std::string jpeg_path = utf8_path(root / "folder.jpg");
     check(
-        ps5mc::load_local_artwork(jpeg_path, artwork, error),
+        bfplayer::load_local_artwork(jpeg_path, artwork, error),
         "bounded JPEG header load");
     check(
-        artwork.format == ps5mc::ArtworkFormat::jpeg &&
+        artwork.format == bfplayer::ArtworkFormat::jpeg &&
         artwork.width == 640 && artwork.height == 960,
         "JPEG dimensions");
 
     write_bytes(root / "huge.png", png_header(9000, 9000));
     check(
-        !ps5mc::load_local_artwork(utf8_path(root / "huge.png"), artwork, error),
+        !bfplayer::load_local_artwork(utf8_path(root / "huge.png"), artwork, error),
         "oversized decoded dimensions rejected");
 
-    ps5mc::ArtworkLimits tiny_limits;
+    bfplayer::ArtworkLimits tiny_limits;
     tiny_limits.max_file_bytes = 8;
     check(
-        !ps5mc::load_local_artwork(jpeg_path, artwork, error, tiny_limits),
+        !bfplayer::load_local_artwork(jpeg_path, artwork, error, tiny_limits),
         "oversized encoded file rejected");
 
     std::filesystem::remove_all(root, filesystem_error);

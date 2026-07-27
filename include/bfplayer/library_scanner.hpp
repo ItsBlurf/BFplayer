@@ -1,13 +1,13 @@
 #pragma once
 
-#include "ps5mc/media.hpp"
+#include "bfplayer/media.hpp"
 
 #include <cstddef>
 #include <functional>
 #include <string>
 #include <vector>
 
-namespace ps5mc {
+namespace bfplayer {
 
 struct ScanLimits {
     std::size_t max_depth = 32;
@@ -60,4 +60,4 @@ using CancelCheck = std::function<bool()>;
     const ScanLimits& limits = {},
     const CancelCheck& cancelled = {});
 
-} // namespace ps5mc
+} // namespace bfplayer

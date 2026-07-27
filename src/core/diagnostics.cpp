@@ -1,4 +1,4 @@
-#include "ps5mc/diagnostics.hpp"
+#include "bfplayer/diagnostics.hpp"
 
 #include <algorithm>
 #include <atomic>
@@ -10,7 +10,7 @@
 #include <ctime>
 #include <string>
 
-#if defined(PS5MC_PS5)
+#if defined(BFPLAYER_PS5)
 extern "C" {
 #include <libavutil/log.h>
 }
@@ -30,7 +30,7 @@ extern "C" {
 #include <unistd.h>
 #endif
 
-namespace ps5mc {
+namespace bfplayer {
 namespace {
 
 constexpr std::size_t kMaximumLogBytes = 8U * 1024U * 1024U;
@@ -144,7 +144,7 @@ void install_signal_handlers() noexcept {
 }
 #endif
 
-#if defined(PS5MC_PS5)
+#if defined(BFPLAYER_PS5)
 void ffmpeg_log_callback(
     void* context,
     int level,
@@ -258,7 +258,7 @@ void diagnostics_init(int argc, char** argv) noexcept {
 }
 
 void diagnostics_install_ffmpeg() noexcept {
-#if defined(PS5MC_PS5)
+#if defined(BFPLAYER_PS5)
     av_log_set_level(AV_LOG_WARNING);
     av_log_set_callback(ffmpeg_log_callback);
     diagnostics_log(DiagnosticLevel::info, "ffmpeg logging installed level=warning");
@@ -345,4 +345,4 @@ const char* diagnostics_log_path() noexcept {
     return kLatestLog;
 }
 
-} // namespace ps5mc
+} // namespace bfplayer

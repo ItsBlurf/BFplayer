@@ -3,7 +3,7 @@
 #include <cstdint>
 #include <string>
 
-namespace ps5mc {
+namespace bfplayer {
 
 enum class MediaKind {
     unknown = 0,
@@ -38,4 +38,4 @@ struct MediaEntry {
     bool explicit_movie = false;
 };
 
-} // namespace ps5mc
+} // namespace bfplayer

@@ -3,7 +3,7 @@
 #include <optional>
 #include <string_view>
 
-namespace ps5mc {
+namespace bfplayer {
 
 enum class VideoScaleMode {
     fit = 0,
@@ -110,4 +110,4 @@ struct VideoLayout {
     VideoAspectMode aspect_mode,
     VideoCropMode crop_mode) noexcept;
 
-} // namespace ps5mc
+} // namespace bfplayer

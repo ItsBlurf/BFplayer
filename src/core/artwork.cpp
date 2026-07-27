@@ -1,6 +1,6 @@
-#include "ps5mc/artwork.hpp"
+#include "bfplayer/artwork.hpp"
 
-#include "ps5mc/library_scanner.hpp"
+#include "bfplayer/library_scanner.hpp"
 
 #include <algorithm>
 #include <array>
@@ -27,7 +27,7 @@
 #include <unistd.h>
 #endif
 
-namespace ps5mc {
+namespace bfplayer {
 namespace {
 
 std::string ascii_lower(std::string value) {
@@ -530,4 +530,4 @@ bool load_local_artwork(
     return true;
 }
 
-} // namespace ps5mc
+} // namespace bfplayer

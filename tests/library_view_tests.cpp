@@ -1,4 +1,4 @@
-#include "ps5mc/library_view.hpp"
+#include "bfplayer/library_view.hpp"
 
 #include <iostream>
 #include <string>
@@ -18,9 +18,9 @@ void check(bool condition, const char* message) {
 } // namespace
 
 int main() {
-    using ps5mc::LibrarySortMode;
-    using ps5mc::MediaEntry;
-    using ps5mc::MediaKind;
+    using bfplayer::LibrarySortMode;
+    using bfplayer::MediaEntry;
+    using bfplayer::MediaKind;
 
     MediaEntry episode_10{"/media/Season 1/Episode 10.mkv", "Episode 10.mkv", MediaKind::video};
     episode_10.title = "The Return";
@@ -38,41 +38,41 @@ int main() {
     episode_2.size = 2000;
     episode_2.last_played_unix = 75;
 
-    check(ps5mc::media_matches_query(episode_10, "RETURN h264"),
+    check(bfplayer::media_matches_query(episode_10, "RETURN h264"),
           "query matches title and codec case-insensitively");
-    check(ps5mc::media_matches_query(episode_10, "season   aac"),
+    check(bfplayer::media_matches_query(episode_10, "season   aac"),
           "query whitespace collapses and tokens match separate fields");
-    check(!ps5mc::media_matches_query(episode_10, "return hevc"),
+    check(!bfplayer::media_matches_query(episode_10, "return hevc"),
           "every query token is required");
     episode_10.title = "Am\xC3\xA9lie";
-    check(ps5mc::media_matches_query(episode_10, "am\xC3\xA9lie"),
+    check(bfplayer::media_matches_query(episode_10, "am\xC3\xA9lie"),
           "UTF-8 bytes match while ASCII letters remain case-insensitive");
     episode_10.title = "The Return";
-    check(ps5mc::normalize_media_query("  MOVIE\t  Night  ") == "movie night",
+    check(bfplayer::normalize_media_query("  MOVIE\t  Night  ") == "movie night",
           "query normalization trims and collapses ASCII whitespace");
 
     const std::vector<MediaEntry> entries{episode_10, episode_2};
     std::vector<std::size_t> indices{0, 1};
-    ps5mc::sort_media_indices(entries, indices, LibrarySortMode::name, false);
+    bfplayer::sort_media_indices(entries, indices, LibrarySortMode::name, false);
     check(indices == std::vector<std::size_t>({1, 0}), "natural display-name sort");
 
     indices = {0, 1};
-    ps5mc::sort_media_indices(entries, indices, LibrarySortMode::smart, true);
+    bfplayer::sort_media_indices(entries, indices, LibrarySortMode::smart, true);
     check(indices == std::vector<std::size_t>({1, 0}), "smart recent-first sort");
 
     indices = {0, 1};
-    ps5mc::sort_media_indices(entries, indices, LibrarySortMode::duration, false);
+    bfplayer::sort_media_indices(entries, indices, LibrarySortMode::duration, false);
     check(indices == std::vector<std::size_t>({0, 1}), "duration descending sort");
 
     indices = {0, 1};
-    ps5mc::sort_media_indices(entries, indices, LibrarySortMode::newest, false);
+    bfplayer::sort_media_indices(entries, indices, LibrarySortMode::newest, false);
     check(indices == std::vector<std::size_t>({1, 0}), "modified-time descending sort");
 
-    check(ps5mc::parse_library_sort_mode("size") == LibrarySortMode::size,
+    check(bfplayer::parse_library_sort_mode("size") == LibrarySortMode::size,
           "sort key parses");
-    check(!ps5mc::parse_library_sort_mode("invalid").has_value(),
+    check(!bfplayer::parse_library_sort_mode("invalid").has_value(),
           "invalid sort key rejected");
-    check(ps5mc::next_library_sort_mode(LibrarySortMode::size) == LibrarySortMode::smart,
+    check(bfplayer::next_library_sort_mode(LibrarySortMode::size) == LibrarySortMode::smart,
           "sort cycle wraps");
 
     MediaEntry nested_episode{
@@ -80,7 +80,7 @@ int main() {
         "Episode 4.mkv",
         MediaKind::video};
     check(
-        ps5mc::media_season_root(
+        bfplayer::media_season_root(
             nested_episode, "/media/Shows/The Example") ==
             "/media/Shows/The Example/Season 2",
         "nested episode groups under its first season directory");
@@ -89,7 +89,7 @@ int main() {
         "Special.mkv",
         MediaKind::video};
     check(
-        ps5mc::media_season_root(
+        bfplayer::media_season_root(
             direct_episode, "/media/Shows/The Example").empty(),
         "direct series file remains an ungrouped episode");
     MediaEntry sibling_episode{
@@ -97,7 +97,7 @@ int main() {
         "Episode.mkv",
         MediaKind::video};
     check(
-        ps5mc::media_season_root(
+        bfplayer::media_season_root(
             sibling_episode, "/media/Shows/The Example").empty(),
         "season grouping enforces a series-root path boundary");
     MediaEntry windows_episode{
@@ -105,15 +105,15 @@ int main() {
         "Episode.mkv",
         MediaKind::video};
     check(
-        ps5mc::media_season_root(
+        bfplayer::media_season_root(
             windows_episode, R"(D:\Shows\Example)") ==
             "D:/Shows/Example/Season 10",
         "season grouping normalizes Windows separators for host tests");
 
     std::string utf8 = "caf\xC3\xA9";
-    check(ps5mc::erase_last_utf8_codepoint(utf8) && utf8 == "caf",
+    check(bfplayer::erase_last_utf8_codepoint(utf8) && utf8 == "caf",
           "UTF-8 backspace removes one complete code point");
-    check(ps5mc::erase_last_utf8_codepoint(utf8) && utf8 == "ca",
+    check(bfplayer::erase_last_utf8_codepoint(utf8) && utf8 == "ca",
           "ASCII backspace removes one byte");
 
     if (failures == 0) {

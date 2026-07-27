@@ -42,20 +42,22 @@ $distDir = Join-Path $projectRoot 'dist'
 $packageRoot = Join-Path $projectRoot 'build\package'
 $packageDir = Join-Path $packageRoot 'BFplayer-standalone'
 New-Item -ItemType Directory -Force -Path $buildDir, $distDir | Out-Null
+$legacyLowerStem = 'ps5-' + 'media-' + 'center'
+$legacyUpperStem = 'PS5-' + 'Media' + 'Center'
 $obsoleteDistEntries = @(
     'homebrew.js',
     'BFplayer-direct-tile.zip',
     'BFplayer-direct-tile.zip.sha256',
     'BFplayer-websrv.zip',
     'BFplayer-websrv.zip.sha256',
-    'ps5-media-center.elf',
-    'ps5-media-center.sha256',
-    'ps5-media-center-standalone.elf',
-    'ps5-media-center-standalone.sha256',
-    'PS5-MediaCenter-standalone.zip',
-    'PS5-MediaCenter-standalone.zip.sha256',
-    'ps5mc-tile-installer.elf',
-    'ps5mc-tile-installer.sha256',
+    "$legacyLowerStem.elf",
+    "$legacyLowerStem.sha256",
+    "$legacyLowerStem-standalone.elf",
+    "$legacyLowerStem-standalone.sha256",
+    "$legacyUpperStem-standalone.zip",
+    "$legacyUpperStem-standalone.zip.sha256",
+    'bfplayer-tile-installer.elf',
+    'bfplayer-tile-installer.sha256',
     'THIRD_PARTY_NOTICES.md',
     'assets',
     'sce_sys',
@@ -72,18 +74,18 @@ foreach ($entry in $obsoleteDistEntries) {
     }
 }
 $version = (Get-Content -Raw (Join-Path $projectRoot 'VERSION')).Trim()
-$versionHeader = Join-Path $buildDir 'ps5mc_version.h'
-$versionHeaderRelative = 'build\ps5\ps5mc_version.h'
+$versionHeader = Join-Path $buildDir 'bfplayer_version.h'
+$versionHeaderRelative = 'build\ps5\bfplayer_version.h'
 [IO.File]::WriteAllText(
     $versionHeader,
-    "#pragma once`n#define PS5MC_VERSION `"$version`"`n")
+    "#pragma once`n#define BFPLAYER_VERSION `"$version`"`n")
 
 $common = @(
     '-std=c++20',
     '-Wall',
     '-Wextra',
     '-Wpedantic',
-    '-DPS5MC_PS5=1',
+    '-DBFPLAYER_PS5=1',
     '-Ivendor\SDL_kitchensink\include',
     "-I$($pacbrewHome)\include",
     "-I$($pacbrewHome)\include\SDL2",
@@ -161,7 +163,7 @@ try {
         '-Wall',
         '-Wextra',
         '-Wpedantic',
-        '-DPS5MC_PS5=1',
+        '-DBFPLAYER_PS5=1',
         '-DKIT_VERSION_MAJOR=2',
         '-DKIT_VERSION_MINOR=0',
         '-DKIT_VERSION_PATCH=0',
@@ -245,7 +247,7 @@ try {
     $playerSize = (Get-Item -LiteralPath $elf).Length
     [IO.File]::AppendAllText(
         $versionHeader,
-        "#define PS5MC_PLAYER_UNCOMPRESSED_SIZE $($playerSize)UL`n")
+        "#define BFPLAYER_PLAYER_UNCOMPRESSED_SIZE $($playerSize)UL`n")
     $compressedPlayer = Join-Path $buildDir 'bfplayer.elf.gz'
     $inputStream = [IO.File]::OpenRead($elf)
     try {

@@ -1,4 +1,4 @@
-#include "ps5mc/safe_read_file.hpp"
+#include "bfplayer/safe_read_file.hpp"
 
 #include <array>
 #include <chrono>
@@ -32,7 +32,7 @@ int main() {
         std::chrono::steady_clock::now().time_since_epoch().count();
     const std::filesystem::path root =
         std::filesystem::temp_directory_path() /
-        ("ps5mc-safe-file-" + std::to_string(suffix));
+        ("bfplayer-safe-file-" + std::to_string(suffix));
     std::error_code error;
     std::filesystem::create_directories(root, error);
     const std::filesystem::path regular = root / "sample.bin";
@@ -41,7 +41,7 @@ int main() {
         output << "abcdef";
     }
 
-    ps5mc::SafeReadFile file;
+    bfplayer::SafeReadFile file;
     std::string open_error;
     check(file.open(utf8_path(regular), open_error), "regular file opens");
     check(file.size() == 6, "regular file size captured");

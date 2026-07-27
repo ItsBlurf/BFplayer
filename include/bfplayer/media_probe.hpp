@@ -1,10 +1,10 @@
 #pragma once
 
-#include "ps5mc/media.hpp"
+#include "bfplayer/media.hpp"
 
 #include <string>
 
-namespace ps5mc {
+namespace bfplayer {
 
 // Probes one local media item with bounded FFmpeg analysis. On success the
 // metadata fields of entry are populated while its scanner fingerprint stays
@@ -14,4 +14,4 @@ bool probe_media_metadata(
     std::string& error,
     int* fatal_io_error = nullptr);
 
-} // namespace ps5mc
+} // namespace bfplayer

@@ -94,11 +94,11 @@ standalone `.sha256` files also match independently calculated hashes.
 All hashes in [TEST_CORPUS.md](TEST_CORPUS.md) passed. Independent `ffprobe`
 inspection found:
 
-- `ps5mc-multitrack-test.mkv`: one 1280x720 H.264 video stream, two AAC audio
+- `bfplayer-multitrack-test.mkv`: one 1280x720 H.264 video stream, two AAC audio
   streams, two SubRip plus one ASS subtitle stream, three chapters, and
   duration `10.021000` seconds;
 - `ffmpeg-pgs-supsample.mkv`: one embedded `hdmv_pgs_subtitle` stream;
-- `ps5mc-multitrack-test.bitmap.sup`: one external
+- `bfplayer-multitrack-test.bitmap.sup`: one external
   `hdmv_pgs_subtitle` stream.
 
 The full claim boundary, implementation mapping, fixed defects, and residual

@@ -1,4 +1,4 @@
-#include "ps5mc/safe_read_file.hpp"
+#include "bfplayer/safe_read_file.hpp"
 
 #include <cerrno>
 #include <cstdio>
@@ -19,7 +19,7 @@
 #include <unistd.h>
 #endif
 
-namespace ps5mc {
+namespace bfplayer {
 namespace {
 
 constexpr int negative_error(int value) noexcept {
@@ -274,4 +274,4 @@ std::int64_t SafeReadFile::seek(std::int64_t offset, int whence) noexcept {
 #endif
 }
 
-} // namespace ps5mc
+} // namespace bfplayer

@@ -3,7 +3,7 @@
 #include <string>
 #include <string_view>
 
-namespace ps5mc {
+namespace bfplayer {
 
 // These helpers deliberately avoid decoding or normalizing the URI. FFmpeg
 // must receive the original source string, while logs and persistence must not
@@ -14,4 +14,4 @@ namespace ps5mc {
 [[nodiscard]] bool uri_has_sensitive_components(std::string_view value) noexcept;
 [[nodiscard]] std::string redact_uri_secrets(std::string_view value);
 
-} // namespace ps5mc
+} // namespace bfplayer

@@ -1,4 +1,4 @@
-#include "ps5mc/library_scanner.hpp"
+#include "bfplayer/library_scanner.hpp"
 
 #include <algorithm>
 #include <array>
@@ -27,7 +27,7 @@
 #include <unistd.h>
 #endif
 
-namespace ps5mc {
+namespace bfplayer {
 namespace {
 
 using ExtensionList = std::vector<std::string_view>;
@@ -742,4 +742,4 @@ ScanResult scan_media_library(
     return result;
 }
 
-} // namespace ps5mc
+} // namespace bfplayer

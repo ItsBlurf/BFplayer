@@ -5,7 +5,7 @@
 #include <string>
 #include <vector>
 
-namespace ps5mc {
+namespace bfplayer {
 
 enum class ArtworkFormat {
     unknown = 0,
@@ -47,4 +47,4 @@ struct ArtworkData {
     std::string& error,
     const ArtworkLimits& limits = {});
 
-} // namespace ps5mc
+} // namespace bfplayer

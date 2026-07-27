@@ -4,7 +4,7 @@
 #include <cstdint>
 #include <string>
 
-namespace ps5mc {
+namespace bfplayer {
 
 // Read-only regular-file handle used by FFmpeg callbacks. Opening rejects a
 // symlink/reparse-point final component and verifies the opened object before it
@@ -46,4 +46,4 @@ private:
     int last_error_code_ = 0;
 };
 
-} // namespace ps5mc
+} // namespace bfplayer

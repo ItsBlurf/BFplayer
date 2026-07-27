@@ -1,8 +1,20 @@
 # Changelog
 
+## 0.1.0-alpha.28 - complete internal BFplayer identity
+
+- Renamed the remaining internal namespace, public header tree, build symbols,
+  launcher symbols, tests, and test-corpus labels from the former project
+  identity to `BFplayer`.
+- Updated the repaired BigApp host content ID to use `BFPLAYER` while retaining
+  title ID `PSMC00001`, which is required to update the existing Media tile.
+- Retained legacy file/database recognition only as split migration literals,
+  so existing installations are upgraded without exposing or reviving the old
+  product identity.
+- Added a repository-wide naming regression test.
+
 ## 0.1.0-alpha.27 - BFplayer naming completion
 
-- Replaced the remaining visible `Media Center` menu, exit, deployment, and
+- Replaced the remaining legacy product-name menu, exit, deployment, and
   diagnostic labels with `BFplayer`.
 - Renamed the host CMake project while preserving the existing title ID and
   internal compatibility identifiers required to update installed tiles.
@@ -126,7 +138,7 @@
 
 ### Native exit
 
-- On a normal Media Center exit, close SDL/player resources and ask
+- On a normal BFplayer exit, close SDL/player resources and ask
   SystemService to terminate the active `PSMC00001` BigApp host so the console
   returns to PlayStation Home instead of leaving a black VideoOut surface.
   The title ID is verified before termination so a directly injected player
@@ -346,7 +358,7 @@
   safely instead of treating any existing path as usable.
 - Recreates all required `/data/homebrew/BFplayer` runtime assets; the
   folder is not required to remain on the console.
-- Uses the Media Center icon and title for the active BigApp host so the PS
+- Uses the BFplayer icon and title for the active BigApp host so the PS
   switcher can identify the running app correctly.
 
 ### Payload size and integrity
@@ -398,9 +410,9 @@
 ### Dashboard launch
 
 - Added a `PSMC00001` Media-category dashboard tile.
-- Added a separate `ps5mc-tile-installer.elf` so AppInst/kernel-system
+- Added a separate `bfplayer-tile-installer.elf` so AppInst/kernel-system
   privileges do not enter the player ELF.
-- The tile calls websrv's `/hbldr` route with the exact Media Center ELF and
+- The tile calls websrv's `/hbldr` route with the exact BFplayer ELF and
   working directory, bypassing the catalog, `homebrew.js`, and file picker.
 - Added a primary direct-tile bundle, exact SHA-256 manifests, and install
   documentation.

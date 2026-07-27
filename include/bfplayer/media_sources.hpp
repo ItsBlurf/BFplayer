@@ -1,11 +1,11 @@
 #pragma once
 
-#include "ps5mc/media.hpp"
+#include "bfplayer/media.hpp"
 
 #include <string>
 #include <vector>
 
-namespace ps5mc {
+namespace bfplayer {
 
 enum class MediaSourceKind {
     movie_file,
@@ -34,4 +34,4 @@ void retain_configured_media(
     std::vector<MediaEntry>& entries,
     const std::vector<MediaSource>& sources);
 
-} // namespace ps5mc
+} // namespace bfplayer

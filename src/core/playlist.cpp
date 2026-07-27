@@ -1,6 +1,6 @@
-#include "ps5mc/playlist.hpp"
+#include "bfplayer/playlist.hpp"
 
-#include "ps5mc/source_uri.hpp"
+#include "bfplayer/source_uri.hpp"
 
 #include <algorithm>
 #include <cctype>
@@ -21,7 +21,7 @@
 #include <unistd.h>
 #endif
 
-namespace ps5mc {
+namespace bfplayer {
 namespace {
 
 std::string ascii_lower(std::string value) {
@@ -398,4 +398,4 @@ PlaylistLoadResult load_generic_playlist(
     return result;
 }
 
-} // namespace ps5mc
+} // namespace bfplayer

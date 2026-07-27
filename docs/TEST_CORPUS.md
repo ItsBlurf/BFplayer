@@ -19,24 +19,24 @@ The MKV is 10.021 seconds at 1280x720/30 fps and contains:
 Matching external English SRT and styled ASS sidecars test automatic sidecar
 discovery, external switching, libass rendering, and subtitle delay.
 
-`ps5mc-multitrack-test.bitmap.sup` is an extracted PGS stream from FFmpeg's
+`bfplayer-multitrack-test.bitmap.sup` is an extracted PGS stream from FFmpeg's
 public `supsample.mkv` sample and exercises the external palette/bitmap path.
 `ffmpeg-pgs-supsample.mkv` retains the same PGS stream embedded beside H.264
 video and exercises Kitchensink's embedded bitmap-subtitle path.
 
 The staging script also uploads the project icon as
-`ps5mc-multitrack-test.png`. Its exact-title sidecar name exercises local
+`bfplayer-multitrack-test.png`. Its exact-title sidecar name exercises local
 artwork discovery, bounded PNG header validation, and aspect-correct rendering.
 
 SHA-256:
 
 ```text
-f8d4d77521274aaa5b6603e7cb740e644eb7ea85b3f08132197730484978e796  ps5mc-multitrack-test.en.srt
-bcdd343024479a1ab631c1385363a9b17b00ede4bd70d499150745f5c76983de  ps5mc-multitrack-test.mkv
-f6340733393d3e222f50eaa3c947597c980b9c3669d4f0e6f5d166fca302cf3e  ps5mc-multitrack-test.styled.ass
-f03e72bbd34177046be57da8d760718a078d139126d073e9e28febdd9624b7d9  ps5mc-multitrack-test.bitmap.sup
+f8d4d77521274aaa5b6603e7cb740e644eb7ea85b3f08132197730484978e796  bfplayer-multitrack-test.en.srt
+bcdd343024479a1ab631c1385363a9b17b00ede4bd70d499150745f5c76983de  bfplayer-multitrack-test.mkv
+f6340733393d3e222f50eaa3c947597c980b9c3669d4f0e6f5d166fca302cf3e  bfplayer-multitrack-test.styled.ass
+f03e72bbd34177046be57da8d760718a078d139126d073e9e28febdd9624b7d9  bfplayer-multitrack-test.bitmap.sup
 e6c8f93f57d0371603704d7e7b16933e6c4c5df669da42b42a2a84de881e0f27  ffmpeg-pgs-supsample.mkv
-2b5f1f1c9e21ef5ec8170bd4a081f69623b39fe439fe834b9bde1f4a5a32d5ae  ps5mc-multitrack-test.png
+2b5f1f1c9e21ef5ec8170bd4a081f69623b39fe439fe834b9bde1f4a5a32d5ae  bfplayer-multitrack-test.png
 ```
 
 Expected controller test:

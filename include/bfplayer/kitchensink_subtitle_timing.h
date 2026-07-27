@@ -12,7 +12,7 @@ extern "C" {
 // timestamp in its internal subtitle decoder, but its public player wrapper
 // always supplies the unadjusted player clock. This narrow adapter preserves
 // the installed ABI and exposes that existing timestamp input to the app.
-int ps5mc_get_player_subtitle_texture_at(
+int bfplayer_get_player_subtitle_texture_at(
     const Kit_Player* player,
     SDL_Texture* texture,
     SDL_Rect* sources,

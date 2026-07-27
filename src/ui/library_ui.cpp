@@ -1,16 +1,16 @@
-#include "ps5mc/library_ui.hpp"
+#include "bfplayer/library_ui.hpp"
 
-#include "ps5mc/artwork.hpp"
-#include "ps5mc/bulk_import.hpp"
-#include "ps5mc/controller_buttons.hpp"
-#include "ps5mc/diagnostics.hpp"
-#include "ps5mc/library_database.hpp"
-#include "ps5mc/library_scanner.hpp"
-#include "ps5mc/library_view.hpp"
-#include "ps5mc/media_sources.hpp"
-#include "ps5mc/media_probe.hpp"
-#include "ps5mc/player_settings.hpp"
-#include "ps5mc/video_thumbnail.hpp"
+#include "bfplayer/artwork.hpp"
+#include "bfplayer/bulk_import.hpp"
+#include "bfplayer/controller_buttons.hpp"
+#include "bfplayer/diagnostics.hpp"
+#include "bfplayer/library_database.hpp"
+#include "bfplayer/library_scanner.hpp"
+#include "bfplayer/library_view.hpp"
+#include "bfplayer/media_sources.hpp"
+#include "bfplayer/media_probe.hpp"
+#include "bfplayer/player_settings.hpp"
+#include "bfplayer/video_thumbnail.hpp"
 
 #include <SDL.h>
 #include <SDL_image.h>
@@ -33,11 +33,11 @@
 #include <vector>
 #include <unistd.h>
 
-#ifndef PS5MC_VERSION
-#define PS5MC_VERSION "development"
+#ifndef BFPLAYER_VERSION
+#define BFPLAYER_VERSION "development"
 #endif
 
-namespace ps5mc {
+namespace bfplayer {
 namespace {
 
 constexpr int kUiWidth = 1920;
@@ -1480,7 +1480,7 @@ struct LibraryUi::Impl {
         SDL_UnlockMutex(mutex);
         import_thread = SDL_CreateThread(
             bulk_import_entry,
-            "ps5mc-bulk-import",
+            "bfplayer-bulk-import",
             this);
         if (!import_thread) {
             SDL_LockMutex(mutex);
@@ -1942,7 +1942,7 @@ struct LibraryUi::Impl {
     }
 
     void update_ime_state() {
-#if defined(PS5MC_PS5)
+#if defined(BFPLAYER_PS5)
         SDL_LockMutex(mutex);
         const bool editing = search_editing;
         SDL_UnlockMutex(mutex);
@@ -2055,7 +2055,7 @@ struct LibraryUi::Impl {
         SDL_UnlockMutex(mutex);
         thumbnail_thread = SDL_CreateThread(
             thumbnail_entry,
-            "ps5mc-video-preview",
+            "bfplayer-video-preview",
             this);
         if (!thumbnail_thread) {
             SDL_LockMutex(mutex);
@@ -2561,7 +2561,7 @@ struct LibraryUi::Impl {
             SDL_WaitThread(scan_thread, nullptr);
             scan_thread = nullptr;
         }
-        scan_thread = SDL_CreateThread(scan_entry, "ps5mc-library-scan", this);
+        scan_thread = SDL_CreateThread(scan_entry, "bfplayer-library-scan", this);
         if (!scan_thread) {
             SDL_LockMutex(mutex);
             scanning = false;
@@ -2860,7 +2860,7 @@ struct LibraryUi::Impl {
                         "FFmpeg 7.0.1 with SDL_kitchensink and SDL2",
                         "Library and logs: /data/BFplayer",
                         "Dashboard title: PSMC00001 (Media)",
-                        "Build: " PS5MC_VERSION,
+                        "Build: " BFPLAYER_VERSION,
                     };
                     add_footer_hint(FooterGlyph::circle, "", "Back");
                     break;
@@ -3630,7 +3630,7 @@ LibraryAction LibraryUi::handle_event(const SDL_Event& event, std::string& selec
                 impl_->open_browser();
                 return LibraryAction::none;
                 break;
-#if !defined(PS5MC_PS5)
+#if !defined(BFPLAYER_PS5)
             case SDL_CONTROLLER_BUTTON_BACK:
                 clear_search = true;
                 break;
@@ -4123,4 +4123,4 @@ const std::string& LibraryUi::error() const noexcept {
     return impl_->last_error;
 }
 
-} // namespace ps5mc
+} // namespace bfplayer

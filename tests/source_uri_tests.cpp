@@ -1,4 +1,4 @@
-#include "ps5mc/source_uri.hpp"
+#include "bfplayer/source_uri.hpp"
 
 #include <cstdlib>
 #include <iostream>
@@ -16,11 +16,11 @@ void check(bool condition, const char* message) {
 } // namespace
 
 int main() {
-    using ps5mc::is_network_uri;
-    using ps5mc::is_supported_stream_uri;
-    using ps5mc::redact_uri_secrets;
-    using ps5mc::uri_has_credentials;
-    using ps5mc::uri_has_sensitive_components;
+    using bfplayer::is_network_uri;
+    using bfplayer::is_supported_stream_uri;
+    using bfplayer::redact_uri_secrets;
+    using bfplayer::uri_has_credentials;
+    using bfplayer::uri_has_sensitive_components;
 
     check(!is_network_uri("/data/media/Movie.mkv"), "local PS5 path is not a URI");
     check(!is_network_uri("C:\\Media\\Movie.mkv"), "Windows path is not a URI");

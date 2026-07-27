@@ -31,33 +31,33 @@
 #include <ps5/kernel.h>
 #include <ps5/payload.h>
 
-#include "ps5mc/standalone_route.h"
+#include "bfplayer/standalone_route.h"
 #include "core/hbldr.h"
 #include "core/standalone_fs.h"
 
-#define PS5MC_TITLE_ID "PSMC00001"
-#define PS5MC_SERVICE_PORT 9040
-#define PS5MC_SERVICE_ADDRESS "127.0.0.1"
-#define PS5MC_APP_ROOT "/user/app"
-#define PS5MC_APP_PARENT PS5MC_APP_ROOT "/"
-#define PS5MC_APP_DIR PS5MC_APP_ROOT "/" PS5MC_TITLE_ID
-#define PS5MC_LEGACY_HOST_TITLE_ID "PSMR00001"
-#define PS5MC_LEGACY_HOST_APP_DIR \
-    PS5MC_APP_ROOT "/" PS5MC_LEGACY_HOST_TITLE_ID
-#define PS5MC_RUNTIME_DIR "/data/homebrew/BFplayer"
-#define PS5MC_FONT_DIR PS5MC_RUNTIME_DIR "/assets/fonts"
-#define PS5MC_PLAYER_PATH PS5MC_RUNTIME_DIR "/bfplayer.elf"
-#define PS5MC_LOG_DIR "/data/BFplayer"
-#define PS5MC_LOG_PATH PS5MC_LOG_DIR "/standalone-launcher.log"
-#define PS5MC_PLAYER_LOG_PATH PS5MC_LOG_DIR "/player-stdio.log"
-#define PS5MC_INSTANCE_LOCK_PATH PS5MC_LOG_DIR "/standalone-launcher.lock"
-#define PS5MC_LEGACY_CLEAN_MARKER \
-    PS5MC_RUNTIME_DIR "/.legacy-registration-cleaned"
-#define PS5MC_APPINST_AUTHID UINT64_C(0x4801000000000013)
-#define PS5MC_DIAG_SKIPPED (-2147483000)
+#define BFPLAYER_TITLE_ID "PSMC00001"
+#define BFPLAYER_SERVICE_PORT 9040
+#define BFPLAYER_SERVICE_ADDRESS "127.0.0.1"
+#define BFPLAYER_APP_ROOT "/user/app"
+#define BFPLAYER_APP_PARENT BFPLAYER_APP_ROOT "/"
+#define BFPLAYER_APP_DIR BFPLAYER_APP_ROOT "/" BFPLAYER_TITLE_ID
+#define BFPLAYER_LEGACY_HOST_TITLE_ID "PSMR00001"
+#define BFPLAYER_LEGACY_HOST_APP_DIR \
+    BFPLAYER_APP_ROOT "/" BFPLAYER_LEGACY_HOST_TITLE_ID
+#define BFPLAYER_RUNTIME_DIR "/data/homebrew/BFplayer"
+#define BFPLAYER_FONT_DIR BFPLAYER_RUNTIME_DIR "/assets/fonts"
+#define BFPLAYER_PLAYER_PATH BFPLAYER_RUNTIME_DIR "/bfplayer.elf"
+#define BFPLAYER_LOG_DIR "/data/BFplayer"
+#define BFPLAYER_LOG_PATH BFPLAYER_LOG_DIR "/standalone-launcher.log"
+#define BFPLAYER_PLAYER_LOG_PATH BFPLAYER_LOG_DIR "/player-stdio.log"
+#define BFPLAYER_INSTANCE_LOCK_PATH BFPLAYER_LOG_DIR "/standalone-launcher.lock"
+#define BFPLAYER_LEGACY_CLEAN_MARKER \
+    BFPLAYER_RUNTIME_DIR "/.legacy-registration-cleaned"
+#define BFPLAYER_APPINST_AUTHID UINT64_C(0x4801000000000013)
+#define BFPLAYER_DIAG_SKIPPED (-2147483000)
 
-#ifndef PS5MC_VERSION
-#define PS5MC_VERSION "development"
+#ifndef BFPLAYER_VERSION
+#define BFPLAYER_VERSION "development"
 #endif
 
 #define INCASSET(name, file)                                                   \
@@ -69,11 +69,11 @@
     extern const uint8_t name[];                                               \
     extern const unsigned long name##_size
 
-INCASSET(ps5mc_embedded_player_gzip, "build/ps5/bfplayer.elf.gz");
-INCASSET(ps5mc_tile_param_json, "assets/tile/param.json");
-INCASSET(ps5mc_icon_png, "assets/icon0.png");
-INCASSET(ps5mc_font_ttf, "assets/fonts/NotoSans-Regular.ttf");
-INCASSET(ps5mc_font_license, "assets/fonts/OFL.txt");
+INCASSET(bfplayer_embedded_player_gzip, "build/ps5/bfplayer.elf.gz");
+INCASSET(bfplayer_tile_param_json, "assets/tile/param.json");
+INCASSET(bfplayer_icon_png, "assets/icon0.png");
+INCASSET(bfplayer_font_ttf, "assets/fonts/NotoSans-Regular.ttf");
+INCASSET(bfplayer_font_license, "assets/fonts/OFL.txt");
 
 typedef int (*app_install_title_dir_fn)(
     const char* title_id,
@@ -88,10 +88,10 @@ int sceAppInstUtilAppInstallAll(void*);
 int sceAppInstUtilAppUnInstall(const char*, void*, void*);
 int sceKernelSendNotificationRequest(int, void*, size_t, int);
 
-typedef struct ps5mc_notify_request {
+typedef struct bfplayer_notify_request {
     char reserved[45];
     char message[3075];
-} ps5mc_notify_request_t;
+} bfplayer_notify_request_t;
 
 static int mkdir_if_needed(const char* path) {
     struct stat info;
@@ -135,8 +135,8 @@ static void launcher_log(const char* format, ...) {
     fputs(line, stdout);
     fflush(stdout);
     (void)mkdir_if_needed("/data");
-    (void)mkdir_if_needed(PS5MC_LOG_DIR);
-    descriptor = open(PS5MC_LOG_PATH, O_WRONLY | O_CREAT | O_APPEND, 0600);
+    (void)mkdir_if_needed(BFPLAYER_LOG_DIR);
+    descriptor = open(BFPLAYER_LOG_PATH, O_WRONLY | O_CREAT | O_APPEND, 0600);
     if (descriptor >= 0) {
         (void)write(descriptor, line, (size_t)length);
         close(descriptor);
@@ -144,7 +144,7 @@ static void launcher_log(const char* format, ...) {
 }
 
 static void send_ready_notification(void) {
-    ps5mc_notify_request_t request;
+    bfplayer_notify_request_t request;
     int result;
 
     memset(&request, 0, sizeof(request));
@@ -152,7 +152,7 @@ static void send_ready_notification(void) {
         request.message,
         sizeof(request.message),
         "BFplayer %s loaded. Open it from Media.",
-        PS5MC_VERSION);
+        BFPLAYER_VERSION);
     result = sceKernelSendNotificationRequest(
         0, &request, sizeof(request), 0);
     launcher_log(
@@ -343,9 +343,9 @@ static int install_runtime_assets(void) {
         "  \"loopback\": \"%s:%d\",\n"
         "  \"websrv\": false\n"
         "}\n",
-        PS5MC_VERSION,
-        PS5MC_SERVICE_ADDRESS,
-        PS5MC_SERVICE_PORT);
+        BFPLAYER_VERSION,
+        BFPLAYER_SERVICE_ADDRESS,
+        BFPLAYER_SERVICE_PORT);
     int result;
     int changed;
     int changed_files = 0;
@@ -355,41 +355,41 @@ static int install_runtime_assets(void) {
     }
     if ((result = mkdir_if_needed("/data")) != 0 ||
         (result = mkdir_if_needed("/data/homebrew")) != 0 ||
-        (result = mkdir_if_needed(PS5MC_RUNTIME_DIR)) != 0 ||
-        (result = mkdir_if_needed(PS5MC_RUNTIME_DIR "/assets")) != 0 ||
-        (result = mkdir_if_needed(PS5MC_FONT_DIR)) != 0 ||
-        (result = mkdir_if_needed(PS5MC_RUNTIME_DIR "/sce_sys")) != 0) {
+        (result = mkdir_if_needed(BFPLAYER_RUNTIME_DIR)) != 0 ||
+        (result = mkdir_if_needed(BFPLAYER_RUNTIME_DIR "/assets")) != 0 ||
+        (result = mkdir_if_needed(BFPLAYER_FONT_DIR)) != 0 ||
+        (result = mkdir_if_needed(BFPLAYER_RUNTIME_DIR "/sce_sys")) != 0) {
         return result;
     }
     if ((result = update_file_atomic(
-            PS5MC_FONT_DIR "/NotoSans-Regular.ttf",
-            ps5mc_font_ttf,
-            ps5mc_font_ttf_size,
+            BFPLAYER_FONT_DIR "/NotoSans-Regular.ttf",
+            bfplayer_font_ttf,
+            bfplayer_font_ttf_size,
             0644,
             &changed)) != 0) {
         return result;
     }
     changed_files += changed;
     if ((result = update_file_atomic(
-            PS5MC_FONT_DIR "/OFL.txt",
-            ps5mc_font_license,
-            ps5mc_font_license_size,
+            BFPLAYER_FONT_DIR "/OFL.txt",
+            bfplayer_font_license,
+            bfplayer_font_license_size,
             0644,
             &changed)) != 0) {
         return result;
     }
     changed_files += changed;
     if ((result = update_file_atomic(
-            PS5MC_RUNTIME_DIR "/sce_sys/icon0.png",
-            ps5mc_icon_png,
-            ps5mc_icon_png_size,
+            BFPLAYER_RUNTIME_DIR "/sce_sys/icon0.png",
+            bfplayer_icon_png,
+            bfplayer_icon_png_size,
             0644,
             &changed)) != 0) {
         return result;
     }
     changed_files += changed;
     if ((result = update_file_atomic(
-            PS5MC_RUNTIME_DIR "/build-manifest.json",
+            BFPLAYER_RUNTIME_DIR "/build-manifest.json",
             (const uint8_t*)manifest,
             (size_t)manifest_length,
             0644,
@@ -399,7 +399,7 @@ static int install_runtime_assets(void) {
     changed_files += changed;
     launcher_log(
         "runtime assets version=%s changed_files=%d",
-        PS5MC_VERSION,
+        BFPLAYER_VERSION,
         changed_files);
     return 0;
 }
@@ -414,27 +414,27 @@ static int install_dashboard_tile(void) {
     const uint64_t original_authid = kernel_get_ucred_authid(pid);
     int changed;
     int changed_files = 0;
-    int title_dir_rc = PS5MC_DIAG_SKIPPED;
-    int install_all_rc = PS5MC_DIAG_SKIPPED;
+    int title_dir_rc = BFPLAYER_DIAG_SKIPPED;
+    int install_all_rc = BFPLAYER_DIAG_SKIPPED;
     int result = -1;
 
-    if (kernel_set_ucred_authid(pid, PS5MC_APPINST_AUTHID) != 0) {
+    if (kernel_set_ucred_authid(pid, BFPLAYER_APPINST_AUTHID) != 0) {
         return -1;
     }
     if (sceAppInstUtilInitialize() != 0) {
         goto cleanup;
     }
-    snprintf(sce_sys_dir, sizeof(sce_sys_dir), "%s/sce_sys", PS5MC_APP_DIR);
+    snprintf(sce_sys_dir, sizeof(sce_sys_dir), "%s/sce_sys", BFPLAYER_APP_DIR);
     snprintf(param_path, sizeof(param_path), "%s/param.json", sce_sys_dir);
     snprintf(icon_path, sizeof(icon_path), "%s/icon0.png", sce_sys_dir);
-    if (mkdir_if_needed(PS5MC_APP_DIR) != 0 ||
+    if (mkdir_if_needed(BFPLAYER_APP_DIR) != 0 ||
         mkdir_if_needed(sce_sys_dir) != 0) {
         goto terminate_appinst;
     }
     if (update_file_atomic(
             param_path,
-            ps5mc_tile_param_json,
-            ps5mc_tile_param_json_size,
+            bfplayer_tile_param_json,
+            bfplayer_tile_param_json_size,
             0644,
             &changed) != 0) {
         goto terminate_appinst;
@@ -442,8 +442,8 @@ static int install_dashboard_tile(void) {
     changed_files += changed;
     if (update_file_atomic(
             icon_path,
-            ps5mc_icon_png,
-            ps5mc_icon_png_size,
+            bfplayer_icon_png,
+            bfplayer_icon_png_size,
             0644,
             &changed) != 0) {
         goto terminate_appinst;
@@ -461,8 +461,8 @@ static int install_dashboard_tile(void) {
     }
     if (install_title_dir) {
         title_dir_rc = install_title_dir(
-            PS5MC_TITLE_ID,
-            PS5MC_APP_PARENT,
+            BFPLAYER_TITLE_ID,
+            BFPLAYER_APP_PARENT,
             NULL);
     }
     if (title_dir_rc != 0) {
@@ -493,18 +493,18 @@ static void remove_legacy_bigapp_host_registration(void) {
     struct stat marker_info;
     const pid_t pid = getpid();
     const uint64_t original_authid = kernel_get_ucred_authid(pid);
-    int uninstall_rc = PS5MC_DIAG_SKIPPED;
+    int uninstall_rc = BFPLAYER_DIAG_SKIPPED;
 
-    if (lstat(PS5MC_LEGACY_CLEAN_MARKER, &marker_info) == 0 &&
+    if (lstat(BFPLAYER_LEGACY_CLEAN_MARKER, &marker_info) == 0 &&
         S_ISREG(marker_info.st_mode) && !S_ISLNK(marker_info.st_mode) &&
         lstat(
-            PS5MC_LEGACY_HOST_APP_DIR "/sce_sys/param.json",
+            BFPLAYER_LEGACY_HOST_APP_DIR "/sce_sys/param.json",
             &legacy_info) != 0 &&
         errno == ENOENT) {
         launcher_log("legacy host cleanup already complete; skipping");
         return;
     }
-    if (kernel_set_ucred_authid(pid, PS5MC_APPINST_AUTHID) != 0) {
+    if (kernel_set_ucred_authid(pid, BFPLAYER_APPINST_AUTHID) != 0) {
         launcher_log("legacy host uninstall authid swap failed");
         return;
     }
@@ -516,7 +516,7 @@ static void remove_legacy_bigapp_host_registration(void) {
         goto cleanup;
     }
     uninstall_rc = sceAppInstUtilAppUnInstall(
-        PS5MC_LEGACY_HOST_TITLE_ID,
+        BFPLAYER_LEGACY_HOST_TITLE_ID,
         NULL,
         NULL);
     // Sony's install/uninstall paths touch the same app database. Give the
@@ -524,29 +524,29 @@ static void remove_legacy_bigapp_host_registration(void) {
     usleep(400000);
     // Prevent AppInstallAll fallback from rediscovering stale alpha.11/12
     // metadata if Sony's uninstall left the title directory behind.
-    if (unlink(PS5MC_LEGACY_HOST_APP_DIR "/sce_sys/param.json") != 0 &&
+    if (unlink(BFPLAYER_LEGACY_HOST_APP_DIR "/sce_sys/param.json") != 0 &&
         errno != ENOENT) {
         launcher_log("legacy host param remove failed errno=%d", errno);
     }
-    if (unlink(PS5MC_LEGACY_HOST_APP_DIR "/sce_sys/icon0.png") != 0 &&
+    if (unlink(BFPLAYER_LEGACY_HOST_APP_DIR "/sce_sys/icon0.png") != 0 &&
         errno != ENOENT) {
         launcher_log("legacy host icon remove failed errno=%d", errno);
     }
-    if (rmdir(PS5MC_LEGACY_HOST_APP_DIR "/sce_sys") != 0 &&
+    if (rmdir(BFPLAYER_LEGACY_HOST_APP_DIR "/sce_sys") != 0 &&
         errno != ENOENT && errno != ENOTEMPTY) {
         launcher_log("legacy host sce_sys remove failed errno=%d", errno);
     }
-    if (rmdir(PS5MC_LEGACY_HOST_APP_DIR) != 0 &&
+    if (rmdir(BFPLAYER_LEGACY_HOST_APP_DIR) != 0 &&
         errno != ENOENT && errno != ENOTEMPTY) {
         launcher_log("legacy host directory remove failed errno=%d", errno);
     }
     launcher_log(
         "legacy host uninstall title=%s rc=0x%08x",
-        PS5MC_LEGACY_HOST_TITLE_ID,
+        BFPLAYER_LEGACY_HOST_TITLE_ID,
         uninstall_rc);
     (void)sceAppInstUtilTerminate();
     if (write_file_atomic(
-            PS5MC_LEGACY_CLEAN_MARKER,
+            BFPLAYER_LEGACY_CLEAN_MARKER,
             clean_marker,
             sizeof(clean_marker) - 1U,
             0600) != 0) {
@@ -575,7 +575,7 @@ static int create_loopback_listener(void) {
         sizeof(enabled));
     memset(&address, 0, sizeof(address));
     address.sin_family = AF_INET;
-    address.sin_port = htons(PS5MC_SERVICE_PORT);
+    address.sin_port = htons(BFPLAYER_SERVICE_PORT);
     address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
     if (bind(listener, (struct sockaddr*)&address, sizeof(address)) != 0 ||
         listen(listener, 2) != 0) {
@@ -616,7 +616,7 @@ static int request_existing_launcher_shutdown(void) {
         sizeof(timeout));
     memset(&address, 0, sizeof(address));
     address.sin_family = AF_INET;
-    address.sin_port = htons(PS5MC_SERVICE_PORT);
+    address.sin_port = htons(BFPLAYER_SERVICE_PORT);
     address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
     if (connect(
             connection,
@@ -653,11 +653,11 @@ static int acquire_instance_lock(void) {
     int length;
 
     (void)mkdir_if_needed("/data");
-    if (mkdir_if_needed(PS5MC_LOG_DIR) != 0) {
+    if (mkdir_if_needed(BFPLAYER_LOG_DIR) != 0) {
         return -1;
     }
     descriptor = open(
-        PS5MC_INSTANCE_LOCK_PATH,
+        BFPLAYER_INSTANCE_LOCK_PATH,
         O_RDWR | O_CREAT,
         0600);
     if (descriptor < 0) {
@@ -706,7 +706,7 @@ static int acquire_instance_lock(void) {
         sizeof(owner),
         "pid=%ld version=%s\n",
         (long)getpid(),
-        PS5MC_VERSION);
+        BFPLAYER_VERSION);
     if (length > 0 && length < (int)sizeof(owner) &&
         ftruncate(descriptor, 0) == 0 &&
         lseek(descriptor, 0, SEEK_SET) == 0) {
@@ -780,7 +780,7 @@ static int launch_embedded_player(void) {
     z_stream stream;
     int inflate_result;
     int stdio_descriptor = open(
-        PS5MC_PLAYER_LOG_PATH,
+        BFPLAYER_PLAYER_LOG_PATH,
         O_WRONLY | O_CREAT | O_APPEND,
         0600);
     pid_t player_pid;
@@ -837,37 +837,37 @@ static int launch_embedded_player(void) {
         return -1;
     }
     memset(&stream, 0, sizeof(stream));
-    player = malloc((size_t)PS5MC_PLAYER_UNCOMPRESSED_SIZE);
+    player = malloc((size_t)BFPLAYER_PLAYER_UNCOMPRESSED_SIZE);
     if (!player) {
         launcher_log(
             "player decompress allocation failed bytes=%lu",
-            (unsigned long)PS5MC_PLAYER_UNCOMPRESSED_SIZE);
+            (unsigned long)BFPLAYER_PLAYER_UNCOMPRESSED_SIZE);
         if (stdio_descriptor >= 0) {
             close(stdio_descriptor);
         }
         return -1;
     }
-    stream.next_in = (Bytef*)ps5mc_embedded_player_gzip;
-    stream.avail_in = (uInt)ps5mc_embedded_player_gzip_size;
+    stream.next_in = (Bytef*)bfplayer_embedded_player_gzip;
+    stream.avail_in = (uInt)bfplayer_embedded_player_gzip_size;
     stream.next_out = player;
-    stream.avail_out = (uInt)PS5MC_PLAYER_UNCOMPRESSED_SIZE;
+    stream.avail_out = (uInt)BFPLAYER_PLAYER_UNCOMPRESSED_SIZE;
     inflate_result = inflateInit2(&stream, 15 + 16);
     if (inflate_result == Z_OK) {
         inflate_result = inflate(&stream, Z_FINISH);
         (void)inflateEnd(&stream);
     }
     if (inflate_result != Z_STREAM_END ||
-        stream.total_out != (uLong)PS5MC_PLAYER_UNCOMPRESSED_SIZE ||
-        stream.total_in != (uLong)ps5mc_embedded_player_gzip_size ||
+        stream.total_out != (uLong)BFPLAYER_PLAYER_UNCOMPRESSED_SIZE ||
+        stream.total_in != (uLong)bfplayer_embedded_player_gzip_size ||
         player[0] != 0x7f || player[1] != 'E' ||
         player[2] != 'L' || player[3] != 'F' || player[4] != 2U) {
         launcher_log(
             "player decompress failed zlib=%d in=%lu/%lu out=%lu/%lu",
             inflate_result,
             (unsigned long)stream.total_in,
-            ps5mc_embedded_player_gzip_size,
+            bfplayer_embedded_player_gzip_size,
             (unsigned long)stream.total_out,
-            (unsigned long)PS5MC_PLAYER_UNCOMPRESSED_SIZE);
+            (unsigned long)BFPLAYER_PLAYER_UNCOMPRESSED_SIZE);
         free(player);
         if (stdio_descriptor >= 0) {
             close(stdio_descriptor);
@@ -875,8 +875,8 @@ static int launch_embedded_player(void) {
         return -1;
     }
     player_pid = hbldr_launch_buffer(
-        PS5MC_RUNTIME_DIR,
-        PS5MC_PLAYER_PATH,
+        BFPLAYER_RUNTIME_DIR,
+        BFPLAYER_PLAYER_PATH,
         stdio_descriptor,
         argv,
         envp,
@@ -889,8 +889,8 @@ static int launch_embedded_player(void) {
         "launch result=%s player_pid=%ld compressed_bytes=%lu player_bytes=%lu",
         player_pid > 0 ? "started" : "failed",
         (long)player_pid,
-        ps5mc_embedded_player_gzip_size,
-        (unsigned long)PS5MC_PLAYER_UNCOMPRESSED_SIZE);
+        bfplayer_embedded_player_gzip_size,
+        (unsigned long)BFPLAYER_PLAYER_UNCOMPRESSED_SIZE);
     if (player_pid > 0) {
         active_player_pid = player_pid;
         (void)clock_gettime(CLOCK_MONOTONIC, &last_successful_launch);
@@ -960,12 +960,12 @@ static void serve_forever(int listener) {
         } else {
             request[0] = '\0';
         }
-        if (ps5mc_request_is_launch(request)) {
+        if (bfplayer_request_is_launch(request)) {
             send_response(connection, 200, "text/html", launch_page);
             close(connection);
             launcher_log("request route=/launch");
             (void)launch_embedded_player();
-        } else if (ps5mc_request_is_shutdown(request)) {
+        } else if (bfplayer_request_is_shutdown(request)) {
             send_response(connection, 200, "text/plain", "Shutting down\n");
             close(connection);
             launcher_log("request route=/shutdown action=exit");
@@ -985,13 +985,13 @@ int main(void) {
     (void)signal(SIGPIPE, SIG_IGN);
     launcher_log(
         "start version=%s address=%s port=%d player_bytes=%lu",
-        PS5MC_VERSION,
-        PS5MC_SERVICE_ADDRESS,
-        PS5MC_SERVICE_PORT,
-        (unsigned long)PS5MC_PLAYER_UNCOMPRESSED_SIZE);
-    if (ps5mc_embedded_player_gzip_size < 64U ||
-        ps5mc_embedded_player_gzip[0] != 0x1f ||
-        ps5mc_embedded_player_gzip[1] != 0x8b) {
+        BFPLAYER_VERSION,
+        BFPLAYER_SERVICE_ADDRESS,
+        BFPLAYER_SERVICE_PORT,
+        (unsigned long)BFPLAYER_PLAYER_UNCOMPRESSED_SIZE);
+    if (bfplayer_embedded_player_gzip_size < 64U ||
+        bfplayer_embedded_player_gzip[0] != 0x1f ||
+        bfplayer_embedded_player_gzip[1] != 0x8b) {
         launcher_log("embedded player gzip validation failed");
         return 2;
     }
@@ -1004,8 +1004,8 @@ int main(void) {
     if (listener < 0) {
         launcher_log(
             "loopback takeover failed address=%s port=%d errno=%d",
-            PS5MC_SERVICE_ADDRESS,
-            PS5MC_SERVICE_PORT,
+            BFPLAYER_SERVICE_ADDRESS,
+            BFPLAYER_SERVICE_PORT,
             errno);
         close(instance_lock);
         return 5;
@@ -1039,8 +1039,8 @@ int main(void) {
     if (listener < 0) {
         launcher_log(
             "final loopback bind failed address=%s port=%d errno=%d",
-            PS5MC_SERVICE_ADDRESS,
-            PS5MC_SERVICE_PORT,
+            BFPLAYER_SERVICE_ADDRESS,
+            BFPLAYER_SERVICE_PORT,
             errno);
         close(instance_lock);
         (void)sceUserServiceTerminate();
@@ -1048,8 +1048,8 @@ int main(void) {
     }
     launcher_log(
         "ready address=%s port=%d routes=/launch,/shutdown websrv=unused",
-        PS5MC_SERVICE_ADDRESS,
-        PS5MC_SERVICE_PORT);
+        BFPLAYER_SERVICE_ADDRESS,
+        BFPLAYER_SERVICE_PORT);
     send_ready_notification();
     serve_forever(listener);
     close(listener);

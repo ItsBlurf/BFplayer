@@ -1,4 +1,4 @@
-#include "ps5mc/video_layout.hpp"
+#include "bfplayer/video_layout.hpp"
 
 #include <array>
 #include <cmath>
@@ -18,7 +18,7 @@ void check(bool condition, const char* message) {
 }
 
 bool rect_is(
-    const ps5mc::VideoRect& rect,
+    const bfplayer::VideoRect& rect,
     int x,
     int y,
     int width,
@@ -30,24 +30,24 @@ bool rect_is(
 } // namespace
 
 int main() {
-    using ps5mc::VideoScaleMode;
-    using ps5mc::VideoAspectMode;
-    using ps5mc::VideoCropMode;
+    using bfplayer::VideoScaleMode;
+    using bfplayer::VideoAspectMode;
+    using bfplayer::VideoCropMode;
 
     const double square_pixel_16_9 =
-        ps5mc::display_aspect_from_sample_aspect(1920, 1080, 1, 1);
+        bfplayer::display_aspect_from_sample_aspect(1920, 1080, 1, 1);
     check(
         std::abs(square_pixel_16_9 - 16.0 / 9.0) < 0.000001,
         "square-pixel SAR preserves the frame display ratio");
     const double anamorphic_16_9 =
-        ps5mc::display_aspect_from_sample_aspect(720, 480, 32, 27);
+        bfplayer::display_aspect_from_sample_aspect(720, 480, 32, 27);
     check(
         std::abs(anamorphic_16_9 - 16.0 / 9.0) < 0.000001,
         "anamorphic SAR converts to the correct display ratio");
-    const auto downscaled_ps5_clip = ps5mc::compute_video_layout(
+    const auto downscaled_ps5_clip = bfplayer::compute_video_layout(
         1920,
         1080,
-        ps5mc::display_aspect_from_sample_aspect(3840, 2160, 1, 1),
+        bfplayer::display_aspect_from_sample_aspect(3840, 2160, 1, 1),
         1920,
         1080,
         VideoScaleMode::fit,
@@ -57,37 +57,37 @@ int main() {
         rect_is(downscaled_ps5_clip.destination, 0, 0, 1920, 1080),
         "downscaled 4K PS5 clip preserves its original 16:9 display ratio");
     const double missing_sar =
-        ps5mc::display_aspect_from_sample_aspect(640, 480, 0, 0);
+        bfplayer::display_aspect_from_sample_aspect(640, 480, 0, 0);
     check(
         std::abs(missing_sar - 4.0 / 3.0) < 0.000001,
         "missing SAR falls back to square pixels");
     check(
-        ps5mc::display_aspect_from_sample_aspect(0, 1080, 1, 1) == 0.0,
+        bfplayer::display_aspect_from_sample_aspect(0, 1080, 1, 1) == 0.0,
         "invalid frame dimensions do not produce a display ratio");
 
-    const auto fit_4_3 = ps5mc::compute_video_layout(
+    const auto fit_4_3 = bfplayer::compute_video_layout(
         1440, 1080, 4.0 / 3.0, 1920, 1080, VideoScaleMode::fit);
     check(!fit_4_3.crop_source, "fit does not crop");
     check(rect_is(fit_4_3.destination, 240, 0, 1440, 1080), "4:3 fit pillarbox");
 
-    const auto fill_4_3 = ps5mc::compute_video_layout(
+    const auto fill_4_3 = bfplayer::compute_video_layout(
         1440, 1080, 4.0 / 3.0, 1920, 1080, VideoScaleMode::fill);
     check(fill_4_3.crop_source, "fill crops");
     check(rect_is(fill_4_3.source, 0, 135, 1440, 810), "4:3 fill vertical crop");
     check(rect_is(fill_4_3.destination, 0, 0, 1920, 1080), "fill covers output");
 
-    const auto fit_wide = ps5mc::compute_video_layout(
+    const auto fit_wide = bfplayer::compute_video_layout(
         1920, 817, 2.35, 1920, 1080, VideoScaleMode::fit);
     check(rect_is(fit_wide.destination, 0, 131, 1920, 817), "wide fit letterbox");
 
-    const auto fill_wide = ps5mc::compute_video_layout(
+    const auto fill_wide = bfplayer::compute_video_layout(
         1920, 817, 2.35, 1920, 1080, VideoScaleMode::fill);
     check(rect_is(fill_wide.source, 234, 0, 1452, 817), "wide fill horizontal crop");
 
-    const auto anamorphic = ps5mc::compute_video_layout(
+    const auto anamorphic = bfplayer::compute_video_layout(
         720, 480, 16.0 / 9.0, 1920, 1080, VideoScaleMode::fit);
     check(rect_is(anamorphic.destination, 0, 0, 1920, 1080), "display aspect honored");
-    const auto anamorphic_crop = ps5mc::compute_video_layout(
+    const auto anamorphic_crop = bfplayer::compute_video_layout(
         720, 480, 16.0 / 9.0, 1920, 1080,
         VideoScaleMode::fit,
         VideoAspectMode::default_ratio,
@@ -99,20 +99,20 @@ int main() {
         rect_is(anamorphic_crop.destination, 240, 0, 1440, 1080),
         "anamorphic 4:3 crop remains exact at output");
 
-    const auto stretch = ps5mc::compute_video_layout(
+    const auto stretch = bfplayer::compute_video_layout(
         640, 480, 4.0 / 3.0, 1920, 1080, VideoScaleMode::stretch);
     check(!stretch.crop_source, "stretch uses full source");
     check(rect_is(stretch.destination, 0, 0, 1920, 1080), "stretch covers output");
 
-    const auto fallback = ps5mc::compute_video_layout(
+    const auto fallback = bfplayer::compute_video_layout(
         1920, 1080, 0.0, 1280, 720, VideoScaleMode::fit);
     check(rect_is(fallback.destination, 0, 0, 1280, 720), "invalid aspect fallback");
-    const auto fallback_4_3 = ps5mc::compute_video_layout(
+    const auto fallback_4_3 = bfplayer::compute_video_layout(
         640, 480, 0.0, 1920, 1080, VideoScaleMode::fit);
     check(
         rect_is(fallback_4_3.destination, 240, 0, 1440, 1080),
         "missing display aspect falls back to original frame ratio");
-    const auto infinite_aspect = ps5mc::compute_video_layout(
+    const auto infinite_aspect = bfplayer::compute_video_layout(
         1920,
         1080,
         std::numeric_limits<double>::infinity(),
@@ -121,7 +121,7 @@ int main() {
         VideoScaleMode::fit);
     check(rect_is(infinite_aspect.destination, 0, 0, 1280, 720),
           "infinite aspect uses frame fallback");
-    const auto tiny_aspect = ps5mc::compute_video_layout(
+    const auto tiny_aspect = bfplayer::compute_video_layout(
         1920,
         1080,
         std::numeric_limits<double>::min(),
@@ -130,28 +130,28 @@ int main() {
         VideoScaleMode::fill);
     check(tiny_aspect.source.width > 0 && tiny_aspect.source.height > 0,
           "extreme finite aspect remains bounded");
-    const auto invalid_dimensions = ps5mc::compute_video_layout(
+    const auto invalid_dimensions = bfplayer::compute_video_layout(
         0, 1080, 16.0 / 9.0, 1280, 720, VideoScaleMode::fit);
     check(rect_is(invalid_dimensions.destination, 0, 0, 0, 0),
           "invalid dimensions return an empty layout");
 
     check(
-        ps5mc::parse_video_scale_mode("fill") == VideoScaleMode::fill,
+        bfplayer::parse_video_scale_mode("fill") == VideoScaleMode::fill,
         "parse scale mode");
-    check(!ps5mc::parse_video_scale_mode("crop").has_value(), "reject unknown mode");
+    check(!bfplayer::parse_video_scale_mode("crop").has_value(), "reject unknown mode");
     check(
-        ps5mc::next_video_scale_mode(VideoScaleMode::stretch) == VideoScaleMode::fit,
+        bfplayer::next_video_scale_mode(VideoScaleMode::stretch) == VideoScaleMode::fit,
         "scale mode wraps");
     check(
-        ps5mc::step_video_scale_mode(VideoScaleMode::fit, -1) ==
+        bfplayer::step_video_scale_mode(VideoScaleMode::fit, -1) ==
             VideoScaleMode::stretch,
         "scale mode steps backward and wraps");
     check(
-        std::string(ps5mc::video_scale_mode_name(VideoScaleMode::fill)) ==
+        std::string(bfplayer::video_scale_mode_name(VideoScaleMode::fill)) ==
             "Fill screen (crop)",
         "scale mode display name");
 
-    const auto aspect_4_3 = ps5mc::compute_video_layout(
+    const auto aspect_4_3 = bfplayer::compute_video_layout(
         1920, 1080, 16.0 / 9.0, 1920, 1080,
         VideoScaleMode::fit,
         VideoAspectMode::ratio_4_3,
@@ -161,7 +161,7 @@ int main() {
         rect_is(aspect_4_3.destination, 240, 0, 1440, 1080),
         "4:3 aspect override is exact and pillarboxed");
 
-    const auto crop_4_3 = ps5mc::compute_video_layout(
+    const auto crop_4_3 = bfplayer::compute_video_layout(
         1920, 1080, 16.0 / 9.0, 1920, 1080,
         VideoScaleMode::fit,
         VideoAspectMode::default_ratio,
@@ -174,7 +174,7 @@ int main() {
         rect_is(crop_4_3.destination, 240, 0, 1440, 1080),
         "4:3 crop remains undistorted on 16:9 output");
 
-    const auto crop_scope = ps5mc::compute_video_layout(
+    const auto crop_scope = bfplayer::compute_video_layout(
         1920, 1080, 16.0 / 9.0, 1920, 1080,
         VideoScaleMode::fit,
         VideoAspectMode::default_ratio,
@@ -186,7 +186,7 @@ int main() {
         rect_is(crop_scope.destination, 0, 131, 1920, 817),
         "2.35:1 crop remains undistorted");
 
-    const auto crop_then_aspect = ps5mc::compute_video_layout(
+    const auto crop_then_aspect = bfplayer::compute_video_layout(
         1920, 1080, 16.0 / 9.0, 1920, 1080,
         VideoScaleMode::fit,
         VideoAspectMode::ratio_16_9,
@@ -199,32 +199,32 @@ int main() {
         "aspect override stretches cropped picture to requested ratio");
 
     check(
-        ps5mc::parse_video_aspect_mode("2.39:1") ==
+        bfplayer::parse_video_aspect_mode("2.39:1") ==
             VideoAspectMode::ratio_2_39_1,
         "parse VLC aspect ratio");
     check(
-        std::string(ps5mc::video_aspect_mode_name(
+        std::string(bfplayer::video_aspect_mode_name(
             VideoAspectMode::default_ratio)) == "Original",
         "automatic aspect mode is clearly labeled Original");
     check(
-        ps5mc::next_video_aspect_mode(VideoAspectMode::ratio_5_4) ==
+        bfplayer::next_video_aspect_mode(VideoAspectMode::ratio_5_4) ==
             VideoAspectMode::default_ratio,
         "aspect list wraps");
     check(
-        ps5mc::step_video_aspect_mode(
+        bfplayer::step_video_aspect_mode(
             VideoAspectMode::default_ratio,
             -1) == VideoAspectMode::ratio_5_4,
         "aspect list steps backward and wraps");
     check(
-        ps5mc::parse_video_crop_mode("1.85:1") ==
+        bfplayer::parse_video_crop_mode("1.85:1") ==
             VideoCropMode::ratio_1_85_1,
         "parse VLC crop ratio");
     check(
-        ps5mc::next_video_crop_mode(VideoCropMode::ratio_1_1) ==
+        bfplayer::next_video_crop_mode(VideoCropMode::ratio_1_1) ==
             VideoCropMode::default_crop,
         "crop list wraps");
     check(
-        ps5mc::step_video_crop_mode(
+        bfplayer::step_video_crop_mode(
             VideoCropMode::default_crop,
             -1) == VideoCropMode::ratio_1_1,
         "crop list steps backward and wraps");
@@ -240,7 +240,7 @@ int main() {
         {VideoAspectMode::ratio_5_4, 5.0 / 4.0},
     }};
     for (const auto& [mode, ratio] : aspect_modes) {
-        const auto layout = ps5mc::compute_video_layout(
+        const auto layout = bfplayer::compute_video_layout(
             1920, 1080, 16.0 / 9.0, 1920, 1080,
             VideoScaleMode::fit, mode, VideoCropMode::default_crop);
         const double actual =
@@ -267,7 +267,7 @@ int main() {
         {VideoCropMode::ratio_1_1, 1.0},
     }};
     for (const auto& [mode, ratio] : crop_modes) {
-        const auto layout = ps5mc::compute_video_layout(
+        const auto layout = bfplayer::compute_video_layout(
             1920, 1080, 16.0 / 9.0, 1920, 1080,
             VideoScaleMode::fit, VideoAspectMode::default_ratio, mode);
         const double source_ratio =

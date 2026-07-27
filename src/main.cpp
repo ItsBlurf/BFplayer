@@ -11,19 +11,19 @@ extern "C" {
 #include <libavutil/pixdesc.h>
 }
 
-#include "ps5mc/external_subtitles.hpp"
-#include "ps5mc/controller_buttons.hpp"
-#include "ps5mc/diagnostics.hpp"
-#include "ps5mc/library_database.hpp"
-#include "ps5mc/library_scanner.hpp"
-#include "ps5mc/library_ui.hpp"
-#include "ps5mc/kitchensink_subtitle_timing.h"
-#include "ps5mc/playlist.hpp"
-#include "ps5mc/playback_osd.hpp"
-#include "ps5mc/player_settings.hpp"
-#include "ps5mc/safe_read_file.hpp"
-#include "ps5mc/source_uri.hpp"
-#include "ps5mc/video_layout.hpp"
+#include "bfplayer/external_subtitles.hpp"
+#include "bfplayer/controller_buttons.hpp"
+#include "bfplayer/diagnostics.hpp"
+#include "bfplayer/library_database.hpp"
+#include "bfplayer/library_scanner.hpp"
+#include "bfplayer/library_ui.hpp"
+#include "bfplayer/kitchensink_subtitle_timing.h"
+#include "bfplayer/playlist.hpp"
+#include "bfplayer/playback_osd.hpp"
+#include "bfplayer/player_settings.hpp"
+#include "bfplayer/safe_read_file.hpp"
+#include "bfplayer/source_uri.hpp"
+#include "bfplayer/video_layout.hpp"
 
 #include <algorithm>
 #include <array>
@@ -57,8 +57,8 @@ extern "C" int sceSystemServiceKillApp(
     int reason,
     int core_dump);
 
-#ifndef PS5MC_VERSION
-#define PS5MC_VERSION "development"
+#ifndef BFPLAYER_VERSION
+#define BFPLAYER_VERSION "development"
 #endif
 
 constexpr int kWindowWidth = 1920;
@@ -86,9 +86,9 @@ struct App {
     SDL_Texture* video = nullptr;
     SDL_Texture* subtitles = nullptr;
     SDL_AudioDeviceID audio = 0;
-    ps5mc::ExternalSubtitles external_subtitles;
-    ps5mc::SafeReadFile local_media;
-    ps5mc::PlaybackOsd osd;
+    bfplayer::ExternalSubtitles external_subtitles;
+    bfplayer::SafeReadFile local_media;
+    bfplayer::PlaybackOsd osd;
     std::vector<std::string> subtitle_sidecars;
     std::string current_media_path;
     std::string fallback_font;
@@ -98,14 +98,14 @@ struct App {
     int previous_volume_percent = 100;
     std::int64_t subtitle_delay_ms = 0;
     double source_display_aspect = 0.0;
-    ps5mc::PlayerSettings settings;
+    bfplayer::PlayerSettings settings;
     PlaybackOverlay playback_overlay = PlaybackOverlay::none;
     int playback_overlay_selected = 0;
-    ps5mc::VideoScaleMode video_scale_mode = ps5mc::VideoScaleMode::fit;
-    ps5mc::VideoAspectMode video_aspect_mode =
-        ps5mc::VideoAspectMode::default_ratio;
-    ps5mc::VideoCropMode video_crop_mode =
-        ps5mc::VideoCropMode::default_crop;
+    bfplayer::VideoScaleMode video_scale_mode = bfplayer::VideoScaleMode::fit;
+    bfplayer::VideoAspectMode video_aspect_mode =
+        bfplayer::VideoAspectMode::default_ratio;
+    bfplayer::VideoCropMode video_crop_mode =
+        bfplayer::VideoCropMode::default_crop;
     bool running = true;
     bool playback_running = false;
     bool paused = false;
@@ -197,8 +197,8 @@ struct VideoSourceInfo {
 void close_media(App& app);
 
 void log_sdl(const char* operation) {
-    ps5mc::diagnostics_log(
-        ps5mc::DiagnosticLevel::error,
+    bfplayer::diagnostics_log(
+        bfplayer::DiagnosticLevel::error,
         "sdl operation=%s error=%s",
         operation ? operation : "<unknown>",
         SDL_GetError());
@@ -229,7 +229,7 @@ VideoSourceInfo inspect_video_source(
         info.sample_aspect_numerator = guessed_aspect.num;
         info.sample_aspect_denominator = guessed_aspect.den;
     }
-    info.display_aspect = ps5mc::display_aspect_from_sample_aspect(
+    info.display_aspect = bfplayer::display_aspect_from_sample_aspect(
         info.width,
         info.height,
         info.sample_aspect_numerator,
@@ -290,13 +290,13 @@ void sdl_log_output(
     int category,
     SDL_LogPriority priority,
     const char* message) {
-    const ps5mc::DiagnosticLevel level =
+    const bfplayer::DiagnosticLevel level =
         priority >= SDL_LOG_PRIORITY_ERROR
-            ? ps5mc::DiagnosticLevel::error
+            ? bfplayer::DiagnosticLevel::error
             : (priority == SDL_LOG_PRIORITY_WARN
-                   ? ps5mc::DiagnosticLevel::warning
-                   : ps5mc::DiagnosticLevel::info);
-    ps5mc::diagnostics_log(
+                   ? bfplayer::DiagnosticLevel::warning
+                   : bfplayer::DiagnosticLevel::info);
+    bfplayer::diagnostics_log(
         level,
         "sdl-log category=%d priority=%d message=%s",
         category,
@@ -328,7 +328,7 @@ std::string executable_asset_path(const char* executable_path, const char* relat
 
 void migrate_legacy_library_database() {
     constexpr const char* legacy_database =
-        "/data/PS5-MediaCenter/library.db";
+        "/data/PS5-" "Media-" "Center/library.db";
     constexpr const char* current_directory = "/data/BFplayer";
     constexpr const char* current_database =
         "/data/BFplayer/library.db";
@@ -451,8 +451,8 @@ void log_installed_manifest(const char* executable_path) {
     const std::string manifest_path = executable_asset_path(executable_path, "build-manifest.json");
     FILE* manifest = std::fopen(manifest_path.c_str(), "rb");
     if (!manifest) {
-        ps5mc::diagnostics_log(
-            ps5mc::DiagnosticLevel::warning,
+        bfplayer::diagnostics_log(
+            bfplayer::DiagnosticLevel::warning,
             "build-manifest unavailable path=%s errno=%d",
             manifest_path.c_str(),
             errno);
@@ -463,57 +463,57 @@ void log_installed_manifest(const char* executable_path) {
     const bool complete = std::feof(manifest) != 0;
     std::fclose(manifest);
     contents[bytes] = '\0';
-    ps5mc::diagnostics_log(
-        ps5mc::DiagnosticLevel::info,
+    bfplayer::diagnostics_log(
+        bfplayer::DiagnosticLevel::info,
         "build-manifest bytes=%zu complete=%d content=%s",
         bytes,
         complete ? 1 : 0,
         contents);
 }
 
-ps5mc::PlayerSettings load_player_settings(
-    ps5mc::LibraryDatabase& database) {
-    ps5mc::PlayerSettings settings{};
+bfplayer::PlayerSettings load_player_settings(
+    bfplayer::LibraryDatabase& database) {
+    bfplayer::PlayerSettings settings{};
     std::string value;
     int integer = 0;
     bool boolean = false;
     if (database.get_setting(
-            std::string(ps5mc::kSettingVolumePercent),
+            std::string(bfplayer::kSettingVolumePercent),
             value) &&
-        ps5mc::parse_setting_integer(value, 0, 100, integer)) {
+        bfplayer::parse_setting_integer(value, 0, 100, integer)) {
         settings.volume_percent = integer;
     }
     if (database.get_setting(
-            std::string(ps5mc::kSettingShortSeekSeconds),
+            std::string(bfplayer::kSettingShortSeekSeconds),
             value) &&
-        ps5mc::parse_setting_integer(value, 1, 300, integer)) {
+        bfplayer::parse_setting_integer(value, 1, 300, integer)) {
         settings.short_seek_seconds = integer;
     }
     if (database.get_setting(
-            std::string(ps5mc::kSettingLongSeekSeconds),
+            std::string(bfplayer::kSettingLongSeekSeconds),
             value) &&
-        ps5mc::parse_setting_integer(value, 1, 900, integer)) {
+        bfplayer::parse_setting_integer(value, 1, 900, integer)) {
         settings.long_seek_seconds = integer;
     }
     if (database.get_setting(
-            std::string(ps5mc::kSettingOsdDurationMs),
+            std::string(bfplayer::kSettingOsdDurationMs),
             value) &&
-        ps5mc::parse_setting_integer(value, 500, 30000, integer)) {
+        bfplayer::parse_setting_integer(value, 500, 30000, integer)) {
         settings.osd_duration_ms = integer;
     }
     if (database.get_setting(
-            std::string(ps5mc::kSettingResumePlayback),
+            std::string(bfplayer::kSettingResumePlayback),
             value) &&
-        ps5mc::parse_setting_boolean(value, boolean)) {
+        bfplayer::parse_setting_boolean(value, boolean)) {
         settings.resume_playback = boolean;
     }
     if (database.get_setting(
-            std::string(ps5mc::kSettingAutoSubtitles),
+            std::string(bfplayer::kSettingAutoSubtitles),
             value) &&
-        ps5mc::parse_setting_boolean(value, boolean)) {
+        bfplayer::parse_setting_boolean(value, boolean)) {
         settings.auto_subtitles = boolean;
     }
-    return ps5mc::normalized_player_settings(settings);
+    return bfplayer::normalized_player_settings(settings);
 }
 
 std::int64_t monotonic_milliseconds() {
@@ -569,7 +569,7 @@ int interrupt_source_io(void* opaque) {
 }
 
 int read_local_media(void* opaque, std::uint8_t* buffer, int length) {
-    auto* file = static_cast<ps5mc::SafeReadFile*>(opaque);
+    auto* file = static_cast<bfplayer::SafeReadFile*>(opaque);
     if (!file) {
         return AVERROR(EINVAL);
     }
@@ -578,7 +578,7 @@ int read_local_media(void* opaque, std::uint8_t* buffer, int length) {
 }
 
 std::int64_t seek_local_media(void* opaque, std::int64_t offset, int whence) {
-    auto* file = static_cast<ps5mc::SafeReadFile*>(opaque);
+    auto* file = static_cast<bfplayer::SafeReadFile*>(opaque);
     if (!file) {
         return AVERROR(EINVAL);
     }
@@ -609,23 +609,23 @@ Kit_Source* create_bounded_source(
     error.clear();
     if (!path || !path[0]) {
         error = "Empty media source";
-        ps5mc::diagnostics_log(ps5mc::DiagnosticLevel::error, "source-open rejected reason=empty");
+        bfplayer::diagnostics_log(bfplayer::DiagnosticLevel::error, "source-open rejected reason=empty");
         return nullptr;
     }
-    const bool network = ps5mc::is_network_uri(path);
-    ps5mc::diagnostics_log(
-        ps5mc::DiagnosticLevel::info,
+    const bool network = bfplayer::is_network_uri(path);
+    bfplayer::diagnostics_log(
+        bfplayer::DiagnosticLevel::info,
         "source-open begin kind=%s path=%s",
         network ? "network" : "local",
-        ps5mc::redact_uri_secrets(path).c_str());
-    if (network && !ps5mc::is_supported_stream_uri(path)) {
+        bfplayer::redact_uri_secrets(path).c_str());
+    if (network && !bfplayer::is_supported_stream_uri(path)) {
         error = "Unsupported network protocol";
-        ps5mc::diagnostics_log(ps5mc::DiagnosticLevel::error, "source-open rejected reason=unsupported-protocol");
+        bfplayer::diagnostics_log(bfplayer::DiagnosticLevel::error, "source-open rejected reason=unsupported-protocol");
         return nullptr;
     }
-    if (network && ps5mc::uri_has_credentials(path)) {
+    if (network && bfplayer::uri_has_credentials(path)) {
         error = "Network URLs containing usernames or passwords are rejected";
-        ps5mc::diagnostics_log(ps5mc::DiagnosticLevel::error, "source-open rejected reason=credentials");
+        bfplayer::diagnostics_log(bfplayer::DiagnosticLevel::error, "source-open rejected reason=credentials");
         return nullptr;
     }
 
@@ -706,10 +706,10 @@ Kit_Source* create_bounded_source(
     app.source_open_deadline_ms.store(0, std::memory_order_relaxed);
     if (result < 0) {
         error = "Open media source: " + ffmpeg_error(result);
-        ps5mc::diagnostics_log(
-            ps5mc::DiagnosticLevel::error,
+        bfplayer::diagnostics_log(
+            bfplayer::DiagnosticLevel::error,
             "source-open failed path=%s ffmpeg=%d error=%s",
-            ps5mc::redact_uri_secrets(path).c_str(),
+            bfplayer::redact_uri_secrets(path).c_str(),
             result,
             error.c_str());
         avformat_close_input(&format);
@@ -728,10 +728,10 @@ Kit_Source* create_bounded_source(
     }
     source->format_ctx = format;
     source->avio_ctx = custom_io;
-    ps5mc::diagnostics_log(
-        ps5mc::DiagnosticLevel::info,
+    bfplayer::diagnostics_log(
+        bfplayer::DiagnosticLevel::info,
         "source-open success path=%s streams=%u duration_us=%lld format=%s",
-        ps5mc::redact_uri_secrets(path).c_str(),
+        bfplayer::redact_uri_secrets(path).c_str(),
         format->nb_streams,
         static_cast<long long>(format->duration),
         format->iformat && format->iformat->name ? format->iformat->name : "<unknown>");
@@ -932,17 +932,17 @@ double player_display_aspect(
     int numerator = 0;
     int denominator = 0;
     Kit_GetPlayerAspectRatio(app.player, &numerator, &denominator);
-    return ps5mc::display_aspect_from_sample_aspect(
+    return bfplayer::display_aspect_from_sample_aspect(
         frame_width,
         frame_height,
         numerator,
         denominator);
 }
 
-ps5mc::VideoLayout player_video_layout(App& app) {
+bfplayer::VideoLayout player_video_layout(App& app) {
     Kit_PlayerInfo info{};
     Kit_GetPlayerInfo(app.player, &info);
-    return ps5mc::compute_video_layout(
+    return bfplayer::compute_video_layout(
         info.video_format.width,
         info.video_format.height,
         player_display_aspect(
@@ -962,8 +962,8 @@ bool set_stream(App& app, Kit_StreamType type, int index) {
         return true;
     }
     if (Kit_SetPlayerStream(app.player, type, index) != 0) {
-        ps5mc::diagnostics_log(
-            ps5mc::DiagnosticLevel::error,
+        bfplayer::diagnostics_log(
+            bfplayer::DiagnosticLevel::error,
             "track-switch failed type=%d previous=%d requested=%d error=%s",
             type,
             previous,
@@ -978,8 +978,8 @@ bool set_stream(App& app, Kit_StreamType type, int index) {
         resources_ready = create_video_textures(app);
     }
     if (!resources_ready) {
-        ps5mc::diagnostics_log(
-            ps5mc::DiagnosticLevel::error,
+        bfplayer::diagnostics_log(
+            bfplayer::DiagnosticLevel::error,
             "track-switch resource-failure type=%d requested=%d restoring=%d",
             type,
             index,
@@ -991,8 +991,8 @@ bool set_stream(App& app, Kit_StreamType type, int index) {
                  ? open_audio(app)
                  : create_video_textures(app));
         if (!resources_restored) {
-            ps5mc::diagnostics_log(
-                ps5mc::DiagnosticLevel::error,
+            bfplayer::diagnostics_log(
+                bfplayer::DiagnosticLevel::error,
                 "track-switch rollback-failed type=%d error=%s",
                 type,
                 Kit_GetError());
@@ -1009,8 +1009,8 @@ bool set_stream(App& app, Kit_StreamType type, int index) {
             index).display_aspect;
     }
 
-    ps5mc::diagnostics_log(
-        ps5mc::DiagnosticLevel::info,
+    bfplayer::diagnostics_log(
+        bfplayer::DiagnosticLevel::info,
         "track-switch success type=%d previous=%d current=%d description=%s",
         type,
         previous,
@@ -1039,8 +1039,8 @@ void cycle_stream(App& app, Kit_StreamType type, bool allow_off) {
 
 bool open_external_subtitle(App& app, int index) {
     if (index < 0 || index >= static_cast<int>(app.subtitle_sidecars.size())) {
-        ps5mc::diagnostics_log(
-            ps5mc::DiagnosticLevel::warning,
+        bfplayer::diagnostics_log(
+            bfplayer::DiagnosticLevel::warning,
             "subtitle-open rejected index=%d count=%zu",
             index,
             app.subtitle_sidecars.size());
@@ -1053,10 +1053,10 @@ bool open_external_subtitle(App& app, int index) {
             app.fallback_font,
             kWindowWidth,
             kWindowHeight)) {
-        ps5mc::diagnostics_log(
-            ps5mc::DiagnosticLevel::error,
+        bfplayer::diagnostics_log(
+            bfplayer::DiagnosticLevel::error,
             "subtitle-open failed path=%s error=%s",
-            ps5mc::redact_uri_secrets(
+            bfplayer::redact_uri_secrets(
                 app.subtitle_sidecars[static_cast<std::size_t>(index)]).c_str(),
             app.external_subtitles.error().c_str());
         return false;
@@ -1067,20 +1067,20 @@ bool open_external_subtitle(App& app, int index) {
         return false;
     }
     app.external_subtitle_index = index;
-    ps5mc::diagnostics_log(
-        ps5mc::DiagnosticLevel::info,
+    bfplayer::diagnostics_log(
+        bfplayer::DiagnosticLevel::info,
         "subtitle-open success index=%d path=%s",
         index,
-        ps5mc::redact_uri_secrets(
+        bfplayer::redact_uri_secrets(
             app.subtitle_sidecars[static_cast<std::size_t>(index)]).c_str());
     app.osd.show(
-        "Subtitles: " + ps5mc::redact_uri_secrets(
+        "Subtitles: " + bfplayer::redact_uri_secrets(
             app.subtitle_sidecars[static_cast<std::size_t>(index)]));
     return true;
 }
 
-ps5mc::TrackPreferences current_track_preferences(const App& app) {
-    ps5mc::TrackPreferences preferences{};
+bfplayer::TrackPreferences current_track_preferences(const App& app) {
+    bfplayer::TrackPreferences preferences{};
     if (!app.player) {
         return preferences;
     }
@@ -1100,7 +1100,7 @@ ps5mc::TrackPreferences current_track_preferences(const App& app) {
 
 void restore_track_preferences(
     App& app,
-    const ps5mc::TrackPreferences& preferences,
+    const bfplayer::TrackPreferences& preferences,
     bool explicit_subtitle) {
     app.subtitle_delay_ms = std::clamp<std::int64_t>(
         preferences.subtitle_delay_ms, -10000, 10000);
@@ -1158,7 +1158,7 @@ void cycle_subtitles(App& app) {
         }
         app.external_subtitles.close();
         app.external_subtitle_index = -1;
-        ps5mc::diagnostics_log(ps5mc::DiagnosticLevel::info, "subtitle-selection off");
+        bfplayer::diagnostics_log(bfplayer::DiagnosticLevel::info, "subtitle-selection off");
         app.osd.show("Subtitles: Off");
         return;
     }
@@ -1200,8 +1200,8 @@ void seek_relative(App& app, double seconds) {
     const double target = std::clamp(
         position + seconds, 0.0, duration);
     if (Kit_PlayerSeek(app.player, target) != 0) {
-        ps5mc::diagnostics_log(
-            ps5mc::DiagnosticLevel::error,
+        bfplayer::diagnostics_log(
+            bfplayer::DiagnosticLevel::error,
             "seek failed from=%.3f delta=%.3f target=%.3f error=%s",
             position,
             seconds,
@@ -1209,8 +1209,8 @@ void seek_relative(App& app, double seconds) {
             Kit_GetError());
     } else if (app.audio != 0) {
         SDL_ClearQueuedAudio(app.audio);
-        ps5mc::diagnostics_log(
-            ps5mc::DiagnosticLevel::info,
+        bfplayer::diagnostics_log(
+            bfplayer::DiagnosticLevel::info,
             "seek success from=%.3f delta=%.3f target=%.3f",
             position,
             seconds,
@@ -1273,14 +1273,14 @@ void seek_chapter(App& app, int direction) {
             label += title->value;
         }
         app.osd.show(std::move(label));
-        ps5mc::diagnostics_log(
-            ps5mc::DiagnosticLevel::info,
+        bfplayer::diagnostics_log(
+            bfplayer::DiagnosticLevel::info,
             "chapter-seek success index=%d target=%.3f",
             target_index,
             target);
     } else {
-        ps5mc::diagnostics_log(
-            ps5mc::DiagnosticLevel::error,
+        bfplayer::diagnostics_log(
+            bfplayer::DiagnosticLevel::error,
             "chapter-seek failed index=%d target=%.3f error=%s",
             target_index,
             target,
@@ -1293,8 +1293,8 @@ void set_volume(App& app, int percent) {
     if (app.volume_percent > 0) {
         app.previous_volume_percent = app.volume_percent;
     }
-    ps5mc::diagnostics_log(
-        ps5mc::DiagnosticLevel::info,
+    bfplayer::diagnostics_log(
+        bfplayer::DiagnosticLevel::info,
         "volume percent=%d",
         app.volume_percent);
     app.osd.show("Volume: " + std::to_string(app.volume_percent) + "%");
@@ -1312,8 +1312,8 @@ void toggle_mute(App& app) {
 void adjust_subtitle_delay(App& app, std::int64_t delta_ms) {
     app.subtitle_delay_ms = std::clamp<std::int64_t>(
         app.subtitle_delay_ms + delta_ms, -10000, 10000);
-    ps5mc::diagnostics_log(
-        ps5mc::DiagnosticLevel::info,
+    bfplayer::diagnostics_log(
+        bfplayer::DiagnosticLevel::info,
         "subtitle-delay delta_ms=%lld value_ms=%lld",
         static_cast<long long>(delta_ms),
         static_cast<long long>(app.subtitle_delay_ms));
@@ -1326,8 +1326,8 @@ void adjust_subtitle_delay(App& app, std::int64_t delta_ms) {
 
 void toggle_pause(App& app) {
     app.paused = !app.paused;
-    ps5mc::diagnostics_log(
-        ps5mc::DiagnosticLevel::info,
+    bfplayer::diagnostics_log(
+        bfplayer::DiagnosticLevel::info,
         "pause state=%s position=%.3f",
         app.paused ? "paused" : "playing",
         app.player ? Kit_GetPlayerPosition(app.player) : 0.0);
@@ -1346,63 +1346,63 @@ void toggle_pause(App& app) {
 }
 
 void cycle_video_scale(App& app) {
-    app.video_scale_mode = ps5mc::next_video_scale_mode(app.video_scale_mode);
-    ps5mc::diagnostics_log(
-        ps5mc::DiagnosticLevel::info,
+    app.video_scale_mode = bfplayer::next_video_scale_mode(app.video_scale_mode);
+    bfplayer::diagnostics_log(
+        bfplayer::DiagnosticLevel::info,
         "video-scale mode=%s",
-        ps5mc::video_scale_mode_name(app.video_scale_mode));
+        bfplayer::video_scale_mode_name(app.video_scale_mode));
     app.osd.show(
         std::string("Video scale: ") +
-        ps5mc::video_scale_mode_name(app.video_scale_mode));
+        bfplayer::video_scale_mode_name(app.video_scale_mode));
 }
 
 void cycle_video_aspect(App& app) {
     app.video_aspect_mode =
-        ps5mc::next_video_aspect_mode(app.video_aspect_mode);
-    ps5mc::diagnostics_log(
-        ps5mc::DiagnosticLevel::info,
+        bfplayer::next_video_aspect_mode(app.video_aspect_mode);
+    bfplayer::diagnostics_log(
+        bfplayer::DiagnosticLevel::info,
         "video-aspect mode=%s",
-        ps5mc::video_aspect_mode_name(app.video_aspect_mode));
+        bfplayer::video_aspect_mode_name(app.video_aspect_mode));
     app.osd.show(
         std::string("Aspect ratio: ") +
-        ps5mc::video_aspect_mode_name(app.video_aspect_mode));
+        bfplayer::video_aspect_mode_name(app.video_aspect_mode));
 }
 
 void cycle_video_crop(App& app) {
     app.video_crop_mode =
-        ps5mc::next_video_crop_mode(app.video_crop_mode);
-    ps5mc::diagnostics_log(
-        ps5mc::DiagnosticLevel::info,
+        bfplayer::next_video_crop_mode(app.video_crop_mode);
+    bfplayer::diagnostics_log(
+        bfplayer::DiagnosticLevel::info,
         "video-crop mode=%s",
-        ps5mc::video_crop_mode_name(app.video_crop_mode));
+        bfplayer::video_crop_mode_name(app.video_crop_mode));
     app.osd.show(
         std::string("Crop ratio: ") +
-        ps5mc::video_crop_mode_name(app.video_crop_mode));
+        bfplayer::video_crop_mode_name(app.video_crop_mode));
 }
 
 bool persist_active_player_settings(App& app) {
-    const ps5mc::PlayerSettings settings =
-        ps5mc::normalized_player_settings(app.settings);
-    ps5mc::LibraryDatabase database;
+    const bfplayer::PlayerSettings settings =
+        bfplayer::normalized_player_settings(app.settings);
+    bfplayer::LibraryDatabase database;
     const bool saved =
         database.open("/data/BFplayer/library.db") &&
         database.set_settings({
-            {std::string(ps5mc::kSettingVolumePercent),
+            {std::string(bfplayer::kSettingVolumePercent),
              std::to_string(settings.volume_percent)},
-            {std::string(ps5mc::kSettingShortSeekSeconds),
+            {std::string(bfplayer::kSettingShortSeekSeconds),
              std::to_string(settings.short_seek_seconds)},
-            {std::string(ps5mc::kSettingLongSeekSeconds),
+            {std::string(bfplayer::kSettingLongSeekSeconds),
              std::to_string(settings.long_seek_seconds)},
-            {std::string(ps5mc::kSettingOsdDurationMs),
+            {std::string(bfplayer::kSettingOsdDurationMs),
              std::to_string(settings.osd_duration_ms)},
-            {std::string(ps5mc::kSettingResumePlayback),
+            {std::string(bfplayer::kSettingResumePlayback),
              settings.resume_playback ? "1" : "0"},
-            {std::string(ps5mc::kSettingAutoSubtitles),
+            {std::string(bfplayer::kSettingAutoSubtitles),
              settings.auto_subtitles ? "1" : "0"},
         });
     if (!saved) {
-        ps5mc::diagnostics_log(
-            ps5mc::DiagnosticLevel::error,
+        bfplayer::diagnostics_log(
+            bfplayer::DiagnosticLevel::error,
             "player-settings live-save failed error=%s",
             database.error().c_str());
         return false;
@@ -1414,8 +1414,8 @@ bool persist_active_player_settings(App& app) {
     }
     app.osd.set_default_duration(
         static_cast<std::uint64_t>(settings.osd_duration_ms));
-    ps5mc::diagnostics_log(
-        ps5mc::DiagnosticLevel::info,
+    bfplayer::diagnostics_log(
+        bfplayer::DiagnosticLevel::info,
         "player-settings live-save volume=%d short_seek=%d long_seek=%d osd_ms=%d resume=%d auto_subtitles=%d scale=%s aspect=%s crop=%s",
         settings.volume_percent,
         settings.short_seek_seconds,
@@ -1423,9 +1423,9 @@ bool persist_active_player_settings(App& app) {
         settings.osd_duration_ms,
         settings.resume_playback ? 1 : 0,
         settings.auto_subtitles ? 1 : 0,
-        ps5mc::video_scale_mode_name(app.video_scale_mode),
-        ps5mc::video_aspect_mode_name(app.video_aspect_mode),
-        ps5mc::video_crop_mode_name(app.video_crop_mode));
+        bfplayer::video_scale_mode_name(app.video_scale_mode),
+        bfplayer::video_aspect_mode_name(app.video_aspect_mode),
+        bfplayer::video_crop_mode_name(app.video_crop_mode));
     return true;
 }
 
@@ -1471,11 +1471,11 @@ void refresh_playback_overlay(App& app) {
                     std::to_string(app.settings.osd_duration_ms / 1000) +
                     " seconds",
                 std::string("Video scaling                   ") +
-                    ps5mc::video_scale_mode_name(app.video_scale_mode),
+                    bfplayer::video_scale_mode_name(app.video_scale_mode),
                 std::string("Display aspect (this video)     ") +
-                    ps5mc::video_aspect_mode_name(app.video_aspect_mode),
+                    bfplayer::video_aspect_mode_name(app.video_aspect_mode),
                 std::string("Crop                            ") +
-                    ps5mc::video_crop_mode_name(app.video_crop_mode),
+                    bfplayer::video_crop_mode_name(app.video_crop_mode),
                 std::string("Resume where I stopped         ") +
                     (app.settings.resume_playback ? "On" : "Off"),
                 std::string("Automatically select subtitles  ") +
@@ -1504,8 +1504,8 @@ void open_playback_overlay(App& app, PlaybackOverlay overlay) {
     app.playback_overlay = overlay;
     app.playback_overlay_selected = 0;
     refresh_playback_overlay(app);
-    ps5mc::diagnostics_log(
-        ps5mc::DiagnosticLevel::info,
+    bfplayer::diagnostics_log(
+        bfplayer::DiagnosticLevel::info,
         "playback-overlay open=%s",
         overlay == PlaybackOverlay::menu
             ? "menu"
@@ -1520,7 +1520,7 @@ bool handle_playback_overlay_button(
     if (app.playback_overlay == PlaybackOverlay::none) {
         return false;
     }
-    if (button == ps5mc::kControllerOptionsButton) {
+    if (button == bfplayer::kControllerOptionsButton) {
         app.playback_overlay = PlaybackOverlay::none;
         refresh_playback_overlay(app);
         return true;
@@ -1548,19 +1548,19 @@ bool handle_playback_overlay_button(
             return true;
         }
         if (button == SDL_CONTROLLER_BUTTON_X) {
-            const ps5mc::PlayerSettings previous = app.settings;
-            const ps5mc::VideoScaleMode previous_scale =
+            const bfplayer::PlayerSettings previous = app.settings;
+            const bfplayer::VideoScaleMode previous_scale =
                 app.video_scale_mode;
-            const ps5mc::VideoAspectMode previous_aspect =
+            const bfplayer::VideoAspectMode previous_aspect =
                 app.video_aspect_mode;
-            const ps5mc::VideoCropMode previous_crop =
+            const bfplayer::VideoCropMode previous_crop =
                 app.video_crop_mode;
             app.settings = {};
-            app.video_scale_mode = ps5mc::VideoScaleMode::fit;
+            app.video_scale_mode = bfplayer::VideoScaleMode::fit;
             app.video_aspect_mode =
-                ps5mc::VideoAspectMode::default_ratio;
+                bfplayer::VideoAspectMode::default_ratio;
             app.video_crop_mode =
-                ps5mc::VideoCropMode::default_crop;
+                bfplayer::VideoCropMode::default_crop;
             if (!persist_active_player_settings(app)) {
                 app.settings = previous;
                 app.video_scale_mode = previous_scale;
@@ -1578,12 +1578,12 @@ bool handle_playback_overlay_button(
         }
         const int direction =
             button == SDL_CONTROLLER_BUTTON_DPAD_LEFT ? -1 : 1;
-        const ps5mc::PlayerSettings previous = app.settings;
-        const ps5mc::VideoScaleMode previous_scale =
+        const bfplayer::PlayerSettings previous = app.settings;
+        const bfplayer::VideoScaleMode previous_scale =
             app.video_scale_mode;
-        const ps5mc::VideoAspectMode previous_aspect =
+        const bfplayer::VideoAspectMode previous_aspect =
             app.video_aspect_mode;
-        const ps5mc::VideoCropMode previous_crop =
+        const bfplayer::VideoCropMode previous_crop =
             app.video_crop_mode;
         switch (app.playback_overlay_selected) {
             case 0:
@@ -1594,37 +1594,37 @@ bool handle_playback_overlay_button(
                 break;
             case 1:
                 app.settings.short_seek_seconds =
-                    ps5mc::next_short_seek_seconds(
+                    bfplayer::next_short_seek_seconds(
                         app.settings.short_seek_seconds,
                         direction);
                 break;
             case 2:
                 app.settings.long_seek_seconds =
-                    ps5mc::next_long_seek_seconds(
+                    bfplayer::next_long_seek_seconds(
                         app.settings.long_seek_seconds,
                         direction);
                 break;
             case 3:
                 app.settings.osd_duration_ms =
-                    ps5mc::next_osd_duration_ms(
+                    bfplayer::next_osd_duration_ms(
                         app.settings.osd_duration_ms,
                         direction);
                 break;
             case 4:
                 app.video_scale_mode =
-                    ps5mc::step_video_scale_mode(
+                    bfplayer::step_video_scale_mode(
                         app.video_scale_mode,
                         direction);
                 break;
             case 5:
                 app.video_aspect_mode =
-                    ps5mc::step_video_aspect_mode(
+                    bfplayer::step_video_aspect_mode(
                         app.video_aspect_mode,
                         direction);
                 break;
             case 6:
                 app.video_crop_mode =
-                    ps5mc::step_video_crop_mode(
+                    bfplayer::step_video_crop_mode(
                         app.video_crop_mode,
                         direction);
                 break;
@@ -1638,11 +1638,11 @@ bool handle_playback_overlay_button(
                 break;
             case 9:
                 app.settings = {};
-                app.video_scale_mode = ps5mc::VideoScaleMode::fit;
+                app.video_scale_mode = bfplayer::VideoScaleMode::fit;
                 app.video_aspect_mode =
-                    ps5mc::VideoAspectMode::default_ratio;
+                    bfplayer::VideoAspectMode::default_ratio;
                 app.video_crop_mode =
-                    ps5mc::VideoCropMode::default_crop;
+                    bfplayer::VideoCropMode::default_crop;
                 break;
             default:
                 return true;
@@ -1700,8 +1700,8 @@ bool handle_playback_overlay_button(
             break;
         case 5:
             app.playback_running = false;
-            ps5mc::diagnostics_log(
-                ps5mc::DiagnosticLevel::info,
+            bfplayer::diagnostics_log(
+                bfplayer::DiagnosticLevel::info,
                 "playback-stop requested=menu");
             break;
         default:
@@ -1779,15 +1779,15 @@ void on_controller_button(App& app, SDL_GameControllerButton button) {
         case SDL_CONTROLLER_BUTTON_RIGHTSTICK:
             set_volume(app, app.volume_percent + 5);
             break;
-        case ps5mc::kControllerTouchpadButton:
+        case bfplayer::kControllerTouchpadButton:
             open_playback_overlay(app, PlaybackOverlay::controls);
             break;
-#if !defined(PS5MC_PS5)
+#if !defined(BFPLAYER_PS5)
         case SDL_CONTROLLER_BUTTON_BACK:
             toggle_mute(app);
             break;
 #endif
-        case ps5mc::kControllerOptionsButton:
+        case bfplayer::kControllerOptionsButton:
             open_playback_overlay(app, PlaybackOverlay::menu);
             break;
         default:
@@ -1876,17 +1876,17 @@ PlaybackOutcome run_player(
     const char* explicit_subtitle = nullptr) {
     // Geometry overrides are playback-local. A saved stretch/fill/crop mode
     // must never make a newly opened video's "Original" ratio look distorted.
-    app.video_scale_mode = ps5mc::VideoScaleMode::fit;
-    app.video_aspect_mode = ps5mc::VideoAspectMode::default_ratio;
-    app.video_crop_mode = ps5mc::VideoCropMode::default_crop;
+    app.video_scale_mode = bfplayer::VideoScaleMode::fit;
+    app.video_aspect_mode = bfplayer::VideoAspectMode::default_ratio;
+    app.video_crop_mode = bfplayer::VideoCropMode::default_crop;
     app.source_display_aspect = 0.0;
-    app.current_media_path = path ? ps5mc::redact_uri_secrets(path) : std::string{};
-    ps5mc::diagnostics_log(
-        ps5mc::DiagnosticLevel::info,
+    app.current_media_path = path ? bfplayer::redact_uri_secrets(path) : std::string{};
+    bfplayer::diagnostics_log(
+        bfplayer::DiagnosticLevel::info,
         "playback-start path=%s explicit_subtitle=%s",
         app.current_media_path.c_str(),
         explicit_subtitle && explicit_subtitle[0]
-            ? ps5mc::redact_uri_secrets(explicit_subtitle).c_str()
+            ? bfplayer::redact_uri_secrets(explicit_subtitle).c_str()
             : "<none>");
     app.playback_running = true;
     app.paused = false;
@@ -1914,7 +1914,7 @@ PlaybackOutcome run_player(
                 if (event.type == SDL_QUIT ||
                     (event.type == SDL_CONTROLLERBUTTONDOWN &&
                      event.cbutton.button ==
-                         ps5mc::kControllerOptionsButton)) {
+                         bfplayer::kControllerOptionsButton)) {
                     return;
                 }
             }
@@ -1928,27 +1928,27 @@ PlaybackOutcome run_player(
     std::string source_error;
     app.source = create_bounded_source(app, path, source_error);
     if (!app.source) {
-        ps5mc::diagnostics_log(
-            ps5mc::DiagnosticLevel::error,
+        bfplayer::diagnostics_log(
+            bfplayer::DiagnosticLevel::error,
             "playback-start failed path=%s error=%s",
             app.current_media_path.c_str(),
             source_error.c_str());
         show_open_error(source_error);
         return PlaybackOutcome::error;
     }
-    ps5mc::LibraryDatabase resume_database;
+    bfplayer::LibraryDatabase resume_database;
     const bool database_available =
         resume_database.open("/data/BFplayer/library.db");
     app.settings = database_available
         ? load_player_settings(resume_database)
-        : ps5mc::PlayerSettings{};
+        : bfplayer::PlayerSettings{};
     app.volume_percent = app.settings.volume_percent;
     app.previous_volume_percent =
         app.volume_percent > 0 ? app.volume_percent : 100;
     app.osd.set_default_duration(
         static_cast<std::uint64_t>(app.settings.osd_duration_ms));
-    ps5mc::diagnostics_log(
-        ps5mc::DiagnosticLevel::info,
+    bfplayer::diagnostics_log(
+        bfplayer::DiagnosticLevel::info,
         "player-settings volume=%d short_seek=%d long_seek=%d osd_ms=%d resume=%d auto_subtitles=%d",
         app.settings.volume_percent,
         app.settings.short_seek_seconds,
@@ -1956,14 +1956,14 @@ PlaybackOutcome run_player(
         app.settings.osd_duration_ms,
         app.settings.resume_playback ? 1 : 0,
         app.settings.auto_subtitles ? 1 : 0);
-    app.subtitle_sidecars = ps5mc::is_network_uri(path)
+    app.subtitle_sidecars = bfplayer::is_network_uri(path)
         ? std::vector<std::string>{}
-        : ps5mc::find_subtitle_sidecars(path);
+        : bfplayer::find_subtitle_sidecars(path);
     if (explicit_subtitle && explicit_subtitle[0]) {
         app.subtitle_sidecars.insert(app.subtitle_sidecars.begin(), explicit_subtitle);
     }
-    ps5mc::diagnostics_log(
-        ps5mc::DiagnosticLevel::info,
+    bfplayer::diagnostics_log(
+        bfplayer::DiagnosticLevel::info,
         "subtitle-sidecars count=%zu",
         app.subtitle_sidecars.size());
     if (const auto* format = static_cast<const AVFormatContext*>(app.source->format_ctx)) {
@@ -1971,8 +1971,8 @@ PlaybackOutcome run_player(
             const AVMediaType type = format->streams[index]->codecpar->codec_type;
             if (type == AVMEDIA_TYPE_VIDEO || type == AVMEDIA_TYPE_AUDIO ||
                 type == AVMEDIA_TYPE_SUBTITLE) {
-                ps5mc::diagnostics_log(
-                    ps5mc::DiagnosticLevel::info,
+                bfplayer::diagnostics_log(
+                    bfplayer::DiagnosticLevel::info,
                     "track index=%u type=%d description=%s",
                     index,
                     type,
@@ -2001,8 +2001,8 @@ PlaybackOutcome run_player(
     app.source_display_aspect = source_video.display_aspect;
     const Kit_VideoFormatRequest video_request =
         make_video_format_request(source_video);
-    ps5mc::diagnostics_log(
-        ps5mc::DiagnosticLevel::info,
+    bfplayer::diagnostics_log(
+        bfplayer::DiagnosticLevel::info,
         "video-source codec=%s profile=%d pix_fmt=%s bit_depth=%d size=%dx%d sar=%d:%d dar=%.6f fps=%.3f bitrate=%lld demanding_software_decode=%d",
         source_video.codec,
         source_video.profile,
@@ -2016,8 +2016,8 @@ PlaybackOutcome run_player(
         source_video.frame_rate,
         static_cast<long long>(source_video.bit_rate),
         source_video.demanding_software_decode ? 1 : 0);
-    ps5mc::diagnostics_log(
-        ps5mc::DiagnosticLevel::info,
+    bfplayer::diagnostics_log(
+        bfplayer::DiagnosticLevel::info,
         "video-output-request source=%dx%d output=%dx%d downscale=%d",
         source_video.width,
         source_video.height,
@@ -2040,8 +2040,8 @@ PlaybackOutcome run_player(
         kWindowWidth,
         kWindowHeight);
     if (!app.player) {
-        ps5mc::diagnostics_log(
-            ps5mc::DiagnosticLevel::error,
+        bfplayer::diagnostics_log(
+            bfplayer::DiagnosticLevel::error,
             "player-create failed error=%s",
             Kit_GetError());
         show_open_error(Kit_GetError());
@@ -2049,8 +2049,8 @@ PlaybackOutcome run_player(
     }
     if (Kit_GetPlayerVideoStream(app.player) < 0 &&
         Kit_GetPlayerAudioStream(app.player) < 0) {
-        ps5mc::diagnostics_log(
-            ps5mc::DiagnosticLevel::error,
+        bfplayer::diagnostics_log(
+            bfplayer::DiagnosticLevel::error,
             "player-create failed reason=no-decodable-audio-video");
         return PlaybackOutcome::error;
     }
@@ -2060,15 +2060,15 @@ PlaybackOutcome run_player(
         return PlaybackOutcome::error;
     }
     if (!opening_osd_ready) {
-        ps5mc::diagnostics_log(
-            ps5mc::DiagnosticLevel::warning,
+        bfplayer::diagnostics_log(
+            bfplayer::DiagnosticLevel::warning,
             "osd-open failed error=%s",
             app.osd.error().c_str());
     }
 
     const bool source_persistence_allowed =
-        !ps5mc::uri_has_sensitive_components(path);
-    ps5mc::ResumeState saved_resume{};
+        !bfplayer::uri_has_sensitive_components(path);
+    bfplayer::ResumeState saved_resume{};
     double pending_resume_seconds = 0.0;
     if (app.settings.resume_playback &&
         database_available &&
@@ -2082,14 +2082,14 @@ PlaybackOutcome run_player(
             // Kitchensink ignores/rejects seeks while the player is stopped.
             // Apply this immediately after Kit_PlayerPlay() below.
             pending_resume_seconds = resume_seconds;
-            ps5mc::diagnostics_log(
-                ps5mc::DiagnosticLevel::info,
+            bfplayer::diagnostics_log(
+                bfplayer::DiagnosticLevel::info,
                 "resume-pending seconds=%.3f duration=%.3f",
                 resume_seconds,
                 duration);
         } else {
-            ps5mc::diagnostics_log(
-                ps5mc::DiagnosticLevel::info,
+            bfplayer::diagnostics_log(
+                bfplayer::DiagnosticLevel::info,
                 "resume-skipped saved_ms=%lld duration=%.3f completed=%d",
                 static_cast<long long>(saved_resume.position_ms),
                 duration,
@@ -2097,23 +2097,23 @@ PlaybackOutcome run_player(
         }
     } else if (app.settings.resume_playback && database_available &&
                source_persistence_allowed) {
-        ps5mc::diagnostics_log(
-            ps5mc::DiagnosticLevel::info,
+        bfplayer::diagnostics_log(
+            bfplayer::DiagnosticLevel::info,
             "resume-not-found");
     }
-    ps5mc::TrackPreferences saved_preferences{};
+    bfplayer::TrackPreferences saved_preferences{};
     if (database_available && source_persistence_allowed &&
         resume_database.load_track_preferences(path, saved_preferences)) {
         restore_track_preferences(
             app,
             saved_preferences,
             explicit_subtitle && explicit_subtitle[0]);
-        ps5mc::diagnostics_log(
-            ps5mc::DiagnosticLevel::info,
+        bfplayer::diagnostics_log(
+            bfplayer::DiagnosticLevel::info,
             "preferences-restored audio=%d subtitle=%d external=%s delay_ms=%lld",
             saved_preferences.audio_stream,
             saved_preferences.subtitle_stream,
-            ps5mc::redact_uri_secrets(saved_preferences.external_subtitle).c_str(),
+            bfplayer::redact_uri_secrets(saved_preferences.external_subtitle).c_str(),
             static_cast<long long>(app.subtitle_delay_ms));
     }
     if (explicit_subtitle && explicit_subtitle[0]) {
@@ -2129,13 +2129,13 @@ PlaybackOutcome run_player(
         &sample_aspect_numerator,
         &sample_aspect_denominator);
     const double initial_display_aspect =
-        ps5mc::display_aspect_from_sample_aspect(
+        bfplayer::display_aspect_from_sample_aspect(
             info.video_format.width,
             info.video_format.height,
             sample_aspect_numerator,
             sample_aspect_denominator);
-    ps5mc::diagnostics_log(
-        ps5mc::DiagnosticLevel::info,
+    bfplayer::diagnostics_log(
+        bfplayer::DiagnosticLevel::info,
         "playback-format video=%s threads=%d frame_threading=%u slice_threading=%u output=%dx%d format=%u audio=%s threads=%d %dHz/%dch duration_s=%.3f",
         info.video_codec.name,
         info.video_codec.threads,
@@ -2149,8 +2149,8 @@ PlaybackOutcome run_player(
         info.audio_format.sample_rate,
         info.audio_format.channels,
         Kit_GetPlayerDuration(app.player));
-    ps5mc::diagnostics_log(
-        ps5mc::DiagnosticLevel::info,
+    bfplayer::diagnostics_log(
+        bfplayer::DiagnosticLevel::info,
         "playback-aspect frame=%dx%d sar=%d:%d sar_status=%d dar=%.6f",
         info.video_format.width,
         info.video_format.height,
@@ -2162,8 +2162,8 @@ PlaybackOutcome run_player(
     Kit_PlayerPlay(app.player);
     if (pending_resume_seconds > 0.0) {
         if (Kit_PlayerSeek(app.player, pending_resume_seconds) == 0) {
-            ps5mc::diagnostics_log(
-                ps5mc::DiagnosticLevel::info,
+            bfplayer::diagnostics_log(
+                bfplayer::DiagnosticLevel::info,
                 "resume-applied seconds=%.3f actual=%.3f",
                 pending_resume_seconds,
                 Kit_GetPlayerPosition(app.player));
@@ -2174,8 +2174,8 @@ PlaybackOutcome run_player(
                     " seconds",
                 5000);
         } else {
-            ps5mc::diagnostics_log(
-                ps5mc::DiagnosticLevel::error,
+            bfplayer::diagnostics_log(
+                bfplayer::DiagnosticLevel::error,
                 "resume-seek failed seconds=%.3f error=%s",
                 pending_resume_seconds,
                 Kit_GetError());
@@ -2215,8 +2215,8 @@ PlaybackOutcome run_player(
                 if (got > 0) {
                     if (static_cast<std::size_t>(got) > available ||
                         got % static_cast<int>(sizeof(std::int16_t)) != 0) {
-                        ps5mc::diagnostics_log(
-                            ps5mc::DiagnosticLevel::error,
+                        bfplayer::diagnostics_log(
+                            bfplayer::DiagnosticLevel::error,
                             "audio-pull invalid-bytes got=%d available=%zu",
                             got,
                             available);
@@ -2253,7 +2253,7 @@ PlaybackOutcome run_player(
             } else {
                 ++video_empty_polls;
             }
-            const ps5mc::VideoLayout layout = player_video_layout(app);
+            const bfplayer::VideoLayout layout = player_video_layout(app);
             const SDL_Rect source{
                 layout.source.x,
                 layout.source.y,
@@ -2274,7 +2274,7 @@ PlaybackOutcome run_player(
             const double subtitle_clock =
                 Kit_GetPlayerPosition(app.player) -
                 static_cast<double>(app.subtitle_delay_ms) / 1000.0;
-            const int fragments = ps5mc_get_player_subtitle_texture_at(
+            const int fragments = bfplayer_get_player_subtitle_texture_at(
                 app.player,
                 app.subtitles,
                 subtitle_sources.data(),
@@ -2300,8 +2300,8 @@ PlaybackOutcome run_player(
                 std::fprintf(
                     stderr, "External subtitle render: %s\n",
                     app.external_subtitles.error().c_str());
-                ps5mc::diagnostics_log(
-                    ps5mc::DiagnosticLevel::error,
+                bfplayer::diagnostics_log(
+                    bfplayer::DiagnosticLevel::error,
                     "subtitle-render failed error=%s",
                     app.external_subtitles.error().c_str());
                 app.external_subtitles.close();
@@ -2345,8 +2345,8 @@ PlaybackOutcome run_player(
             const double video_update_rate = diagnostics_seconds > 0.0
                 ? static_cast<double>(video_updates) / diagnostics_seconds
                 : 0.0;
-            ps5mc::diagnostics_log(
-                ps5mc::DiagnosticLevel::info,
+            bfplayer::diagnostics_log(
+                bfplayer::DiagnosticLevel::info,
                 "playback-heartbeat path=%s position_s=%.3f duration_s=%.3f paused=%d state=%d video_updates=%llu video_update_fps=%.2f video_empty_polls=%llu video_frames=%u/%u video_packets=%u/%u audio_frames=%u/%u audio_packets=%u/%u audio_queued=%u external_subtitle=%d delay_ms=%lld scale=%s aspect=%s crop=%s",
                 app.current_media_path.c_str(),
                 Kit_GetPlayerPosition(app.player),
@@ -2367,16 +2367,16 @@ PlaybackOutcome run_player(
                 app.audio != 0 ? SDL_GetQueuedAudioSize(app.audio) : 0U,
                 app.external_subtitle_index,
                 static_cast<long long>(app.subtitle_delay_ms),
-                ps5mc::video_scale_mode_name(app.video_scale_mode),
-                ps5mc::video_aspect_mode_name(app.video_aspect_mode),
-                ps5mc::video_crop_mode_name(app.video_crop_mode));
+                bfplayer::video_scale_mode_name(app.video_scale_mode),
+                bfplayer::video_aspect_mode_name(app.video_aspect_mode),
+                bfplayer::video_crop_mode_name(app.video_crop_mode));
             video_updates = 0;
             video_empty_polls = 0;
             last_diagnostics = now;
         }
         if (database_available && source_persistence_allowed &&
             now - last_resume_save >= 10000) {
-            ps5mc::ResumeState current{};
+            bfplayer::ResumeState current{};
             current.position_ms = seconds_to_milliseconds(
                 Kit_GetPlayerPosition(app.player));
             current.duration_ms = seconds_to_milliseconds(
@@ -2385,16 +2385,16 @@ PlaybackOutcome run_player(
             current.completed = playback_completed(
                 current.position_ms, current.duration_ms);
             if (!resume_database.save_resume(path, current)) {
-                ps5mc::diagnostics_log(
-                    ps5mc::DiagnosticLevel::error,
+                bfplayer::diagnostics_log(
+                    bfplayer::DiagnosticLevel::error,
                     "resume-save failed error=%s",
                     resume_database.error().c_str());
             }
-            const ps5mc::TrackPreferences preferences = current_track_preferences(app);
-            if (!ps5mc::uri_has_sensitive_components(preferences.external_subtitle) &&
+            const bfplayer::TrackPreferences preferences = current_track_preferences(app);
+            if (!bfplayer::uri_has_sensitive_components(preferences.external_subtitle) &&
                 !resume_database.save_track_preferences(path, preferences)) {
-                ps5mc::diagnostics_log(
-                    ps5mc::DiagnosticLevel::error,
+                bfplayer::diagnostics_log(
+                    bfplayer::DiagnosticLevel::error,
                     "track-preference-save failed error=%s",
                     resume_database.error().c_str());
             }
@@ -2411,7 +2411,7 @@ PlaybackOutcome run_player(
                           Kit_GetPlayerState(app.player) == KIT_STOPPED;
     if (database_available) {
         if (source_persistence_allowed) {
-            ps5mc::ResumeState current{};
+            bfplayer::ResumeState current{};
             // Use the values captured before any cleanup/stop transition.
             // Some decoder backends reset their public clock when stopping.
             current.position_ms = seconds_to_milliseconds(final_position);
@@ -2420,17 +2420,17 @@ PlaybackOutcome run_player(
             current.completed = playback_completed(
                 current.position_ms, current.duration_ms);
             if (!resume_database.save_resume(path, current)) {
-                ps5mc::diagnostics_log(
-                    ps5mc::DiagnosticLevel::error,
+                bfplayer::diagnostics_log(
+                    bfplayer::DiagnosticLevel::error,
                     "final-resume-save failed error=%s",
                     resume_database.error().c_str());
             }
-            const ps5mc::TrackPreferences preferences = current_track_preferences(app);
-            if (!ps5mc::uri_has_sensitive_components(
+            const bfplayer::TrackPreferences preferences = current_track_preferences(app);
+            if (!bfplayer::uri_has_sensitive_components(
                     preferences.external_subtitle) &&
                 !resume_database.save_track_preferences(path, preferences)) {
-                ps5mc::diagnostics_log(
-                    ps5mc::DiagnosticLevel::error,
+                bfplayer::diagnostics_log(
+                    bfplayer::DiagnosticLevel::error,
                     "final-track-preference-save failed error=%s",
                     resume_database.error().c_str());
             }
@@ -2438,14 +2438,14 @@ PlaybackOutcome run_player(
         if (!resume_database.set_settings({
                 {"volume_percent", std::to_string(app.volume_percent)},
             })) {
-            ps5mc::diagnostics_log(
-                ps5mc::DiagnosticLevel::error,
+            bfplayer::diagnostics_log(
+                bfplayer::DiagnosticLevel::error,
                 "playback-setting-save failed error=%s",
                 resume_database.error().c_str());
         }
     }
-    ps5mc::diagnostics_log(
-        ps5mc::DiagnosticLevel::info,
+    bfplayer::diagnostics_log(
+        bfplayer::DiagnosticLevel::info,
         "playback-end path=%s outcome=%s position_s=%.3f duration_s=%.3f reached_end=%d",
         app.current_media_path.c_str(),
         finished ? "finished" : (app.playback_running ? "user-return" : "stopped"),
@@ -2457,8 +2457,8 @@ PlaybackOutcome run_player(
 
 void close_media(App& app) {
     if (!app.current_media_path.empty()) {
-        ps5mc::diagnostics_log(
-            ps5mc::DiagnosticLevel::info,
+        bfplayer::diagnostics_log(
+            bfplayer::DiagnosticLevel::info,
             "media-close path=%s",
             app.current_media_path.c_str());
     }
@@ -2489,16 +2489,16 @@ void close_media(App& app) {
 
 int run_library(
     App& app,
-    const std::vector<ps5mc::MediaSource>& initial_sources = {}) {
-    ps5mc::diagnostics_log(ps5mc::DiagnosticLevel::info, "library-start");
-    ps5mc::LibraryUi library;
+    const std::vector<bfplayer::MediaSource>& initial_sources = {}) {
+    bfplayer::diagnostics_log(bfplayer::DiagnosticLevel::info, "library-start");
+    bfplayer::LibraryUi library;
     if (!library.open(
             app.renderer,
             app.fallback_font,
             app.ui_logo,
             initial_sources)) {
-        ps5mc::diagnostics_log(
-            ps5mc::DiagnosticLevel::error,
+        bfplayer::diagnostics_log(
+            bfplayer::DiagnosticLevel::error,
             "library-open failed error=%s",
             library.error().c_str());
         return 1;
@@ -2515,10 +2515,10 @@ int run_library(
                 SDL_IsGameController(event.cdevice.which)) {
                 app.controller =
                     SDL_GameControllerOpen(event.cdevice.which);
-                ps5mc::diagnostics_log(
+                bfplayer::diagnostics_log(
                     app.controller
-                        ? ps5mc::DiagnosticLevel::info
-                        : ps5mc::DiagnosticLevel::warning,
+                        ? bfplayer::DiagnosticLevel::info
+                        : bfplayer::DiagnosticLevel::warning,
                     "library-controller added id=%d opened=%d error=%s",
                     event.cdevice.which,
                     app.controller ? 1 : 0,
@@ -2531,21 +2531,21 @@ int run_library(
                     event.cdevice.which) {
                 SDL_GameControllerClose(app.controller);
                 app.controller = nullptr;
-                ps5mc::diagnostics_log(
-                    ps5mc::DiagnosticLevel::info,
+                bfplayer::diagnostics_log(
+                    bfplayer::DiagnosticLevel::info,
                     "library-controller removed id=%d",
                     event.cdevice.which);
             }
-            const ps5mc::LibraryAction action = library.handle_event(event, selected_path);
-            if (action == ps5mc::LibraryAction::exit) {
+            const bfplayer::LibraryAction action = library.handle_event(event, selected_path);
+            if (action == bfplayer::LibraryAction::exit) {
                 app.running = false;
                 break;
             }
-            if (action == ps5mc::LibraryAction::play) {
+            if (action == bfplayer::LibraryAction::play) {
                 play_selected = true;
                 break;
             }
-            if (action == ps5mc::LibraryAction::play_queue) {
+            if (action == bfplayer::LibraryAction::play_queue) {
                 play_selected = true;
                 play_queue = true;
                 break;
@@ -2556,15 +2556,15 @@ int run_library(
         }
         if (play_selected) {
             std::vector<std::string> queue;
-            if (ps5mc::is_generic_playlist_path(selected_path)) {
-                ps5mc::PlaylistLoadResult playlist =
-                    ps5mc::load_generic_playlist(selected_path);
+            if (bfplayer::is_generic_playlist_path(selected_path)) {
+                bfplayer::PlaylistLoadResult playlist =
+                    bfplayer::load_generic_playlist(selected_path);
                 if (playlist.items.empty()) {
                     const std::string error = playlist.error.empty()
                         ? "Unsupported playlist"
                         : playlist.error;
-                    ps5mc::diagnostics_log(
-                        ps5mc::DiagnosticLevel::error,
+                    bfplayer::diagnostics_log(
+                        bfplayer::DiagnosticLevel::error,
                         "playlist-load failed path=%s error=%s",
                         selected_path.c_str(),
                         error.c_str());
@@ -2572,8 +2572,8 @@ int run_library(
                     continue;
                 }
                 if (playlist.truncated) {
-                    ps5mc::diagnostics_log(
-                        ps5mc::DiagnosticLevel::warning,
+                    bfplayer::diagnostics_log(
+                        bfplayer::DiagnosticLevel::warning,
                         "playlist-load truncated path=%s items=%zu",
                         selected_path.c_str(),
                         playlist.items.size());
@@ -2584,8 +2584,8 @@ int run_library(
                     ? library.playback_queue(selected_path)
                     : std::vector<std::string>{selected_path};
             }
-            ps5mc::diagnostics_log(
-                ps5mc::DiagnosticLevel::info,
+            bfplayer::diagnostics_log(
+                bfplayer::DiagnosticLevel::info,
                 "library-play-request queue_mode=%d items=%zu selected=%s",
                 play_queue ? 1 : 0,
                 queue.size(),
@@ -2603,8 +2603,8 @@ int run_library(
                     app.renderer,
                     app.fallback_font,
                     app.ui_logo)) {
-                ps5mc::diagnostics_log(
-                    ps5mc::DiagnosticLevel::error,
+                bfplayer::diagnostics_log(
+                    bfplayer::DiagnosticLevel::error,
                     "library-reopen failed error=%s",
                     library.error().c_str());
                 app.running = false;
@@ -2616,7 +2616,7 @@ int run_library(
         SDL_Delay(8);
     }
     library.close();
-    ps5mc::diagnostics_log(ps5mc::DiagnosticLevel::info, "library-end running=%d", app.running ? 1 : 0);
+    bfplayer::diagnostics_log(bfplayer::DiagnosticLevel::info, "library-end running=%d", app.running ? 1 : 0);
     return 0;
 }
 
@@ -2632,11 +2632,11 @@ void cleanup(App& app) {
 }
 
 void return_to_playstation_home() {
-    constexpr const char* kMediaCenterTitleId = "PSMC00001";
+    constexpr const char* kBFplayerTitleId = "PSMC00001";
     const int app_id = sceSystemServiceGetAppIdOfRunningBigApp();
     if (app_id <= 0) {
-        ps5mc::diagnostics_log(
-            ps5mc::DiagnosticLevel::error,
+        bfplayer::diagnostics_log(
+            bfplayer::DiagnosticLevel::error,
             "home-return failed reason=no-running-bigapp app_id=%d",
             app_id);
         return;
@@ -2645,31 +2645,31 @@ void return_to_playstation_home() {
     const int title_result =
         sceSystemServiceGetAppTitleId(app_id, title_id.data());
     if (title_result != 0) {
-        ps5mc::diagnostics_log(
-            ps5mc::DiagnosticLevel::error,
+        bfplayer::diagnostics_log(
+            bfplayer::DiagnosticLevel::error,
             "home-return failed reason=title-id app_id=%d result=0x%08x",
             app_id,
             static_cast<unsigned int>(title_result));
         return;
     }
-    if (std::strcmp(title_id.data(), kMediaCenterTitleId) != 0) {
-        ps5mc::diagnostics_log(
-            ps5mc::DiagnosticLevel::error,
+    if (std::strcmp(title_id.data(), kBFplayerTitleId) != 0) {
+        bfplayer::diagnostics_log(
+            bfplayer::DiagnosticLevel::error,
             "home-return skipped reason=unexpected-bigapp app_id=%d title_id=%s",
             app_id,
             title_id.data());
         return;
     }
-    ps5mc::diagnostics_log(
-        ps5mc::DiagnosticLevel::info,
+    bfplayer::diagnostics_log(
+        bfplayer::DiagnosticLevel::info,
         "home-return kill-bigapp app_id=%d title_id=%s",
         app_id,
         title_id.data());
     const int result =
         sceSystemServiceKillApp(app_id, -1, 0, 0);
     if (result != 0) {
-        ps5mc::diagnostics_log(
-            ps5mc::DiagnosticLevel::error,
+        bfplayer::diagnostics_log(
+            bfplayer::DiagnosticLevel::error,
             "home-return kill-bigapp failed app_id=%d result=0x%08x",
             app_id,
             static_cast<unsigned int>(result));
@@ -2690,14 +2690,14 @@ int main(int argc, char** argv) {
         return lock_result == PlayerLockResult::already_running ? 0 : 1;
     }
     migrate_legacy_library_database();
-    ps5mc::diagnostics_init(argc, argv);
-    ps5mc::diagnostics_install_ffmpeg();
+    bfplayer::diagnostics_init(argc, argv);
+    bfplayer::diagnostics_install_ffmpeg();
     SDL_LogSetOutputFunction(sdl_log_output, nullptr);
     log_installed_manifest(argc > 0 ? argv[0] : nullptr);
-    ps5mc::diagnostics_log(
-        ps5mc::DiagnosticLevel::info,
+    bfplayer::diagnostics_log(
+        bfplayer::DiagnosticLevel::info,
         "application-start build=%s player_lock=acquired",
-        PS5MC_VERSION);
+        BFPLAYER_VERSION);
     App app{};
     app.fallback_font = executable_asset_path(
         argc > 0 ? argv[0] : nullptr,
@@ -2707,27 +2707,27 @@ int main(int argc, char** argv) {
         "sce_sys/icon0.png");
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_GAMECONTROLLER) != 0) {
         log_sdl("SDL_Init");
-        ps5mc::diagnostics_shutdown();
+        bfplayer::diagnostics_shutdown();
         return 1;
     }
     Kit_SetHint(KIT_HINT_THREAD_COUNT, kVideoDecoderThreads);
     Kit_SetHint(KIT_HINT_VIDEO_BUFFER_PACKETS, kVideoPacketBufferCount);
     Kit_SetHint(KIT_HINT_VIDEO_BUFFER_FRAMES, kVideoFrameBufferCount);
     if (Kit_Init(KIT_INIT_NETWORK | KIT_INIT_ASS) != 0) {
-        ps5mc::diagnostics_log(
-            ps5mc::DiagnosticLevel::error,
+        bfplayer::diagnostics_log(
+            bfplayer::DiagnosticLevel::error,
             "kitchensink-init failed error=%s",
             Kit_GetError());
         SDL_Quit();
-        ps5mc::diagnostics_shutdown();
+        bfplayer::diagnostics_shutdown();
         return 1;
     }
     Kit_Version kitchensink_version{};
     Kit_GetVersion(&kitchensink_version);
     SDL_version sdl_version{};
     SDL_GetVersion(&sdl_version);
-    ps5mc::diagnostics_log(
-        ps5mc::DiagnosticLevel::info,
+    bfplayer::diagnostics_log(
+        bfplayer::DiagnosticLevel::info,
         "libraries sdl=%u.%u.%u kitchensink=%u.%u.%u cpu_count=%d decoder_threads=%d video_packet_buffers=%d video_frame_buffers=%d",
         sdl_version.major,
         sdl_version.minor,
@@ -2750,14 +2750,14 @@ int main(int argc, char** argv) {
     if (!app.window) {
         log_sdl("SDL_CreateWindow");
         cleanup(app);
-        ps5mc::diagnostics_shutdown();
+        bfplayer::diagnostics_shutdown();
         return 1;
     }
     app.renderer = create_renderer(app.window);
     if (!app.renderer) {
         log_sdl("SDL_CreateRenderer");
         cleanup(app);
-        ps5mc::diagnostics_shutdown();
+        bfplayer::diagnostics_shutdown();
         return 1;
     }
     for (int i = 0; i < SDL_NumJoysticks(); ++i) {
@@ -2770,7 +2770,7 @@ int main(int argc, char** argv) {
     int result = 0;
     const char* media_path = nullptr;
     const char* subtitle_path = nullptr;
-    std::vector<ps5mc::MediaSource> initial_sources;
+    std::vector<bfplayer::MediaSource> initial_sources;
     for (int index = 1; index < argc; ++index) {
         if (std::strcmp(argv[index], "--subtitle") == 0 && index + 1 < argc) {
             subtitle_path = argv[++index];
@@ -2778,14 +2778,14 @@ int main(int argc, char** argv) {
                    index + 1 < argc) {
             const char* source_path = argv[++index];
             initial_sources.push_back({
-                ps5mc::MediaSourceKind::movie_file,
+                bfplayer::MediaSourceKind::movie_file,
                 source_path ? source_path : "",
                 {}});
         } else if (std::strcmp(argv[index], "--add-tv-folder") == 0 &&
                    index + 1 < argc) {
             const char* source_path = argv[++index];
             initial_sources.push_back({
-                ps5mc::MediaSourceKind::tv_folder,
+                bfplayer::MediaSourceKind::tv_folder,
                 source_path ? source_path : "",
                 {}});
         } else if (!media_path && argv[index][0]) {
@@ -2799,11 +2799,11 @@ int main(int argc, char** argv) {
     }
 
     cleanup(app);
-    ps5mc::diagnostics_log(
-        ps5mc::DiagnosticLevel::info,
+    bfplayer::diagnostics_log(
+        bfplayer::DiagnosticLevel::info,
         "application-end result=%d",
         result);
     return_to_playstation_home();
-    ps5mc::diagnostics_shutdown();
+    bfplayer::diagnostics_shutdown();
     return result;
 }

@@ -5,7 +5,7 @@
 #include <string>
 #include <vector>
 
-namespace ps5mc {
+namespace bfplayer {
 
 struct VideoThumbnail {
     int width = 0;
@@ -23,4 +23,4 @@ bool extract_video_thumbnail(
     std::string& error,
     const std::atomic<bool>* cancelled = nullptr);
 
-} // namespace ps5mc
+} // namespace bfplayer

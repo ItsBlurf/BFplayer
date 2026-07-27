@@ -1,6 +1,6 @@
-#include "ps5mc/media_probe.hpp"
+#include "bfplayer/media_probe.hpp"
 
-#include "ps5mc/safe_read_file.hpp"
+#include "bfplayer/safe_read_file.hpp"
 
 extern "C" {
 #include <libavcodec/codec_id.h>
@@ -18,7 +18,7 @@ extern "C" {
 #include <limits>
 #include <string>
 
-namespace ps5mc {
+namespace bfplayer {
 namespace {
 
 using Clock = std::chrono::steady_clock;
@@ -227,4 +227,4 @@ bool probe_media_metadata(
     return true;
 }
 
-} // namespace ps5mc
+} // namespace bfplayer

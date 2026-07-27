@@ -20,9 +20,9 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define PS5MC_MAX_BITMAP_DIMENSION 16384
-#define PS5MC_MAX_BITMAP_RECTS 4096U
-#define PS5MC_MAX_CACHED_RECTS 1024U
+#define BFPLAYER_MAX_BITMAP_DIMENSION 16384
+#define BFPLAYER_MAX_BITMAP_RECTS 4096U
+#define BFPLAYER_MAX_CACHED_RECTS 1024U
 
 typedef struct Kit_Decoder Kit_Decoder;
 typedef struct Kit_PacketBuffer Kit_PacketBuffer;
@@ -164,11 +164,11 @@ static bool rect_is_safe(const AVSubtitleRect *rect) {
     if(!rect || rect->type != SUBTITLE_BITMAP)
         return false;
     if(rect->w <= 0 || rect->h <= 0 ||
-       rect->w > PS5MC_MAX_BITMAP_DIMENSION ||
-       rect->h > PS5MC_MAX_BITMAP_DIMENSION ||
+       rect->w > BFPLAYER_MAX_BITMAP_DIMENSION ||
+       rect->h > BFPLAYER_MAX_BITMAP_DIMENSION ||
        rect->x < 0 || rect->y < 0 ||
-       rect->x > PS5MC_MAX_BITMAP_DIMENSION - rect->w ||
-       rect->y > PS5MC_MAX_BITMAP_DIMENSION - rect->h ||
+       rect->x > BFPLAYER_MAX_BITMAP_DIMENSION - rect->w ||
+       rect->y > BFPLAYER_MAX_BITMAP_DIMENSION - rect->h ||
        rect->linesize[0] < rect->w ||
        !rect->data[0] || !rect->data[1] ||
        rect->nb_colors <= 0 || rect->nb_colors > 256) {
@@ -262,7 +262,7 @@ static void render_image(
             image_renderer->buffer, image_renderer->in_packet);
         return;
     }
-    if(subtitle->num_rects > PS5MC_MAX_BITMAP_RECTS) {
+    if(subtitle->num_rects > BFPLAYER_MAX_BITMAP_RECTS) {
         Kit_SetError("Embedded bitmap subtitle has too many rectangles");
         return;
     }
@@ -467,7 +467,7 @@ Kit_SubtitleRenderer *Kit_CreateImageSubtitleRenderer(
         Kit_SetError("Unable to allocate embedded subtitle renderer");
         return NULL;
     }
-    image_renderer->cached_capacity = PS5MC_MAX_CACHED_RECTS;
+    image_renderer->cached_capacity = BFPLAYER_MAX_CACHED_RECTS;
     image_renderer->cached_items =
         calloc(image_renderer->cached_capacity, sizeof(unsigned char *));
     image_renderer->cached_surfaces =

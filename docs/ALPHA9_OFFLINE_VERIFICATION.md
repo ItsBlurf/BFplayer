@@ -67,7 +67,7 @@ BFplayer/bfplayer.elf
 BFplayer/sce_sys/icon0.png
 BFplayer/THIRD_PARTY_NOTICES.md
 INSTALL-DIRECT-TILE.md
-ps5mc-tile-installer.elf
+bfplayer-tile-installer.elf
 ```
 
 `homebrew.js` remains in the application folder as a compatibility fallback.
@@ -78,7 +78,7 @@ The dashboard tile does not execute it.
 | Artifact | Bytes | SHA-256 |
 | --- | ---: | --- |
 | `bfplayer.elf` | 56,268,760 | `33ee6b9bd8de1eed709d056a9c817aef0dd6940a289de84620ce58c7d0897b20` |
-| `ps5mc-tile-installer.elf` | 1,519,880 | `6e9ca682c57c9589c780743d3536f144006fb8b4d293babcac39e9073dcdb318` |
+| `bfplayer-tile-installer.elf` | 1,519,880 | `6e9ca682c57c9589c780743d3536f144006fb8b4d293babcac39e9073dcdb318` |
 | `BFplayer-direct-tile.zip` | 25,896,387 | `f6421e2a05ff2733f88eecd40b194f3d7aa741982dcc681a77ddde4d7ae79bd9` |
 | `assets/icon0.png` | 1,412,512 | `8c46982a3ee41c21ffce3b71fa52dcd50e61475a619bae58accee06603f5449b` |
 | `docs/ui-preview.png` | 48,416 | `317ffd30bcbde70ac5d4ecbf4df0a57e32f9545926ee6b9fae2f7dfc11243cad` |

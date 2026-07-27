@@ -4,7 +4,7 @@
 #include <string>
 #include <vector>
 
-namespace ps5mc {
+namespace bfplayer {
 
 struct PlaylistLoadResult {
     bool recognized = false;
@@ -24,4 +24,4 @@ struct PlaylistLoadResult {
     std::size_t max_bytes = 1024U * 1024U,
     std::size_t max_items = 2048U);
 
-} // namespace ps5mc
+} // namespace bfplayer

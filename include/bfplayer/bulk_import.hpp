@@ -1,13 +1,13 @@
 #pragma once
 
-#include "ps5mc/media_sources.hpp"
+#include "bfplayer/media_sources.hpp"
 
 #include <cstddef>
 #include <functional>
 #include <string>
 #include <vector>
 
-namespace ps5mc {
+namespace bfplayer {
 
 struct BulkImportResult {
     std::vector<MediaSource> sources;
@@ -50,4 +50,4 @@ using BulkImportProgressVisitor =
     const BulkImportCancelCheck& cancelled = {},
     const BulkImportProgressVisitor& progress = {});
 
-} // namespace ps5mc
+} // namespace bfplayer

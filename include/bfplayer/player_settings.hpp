@@ -3,7 +3,7 @@
 #include <string>
 #include <string_view>
 
-namespace ps5mc {
+namespace bfplayer {
 
 inline constexpr std::string_view kSettingVolumePercent =
     "volume_percent";
@@ -41,4 +41,4 @@ struct PlayerSettings {
 [[nodiscard]] int next_long_seek_seconds(int current, int direction) noexcept;
 [[nodiscard]] int next_osd_duration_ms(int current, int direction) noexcept;
 
-} // namespace ps5mc
+} // namespace bfplayer

@@ -1,6 +1,6 @@
 #pragma once
 
-#include "ps5mc/media.hpp"
+#include "bfplayer/media.hpp"
 
 #include <cstddef>
 #include <cstdint>
@@ -11,7 +11,7 @@
 struct sqlite3;
 struct sqlite3_stmt;
 
-namespace ps5mc {
+namespace bfplayer {
 
 struct ResumeState {
     std::int64_t position_ms = 0;
@@ -89,4 +89,4 @@ private:
     std::string error_;
 };
 
-} // namespace ps5mc
+} // namespace bfplayer

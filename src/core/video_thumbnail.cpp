@@ -1,6 +1,6 @@
-#include "ps5mc/video_thumbnail.hpp"
+#include "bfplayer/video_thumbnail.hpp"
 
-#include "ps5mc/safe_read_file.hpp"
+#include "bfplayer/safe_read_file.hpp"
 
 extern "C" {
 #include <libavcodec/avcodec.h>
@@ -22,7 +22,7 @@ extern "C" {
 #include <string>
 #include <utility>
 
-namespace ps5mc {
+namespace bfplayer {
 namespace {
 
 using Clock = std::chrono::steady_clock;
@@ -472,4 +472,4 @@ bool extract_video_thumbnail(
     return true;
 }
 
-} // namespace ps5mc
+} // namespace bfplayer

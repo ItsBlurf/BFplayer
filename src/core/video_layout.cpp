@@ -1,10 +1,10 @@
-#include "ps5mc/video_layout.hpp"
+#include "bfplayer/video_layout.hpp"
 
 #include <algorithm>
 #include <array>
 #include <cmath>
 
-namespace ps5mc {
+namespace bfplayer {
 namespace {
 
 template <typename Mode, std::size_t Size>
@@ -362,4 +362,4 @@ VideoLayout compute_video_layout(
     return layout;
 }
 
-} // namespace ps5mc
+} // namespace bfplayer

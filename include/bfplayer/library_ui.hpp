@@ -1,6 +1,6 @@
 #pragma once
 
-#include "ps5mc/media_sources.hpp"
+#include "bfplayer/media_sources.hpp"
 
 #include <SDL_events.h>
 
@@ -11,7 +11,7 @@
 
 struct SDL_Renderer;
 
-namespace ps5mc {
+namespace bfplayer {
 
 enum class LibraryAction {
     none,
@@ -47,4 +47,4 @@ private:
     std::unique_ptr<Impl> impl_;
 };
 
-} // namespace ps5mc
+} // namespace bfplayer

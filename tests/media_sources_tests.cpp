@@ -1,4 +1,4 @@
-#include "ps5mc/media_sources.hpp"
+#include "bfplayer/media_sources.hpp"
 
 #include <cstdlib>
 #include <iostream>
@@ -16,7 +16,7 @@ void check(bool condition, const char* message) {
 } // namespace
 
 int main() {
-    using namespace ps5mc;
+    using namespace bfplayer;
     const std::vector<MediaSource> sources{
         {MediaSourceKind::tv_folder, "/mnt/usb0/One Pace/", "One Pace"},
         {MediaSourceKind::movie_file, "/mnt/usb0/Movie.mkv", "Movie"},

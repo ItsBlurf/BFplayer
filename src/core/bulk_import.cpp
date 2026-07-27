@@ -1,7 +1,7 @@
-#include "ps5mc/bulk_import.hpp"
+#include "bfplayer/bulk_import.hpp"
 
-#include "ps5mc/library_scanner.hpp"
-#include "ps5mc/library_view.hpp"
+#include "bfplayer/library_scanner.hpp"
+#include "bfplayer/library_view.hpp"
 
 #include <algorithm>
 #include <cerrno>
@@ -20,7 +20,7 @@
 #include <unistd.h>
 #endif
 
-namespace ps5mc {
+namespace bfplayer {
 namespace {
 
 constexpr std::size_t kMaximumDirectEntries = 10000;
@@ -375,4 +375,4 @@ BulkImportResult discover_bulk_media_sources(
     return output;
 }
 
-} // namespace ps5mc
+} // namespace bfplayer

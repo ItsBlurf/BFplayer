@@ -1,10 +1,10 @@
-#include "ps5mc/source_uri.hpp"
+#include "bfplayer/source_uri.hpp"
 
 #include <array>
 #include <algorithm>
 #include <cctype>
 
-namespace ps5mc {
+namespace bfplayer {
 namespace {
 
 std::size_t scheme_separator(std::string_view value) noexcept {
@@ -99,4 +99,4 @@ std::string redact_uri_secrets(std::string_view value) {
     return redacted;
 }
 
-} // namespace ps5mc
+} // namespace bfplayer

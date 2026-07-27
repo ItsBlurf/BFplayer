@@ -1,11 +1,11 @@
-#include "ps5mc/player_settings.hpp"
+#include "bfplayer/player_settings.hpp"
 
 #include <algorithm>
 #include <array>
 #include <cerrno>
 #include <cstdlib>
 
-namespace ps5mc {
+namespace bfplayer {
 namespace {
 
 template <std::size_t Size>
@@ -105,4 +105,4 @@ int next_osd_duration_ms(int current, int direction) noexcept {
         direction);
 }
 
-} // namespace ps5mc
+} // namespace bfplayer

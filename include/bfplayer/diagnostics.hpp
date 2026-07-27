@@ -3,7 +3,7 @@
 #include <cstddef>
 #include <cstdarg>
 
-namespace ps5mc {
+namespace bfplayer {
 
 enum class DiagnosticLevel {
     debug,
@@ -27,4 +27,4 @@ void diagnostics_shutdown() noexcept;
 
 [[nodiscard]] const char* diagnostics_log_path() noexcept;
 
-} // namespace ps5mc
+} // namespace bfplayer

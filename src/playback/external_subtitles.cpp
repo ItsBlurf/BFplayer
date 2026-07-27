@@ -1,8 +1,8 @@
-#include "ps5mc/external_subtitles.hpp"
+#include "bfplayer/external_subtitles.hpp"
 
-#include "ps5mc/diagnostics.hpp"
-#include "ps5mc/safe_read_file.hpp"
-#include "ps5mc/source_uri.hpp"
+#include "bfplayer/diagnostics.hpp"
+#include "bfplayer/safe_read_file.hpp"
+#include "bfplayer/source_uri.hpp"
 
 #include <SDL.h>
 
@@ -31,7 +31,7 @@ extern "C" {
 #include <utility>
 #include <vector>
 
-namespace ps5mc {
+namespace bfplayer {
 namespace {
 
 using Clock = std::chrono::steady_clock;
@@ -912,4 +912,4 @@ const std::string& ExternalSubtitles::error() const noexcept {
     return impl_->last_error;
 }
 
-} // namespace ps5mc
+} // namespace bfplayer
