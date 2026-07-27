@@ -696,14 +696,18 @@ bool create_video_textures(App& app) {
     return true;
 }
 
-double player_display_aspect(App& app) {
+double player_display_aspect(
+    App& app,
+    int frame_width,
+    int frame_height) {
     int numerator = 0;
     int denominator = 0;
-    if (Kit_GetPlayerAspectRatio(app.player, &numerator, &denominator) == 0 &&
-        numerator > 0 && denominator > 0) {
-        return static_cast<double>(numerator) / static_cast<double>(denominator);
-    }
-    return 0.0;
+    Kit_GetPlayerAspectRatio(app.player, &numerator, &denominator);
+    return ps5mc::display_aspect_from_sample_aspect(
+        frame_width,
+        frame_height,
+        numerator,
+        denominator);
 }
 
 ps5mc::VideoLayout player_video_layout(App& app) {
@@ -712,7 +716,10 @@ ps5mc::VideoLayout player_video_layout(App& app) {
     return ps5mc::compute_video_layout(
         info.video_format.width,
         info.video_format.height,
-        player_display_aspect(app),
+        player_display_aspect(
+            app,
+            info.video_format.width,
+            info.video_format.height),
         kWindowWidth,
         kWindowHeight,
         app.video_scale_mode,
@@ -1886,6 +1893,18 @@ PlaybackOutcome run_player(
 
     Kit_PlayerInfo info{};
     Kit_GetPlayerInfo(app.player, &info);
+    int sample_aspect_numerator = 0;
+    int sample_aspect_denominator = 0;
+    const int sample_aspect_status = Kit_GetPlayerAspectRatio(
+        app.player,
+        &sample_aspect_numerator,
+        &sample_aspect_denominator);
+    const double initial_display_aspect =
+        ps5mc::display_aspect_from_sample_aspect(
+            info.video_format.width,
+            info.video_format.height,
+            sample_aspect_numerator,
+            sample_aspect_denominator);
     ps5mc::diagnostics_log(
         ps5mc::DiagnosticLevel::info,
         "playback-format video=%s threads=%d output=%dx%d format=%u audio=%s threads=%d %dHz/%dch duration_s=%.3f",
@@ -1899,6 +1918,15 @@ PlaybackOutcome run_player(
         info.audio_format.sample_rate,
         info.audio_format.channels,
         Kit_GetPlayerDuration(app.player));
+    ps5mc::diagnostics_log(
+        ps5mc::DiagnosticLevel::info,
+        "playback-aspect frame=%dx%d sar=%d:%d sar_status=%d dar=%.6f",
+        info.video_format.width,
+        info.video_format.height,
+        sample_aspect_numerator,
+        sample_aspect_denominator,
+        sample_aspect_status,
+        initial_display_aspect);
 
     Kit_PlayerPlay(app.player);
     if (pending_resume_seconds > 0.0) {

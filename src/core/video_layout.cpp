@@ -248,6 +248,28 @@ VideoCropMode step_video_crop_mode(
     return step_ratio_mode(mode, direction, kCropModes);
 }
 
+double display_aspect_from_sample_aspect(
+    int frame_width,
+    int frame_height,
+    int sample_aspect_numerator,
+    int sample_aspect_denominator) noexcept {
+    if (frame_width <= 0 || frame_height <= 0) {
+        return 0.0;
+    }
+    const double frame_aspect =
+        static_cast<double>(frame_width) / static_cast<double>(frame_height);
+    if (sample_aspect_numerator <= 0 || sample_aspect_denominator <= 0) {
+        return frame_aspect;
+    }
+    const double display_aspect =
+        frame_aspect *
+        static_cast<double>(sample_aspect_numerator) /
+        static_cast<double>(sample_aspect_denominator);
+    return std::isfinite(display_aspect) && display_aspect > 0.0
+        ? display_aspect
+        : frame_aspect;
+}
+
 VideoLayout compute_video_layout(
     int frame_width,
     int frame_height,

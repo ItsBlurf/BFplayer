@@ -12,7 +12,7 @@ enum class VideoScaleMode {
 };
 
 // VLC Desktop exposes display-aspect overrides separately from crop ratios.
-// "Default" keeps the stream's display aspect (including pixel-aspect data).
+// "Original" keeps the stream's display aspect (including pixel-aspect data).
 enum class VideoAspectMode {
     default_ratio = 0,
     ratio_1_1,
@@ -78,6 +78,15 @@ struct VideoLayout {
 [[nodiscard]] VideoCropMode step_video_crop_mode(
     VideoCropMode mode,
     int direction) noexcept;
+
+// Converts decoded frame dimensions plus a sample/pixel aspect ratio (SAR)
+// into the final display aspect ratio (DAR). Invalid SAR falls back to square
+// pixels, so a 1920x1080 frame remains 16:9 rather than becoming 1:1.
+[[nodiscard]] double display_aspect_from_sample_aspect(
+    int frame_width,
+    int frame_height,
+    int sample_aspect_numerator,
+    int sample_aspect_denominator) noexcept;
 
 // display_aspect is the decoded stream's display aspect ratio after pixel-aspect
 // correction. A non-positive value falls back to frame_width/frame_height.

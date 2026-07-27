@@ -185,6 +185,9 @@ assert(player.includes(
     'Kit_SetHint(KIT_HINT_VIDEO_BUFFER_FRAMES, kVideoFrameBufferCount)'));
 assert(player.includes('video_update_fps=%.2f'));
 assert(player.includes('demanding_software_decode'));
+assert(player.includes('display_aspect_from_sample_aspect('));
+assert(player.includes(
+    '"playback-aspect frame=%dx%d sar=%d:%d sar_status=%d dar=%.6f"'));
 assert(player.includes('sceSystemServiceGetAppIdOfRunningBigApp'));
 assert(player.includes('sceSystemServiceGetAppTitleId'));
 assert(player.includes('sceSystemServiceKillApp(app_id, -1, 0, 0)'));

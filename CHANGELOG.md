@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.1.0-alpha.23 - original aspect calculation fix
+
+- Correctly convert SDL_kitchensink's sample/pixel aspect ratio into the final
+  display aspect ratio using `frame width / frame height * SAR`.
+- Keep ordinary square-pixel videos at their encoded frame ratio instead of
+  incorrectly treating `SAR 1:1` as a square display.
+- Add regression coverage for 16:9 square-pixel, 4:3 fallback, and anamorphic
+  720x480-to-16:9 video.
+
 ## 0.1.0-alpha.22 - WebM decode diagnostics test build
 
 - Explicitly use eight FFmpeg decoder threads instead of depending on runtime

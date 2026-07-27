@@ -34,6 +34,25 @@ int main() {
     using ps5mc::VideoAspectMode;
     using ps5mc::VideoCropMode;
 
+    const double square_pixel_16_9 =
+        ps5mc::display_aspect_from_sample_aspect(1920, 1080, 1, 1);
+    check(
+        std::abs(square_pixel_16_9 - 16.0 / 9.0) < 0.000001,
+        "square-pixel SAR preserves the frame display ratio");
+    const double anamorphic_16_9 =
+        ps5mc::display_aspect_from_sample_aspect(720, 480, 32, 27);
+    check(
+        std::abs(anamorphic_16_9 - 16.0 / 9.0) < 0.000001,
+        "anamorphic SAR converts to the correct display ratio");
+    const double missing_sar =
+        ps5mc::display_aspect_from_sample_aspect(640, 480, 0, 0);
+    check(
+        std::abs(missing_sar - 4.0 / 3.0) < 0.000001,
+        "missing SAR falls back to square pixels");
+    check(
+        ps5mc::display_aspect_from_sample_aspect(0, 1080, 1, 1) == 0.0,
+        "invalid frame dimensions do not produce a display ratio");
+
     const auto fit_4_3 = ps5mc::compute_video_layout(
         1440, 1080, 4.0 / 3.0, 1920, 1080, VideoScaleMode::fit);
     check(!fit_4_3.crop_source, "fit does not crop");
