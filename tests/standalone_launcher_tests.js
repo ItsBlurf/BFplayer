@@ -222,6 +222,15 @@ assert(player.includes(
 assert(player.includes('video_update_fps=%.2f'));
 assert(player.includes('demanding_software_decode'));
 assert(player.includes('display_aspect_from_sample_aspect('));
+assert(player.includes('av_guess_sample_aspect_ratio('));
+assert(player.includes(
+    'app.video_scale_mode = ps5mc::VideoScaleMode::fit'));
+assert(player.includes(
+    'app.video_crop_mode = ps5mc::VideoCropMode::default_crop'));
+assert(!player.includes(
+    'resume_database.get_setting("video_scale_mode"'));
+assert(!player.includes(
+    'resume_database.get_setting("video_crop_mode"'));
 assert(player.includes(
     '"playback-aspect frame=%dx%d sar=%d:%d sar_status=%d dar=%.6f"'));
 assert(player.includes('sceSystemServiceGetAppIdOfRunningBigApp'));

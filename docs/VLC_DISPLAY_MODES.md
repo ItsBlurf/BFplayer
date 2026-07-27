@@ -55,7 +55,8 @@ Default
 
 The implementation honors the stream's display aspect ratio, including
 anamorphic pixel-aspect correction. Crop is applied first, aspect override
-second, and resize mode last. All three settings persist globally in SQLite.
+second, and resize mode last. All three selections are playback-local; a newly
+opened video resets to Best fit, Original aspect, and No crop.
 
 ## Controller controls
 

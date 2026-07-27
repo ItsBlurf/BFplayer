@@ -96,6 +96,7 @@ struct App {
     int volume_percent = 100;
     int previous_volume_percent = 100;
     std::int64_t subtitle_delay_ms = 0;
+    double source_display_aspect = 0.0;
     ps5mc::PlayerSettings settings;
     PlaybackOverlay playback_overlay = PlaybackOverlay::none;
     int playback_overlay_selected = 0;
@@ -124,6 +125,9 @@ struct VideoSourceInfo {
     int width = 0;
     int height = 0;
     int bit_depth = 0;
+    int sample_aspect_numerator = 0;
+    int sample_aspect_denominator = 0;
+    double display_aspect = 0.0;
     double frame_rate = 0.0;
     std::int64_t bit_rate = 0;
     bool demanding_software_decode = false;
@@ -156,6 +160,19 @@ VideoSourceInfo inspect_video_source(
     info.profile = parameters->profile;
     info.width = parameters->width;
     info.height = parameters->height;
+    const AVRational guessed_aspect = av_guess_sample_aspect_ratio(
+        const_cast<AVFormatContext*>(format),
+        const_cast<AVStream*>(stream),
+        nullptr);
+    if (guessed_aspect.num > 0 && guessed_aspect.den > 0) {
+        info.sample_aspect_numerator = guessed_aspect.num;
+        info.sample_aspect_denominator = guessed_aspect.den;
+    }
+    info.display_aspect = ps5mc::display_aspect_from_sample_aspect(
+        info.width,
+        info.height,
+        info.sample_aspect_numerator,
+        info.sample_aspect_denominator);
     info.bit_rate = parameters->bit_rate > 0
         ? parameters->bit_rate
         : format->bit_rate;
@@ -844,6 +861,13 @@ double player_display_aspect(
     App& app,
     int frame_width,
     int frame_height) {
+    // Prefer the demuxer's source dimensions and sample-aspect metadata. The
+    // decoder output may be proportionally downscaled for performance, and
+    // its frame metadata is not guaranteed to survive that conversion.
+    if (app.source_display_aspect > 0.0 &&
+        std::isfinite(app.source_display_aspect)) {
+        return app.source_display_aspect;
+    }
     int numerator = 0;
     int denominator = 0;
     Kit_GetPlayerAspectRatio(app.player, &numerator, &denominator);
@@ -917,6 +941,11 @@ bool set_stream(App& app, Kit_StreamType type, int index) {
             app.osd.show("Track switch failed; previous track restored", 4000);
         }
         return false;
+    }
+    if (type == KIT_STREAMTYPE_VIDEO) {
+        app.source_display_aspect = inspect_video_source(
+            static_cast<const AVFormatContext*>(app.source->format_ctx),
+            index).display_aspect;
     }
 
     ps5mc::diagnostics_log(
@@ -1309,10 +1338,6 @@ bool persist_active_player_settings(App& app) {
              settings.resume_playback ? "1" : "0"},
             {std::string(ps5mc::kSettingAutoSubtitles),
              settings.auto_subtitles ? "1" : "0"},
-            {"video_scale_mode",
-             ps5mc::video_scale_mode_key(app.video_scale_mode)},
-            {"video_crop_mode",
-             ps5mc::video_crop_mode_key(app.video_crop_mode)},
         });
     if (!saved) {
         ps5mc::diagnostics_log(
@@ -1788,9 +1813,12 @@ PlaybackOutcome run_player(
     App& app,
     const char* path,
     const char* explicit_subtitle = nullptr) {
-    // Aspect overrides are playback-local. Each newly opened video starts by
-    // honoring its reported display aspect, with frame dimensions as fallback.
+    // Geometry overrides are playback-local. A saved stretch/fill/crop mode
+    // must never make a newly opened video's "Original" ratio look distorted.
+    app.video_scale_mode = ps5mc::VideoScaleMode::fit;
     app.video_aspect_mode = ps5mc::VideoAspectMode::default_ratio;
+    app.video_crop_mode = ps5mc::VideoCropMode::default_crop;
+    app.source_display_aspect = 0.0;
     app.current_media_path = path ? ps5mc::redact_uri_secrets(path) : std::string{};
     ps5mc::diagnostics_log(
         ps5mc::DiagnosticLevel::info,
@@ -1909,17 +1937,21 @@ PlaybackOutcome run_player(
     const VideoSourceInfo source_video = inspect_video_source(
         static_cast<const AVFormatContext*>(app.source->format_ctx),
         initial_video);
+    app.source_display_aspect = source_video.display_aspect;
     const Kit_VideoFormatRequest video_request =
         make_video_format_request(source_video);
     ps5mc::diagnostics_log(
         ps5mc::DiagnosticLevel::info,
-        "video-source codec=%s profile=%d pix_fmt=%s bit_depth=%d size=%dx%d fps=%.3f bitrate=%lld demanding_software_decode=%d",
+        "video-source codec=%s profile=%d pix_fmt=%s bit_depth=%d size=%dx%d sar=%d:%d dar=%.6f fps=%.3f bitrate=%lld demanding_software_decode=%d",
         source_video.codec,
         source_video.profile,
         source_video.pixel_format,
         source_video.bit_depth,
         source_video.width,
         source_video.height,
+        source_video.sample_aspect_numerator,
+        source_video.sample_aspect_denominator,
+        source_video.display_aspect,
         source_video.frame_rate,
         static_cast<long long>(source_video.bit_rate),
         source_video.demanding_software_decode ? 1 : 0);
@@ -2007,24 +2039,6 @@ PlaybackOutcome run_player(
         ps5mc::diagnostics_log(
             ps5mc::DiagnosticLevel::info,
             "resume-not-found");
-    }
-    std::string saved_video_scale;
-    if (database_available &&
-        resume_database.get_setting("video_scale_mode", saved_video_scale)) {
-        const std::optional<ps5mc::VideoScaleMode> parsed =
-            ps5mc::parse_video_scale_mode(saved_video_scale);
-        if (parsed.has_value()) {
-            app.video_scale_mode = *parsed;
-        }
-    }
-    std::string saved_video_crop;
-    if (database_available &&
-        resume_database.get_setting("video_crop_mode", saved_video_crop)) {
-        const std::optional<ps5mc::VideoCropMode> parsed =
-            ps5mc::parse_video_crop_mode(saved_video_crop);
-        if (parsed.has_value()) {
-            app.video_crop_mode = *parsed;
-        }
     }
     ps5mc::TrackPreferences saved_preferences{};
     if (database_available && source_persistence_allowed &&
@@ -2362,10 +2376,6 @@ PlaybackOutcome run_player(
         }
         if (!resume_database.set_settings({
                 {"volume_percent", std::to_string(app.volume_percent)},
-                {"video_scale_mode",
-                 ps5mc::video_scale_mode_key(app.video_scale_mode)},
-                {"video_crop_mode",
-                 ps5mc::video_crop_mode_key(app.video_crop_mode)},
             })) {
             ps5mc::diagnostics_log(
                 ps5mc::DiagnosticLevel::error,

@@ -28,10 +28,11 @@ files. The player uses the 16 logical processors reported by SDL, enlarged
 video buffers, and proportional 1080p output conversion for oversized sources,
 but these formats can still exceed the PS5 homebrew software-decoding budget.
 
-Every video starts in **Original** aspect mode. The player uses the display
-ratio reported by the stream, including anamorphic pixel-ratio metadata, and
-falls back to the decoded frame dimensions when that metadata is unavailable.
-Manual aspect overrides apply only to the current video.
+Every video starts in **Best fit**, **Original** aspect, and **No crop** mode.
+The player uses the source stream's display ratio, including anamorphic
+pixel-ratio metadata, and falls back to the decoded frame dimensions when that
+metadata is unavailable. Manual scale, aspect, and crop overrides apply only
+to the current video.
 
 ## Install
 

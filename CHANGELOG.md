@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.0-alpha.26 - source aspect and safe playback geometry
+
+- Read display-aspect metadata from the original demuxed stream so proportional
+  decoder downscaling cannot alter the intended picture shape.
+- Start every video in `Best fit`, `Original`, and `No crop`; manual geometry
+  changes are playback-local and cannot distort the next video.
+- Add source SAR and DAR values to diagnostics for hardware verification.
+
 ## 0.1.0-alpha.25 - VP9 threading and YUV color fix
 
 - Enable frame and slice threading together when FFmpeg reports that a video

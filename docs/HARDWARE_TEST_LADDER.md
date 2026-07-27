@@ -21,7 +21,8 @@ or a fatal filesystem error.
 3. Pause/resume and seek repeatedly; verify A/V sync and clean return.
    Use R2+Triangle for every display-aspect override, L2+Triangle for every
    crop ratio, and L2+R2+Triangle for Best fit, Fill screen, and Fullscreen
-   stretch on 4:3, anamorphic, 16:9, and ultrawide samples; verify persistence.
+   stretch on 4:3, anamorphic, 16:9, and ultrawide samples; then open another
+   video and verify it resets to Best fit, Original aspect, and No crop.
 4. Play 1080p H.264 in MKV with two AAC audio tracks; switch tracks ten times.
 5. Switch among embedded SRT, ASS, and Off.
 6. Test embedded PGS separately and watch memory use.

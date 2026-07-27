@@ -34,7 +34,7 @@ The final command results and artifact hashes are recorded in
 | Audio/video switching | Live decoder replacement plus transactional SDL resource rebuild/rollback | Target analyzer and clean PS5 build; runtime behavior intentionally unobserved |
 | Embedded subtitles | Kitchensink text path plus project-owned hardened bitmap renderer override | Replacement symbol selected once in final ELF; unsafe upstream archive member not selected |
 | External subtitles | Independent bounded FFmpeg demux/decode, libass text, validated bitmap conversion | Deadline/packet/event/byte/cache bounds audited; target analyzer/build |
-| Playback state | Resume, completion, volume, mute, chapters, scale, track/language and subtitle-delay persistence | SQLite round-trip/migration tests; integer/finite-value audit |
+| Playback state | Resume, completion, volume, mute, chapters, playback-local geometry, track/language and subtitle-delay persistence | SQLite round-trip/migration tests; integer/finite-value audit |
 | Library | Bounded no-follow scanner, metadata cache, search, categories, sort, Favorites, queue | Host scanner/view/database/artwork tests; descriptor-relative PS5 branch compiles and analyzes |
 | Playlists | Bounded M3U/PLS/XSPF parser, relative paths, URL filtering | Host parsing/limit/error tests and target build |
 | Packaging | Single HBL BigApp ELF and websrv folder | Exact seven-file inventory, manifest per-file hashes, ZIP/source hash comparison |

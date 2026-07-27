@@ -44,6 +44,18 @@ int main() {
     check(
         std::abs(anamorphic_16_9 - 16.0 / 9.0) < 0.000001,
         "anamorphic SAR converts to the correct display ratio");
+    const auto downscaled_ps5_clip = ps5mc::compute_video_layout(
+        1920,
+        1080,
+        ps5mc::display_aspect_from_sample_aspect(3840, 2160, 1, 1),
+        1920,
+        1080,
+        VideoScaleMode::fit,
+        VideoAspectMode::default_ratio,
+        VideoCropMode::default_crop);
+    check(
+        rect_is(downscaled_ps5_clip.destination, 0, 0, 1920, 1080),
+        "downscaled 4K PS5 clip preserves its original 16:9 display ratio");
     const double missing_sar =
         ps5mc::display_aspect_from_sample_aspect(640, 480, 0, 0);
     check(

@@ -49,6 +49,7 @@ Expected controller test:
 5. Touchpad enters delay mode; D-pad changes external subtitle timing.
 6. The library displays the exact-title PNG in the selected-title artwork panel.
 7. R2+Triangle cycles exact display-aspect overrides, L2+Triangle cycles exact
-   crop ratios, and L2+R2+Triangle cycles resize modes; all three persist.
+   crop ratios, and L2+R2+Triangle cycles resize modes; all three reset when
+   opening another video.
 8. Options returns to the library without restarting or killing another
    process.

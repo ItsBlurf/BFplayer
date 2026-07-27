@@ -50,7 +50,8 @@ controls, settings, diagnostics, and current build inputs.
 - A library mutation cannot race an active or pending import. Failed
   persistence/removal paths restart the last-good scan instead of leaving the
   scanner stopped.
-- All playback setting fields are now persisted in one SQLite transaction.
+- Persistent playback preferences are saved in one SQLite transaction. Scale,
+  aspect, and crop remain playback-local so the next title opens undistorted.
   Failed saves roll back on disk and restore the prior live values.
 - Mute is reachable from the PS5 playback Options menu. Controller hot-plug
   clears held-button state and updates the controller handle used by playback.

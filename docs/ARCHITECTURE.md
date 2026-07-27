@@ -61,7 +61,9 @@ aspect ratio. Pure, host-tested layout math independently applies the complete
 VLC Desktop aspect-override list, the complete VLC Desktop crop-ratio list,
 and Best fit, Fill screen/center-crop, or Fullscreen stretch. The trigger axes
 modify Triangle while preserving Triangle alone for video-track switching.
-Scale, aspect, and crop selections are stored as global SQLite settings.
+Scale, aspect, and crop selections are playback-local. Every newly opened
+video starts in Best fit, Original aspect, and No crop so a previous manual
+override cannot distort unrelated media.
 
 The selected audio and subtitle stream indices are persisted per media path.
 Language tags are stored alongside the indices so a remux can recover the same

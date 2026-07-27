@@ -90,7 +90,7 @@ AudioOut are not implemented.
 ## Video presentation
 
 Playback preserves the stream display aspect ratio by default. Holding R2 and
-pressing Triangle cycles and persists three renderer modes: Fit
+pressing Triangle cycles three playback-local renderer modes: Fit
 (letterbox/pillarbox), Fill (center crop without distortion), and Stretch.
 Anamorphic pixel-aspect correction from Kitchensink is included in Fit/Fill
 math. These are renderer controls; playback-rate changes, pan/scan positioning,
