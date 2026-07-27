@@ -77,7 +77,10 @@ $analysis = @(
 $patterns = @(
     'start version=',
     'request route=/launch',
+    'player image ready',
+    'launch stage=',
     'launch result=',
+    'mode=mmap-installed',
     'launch coalesced',
     'BFPLAYER_BOOT_STAGE',
     'boot-stage stage=',

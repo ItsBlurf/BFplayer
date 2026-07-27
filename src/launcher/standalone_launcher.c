@@ -22,6 +22,7 @@
 #include <string.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
+#include <sys/mman.h>
 #include <sys/time.h>
 #include <sys/wait.h>
 #include <time.h>
@@ -74,6 +75,8 @@ INCASSET(bfplayer_tile_param_json, "assets/tile/param.json");
 INCASSET(bfplayer_icon_png, "assets/icon0.png");
 INCASSET(bfplayer_font_ttf, "assets/fonts/NotoSans-Regular.ttf");
 INCASSET(bfplayer_font_license, "assets/fonts/OFL.txt");
+
+static int bfplayer_player_image_verified = 0;
 
 typedef int (*app_install_title_dir_fn)(
     const char* title_id,
@@ -287,6 +290,192 @@ static int update_file_atomic(
     return result;
 }
 
+static uint32_t read_little_endian_u32(const uint8_t* bytes) {
+    return (uint32_t)bytes[0] |
+           ((uint32_t)bytes[1] << 8U) |
+           ((uint32_t)bytes[2] << 16U) |
+           ((uint32_t)bytes[3] << 24U);
+}
+
+static int installed_player_matches(void) {
+    uint8_t buffer[64U * 1024U];
+    uint8_t header[5] = {0};
+    struct stat path_info;
+    struct stat opened_info;
+    uint32_t checksum = (uint32_t)crc32(0L, Z_NULL, 0);
+    size_t total = 0;
+    int descriptor;
+
+    if (lstat(BFPLAYER_PLAYER_PATH, &path_info) != 0) {
+        return errno == ENOENT ? 0 : -errno;
+    }
+    if (!S_ISREG(path_info.st_mode) || S_ISLNK(path_info.st_mode) ||
+        (uintmax_t)path_info.st_size !=
+            (uintmax_t)BFPLAYER_PLAYER_UNCOMPRESSED_SIZE) {
+        return 0;
+    }
+    if (bfplayer_player_image_verified) {
+        return 1;
+    }
+    descriptor = open(BFPLAYER_PLAYER_PATH, O_RDONLY | O_NOFOLLOW);
+    if (descriptor < 0) {
+        return -errno;
+    }
+    if (fstat(descriptor, &opened_info) != 0 ||
+        !S_ISREG(opened_info.st_mode) ||
+        opened_info.st_dev != path_info.st_dev ||
+        opened_info.st_ino != path_info.st_ino ||
+        opened_info.st_size != path_info.st_size) {
+        const int error = errno ? errno : ESTALE;
+        close(descriptor);
+        return -error;
+    }
+    for (;;) {
+        const ssize_t got = read(descriptor, buffer, sizeof(buffer));
+        if (got < 0) {
+            const int error = errno;
+            close(descriptor);
+            return -error;
+        }
+        if (got == 0) {
+            break;
+        }
+        if (total < sizeof(header)) {
+            const size_t header_bytes =
+                (size_t)got < sizeof(header) - total
+                    ? (size_t)got
+                    : sizeof(header) - total;
+            memcpy(header + total, buffer, header_bytes);
+        }
+        checksum = (uint32_t)crc32(
+            checksum,
+            buffer,
+            (uInt)got);
+        total += (size_t)got;
+    }
+    if (close(descriptor) != 0) {
+        return -errno;
+    }
+    if (total != (size_t)BFPLAYER_PLAYER_UNCOMPRESSED_SIZE ||
+        header[0] != 0x7f || header[1] != 'E' ||
+        header[2] != 'L' || header[3] != 'F' || header[4] != 2U) {
+        return 0;
+    }
+    const uint32_t expected_checksum = read_little_endian_u32(
+        bfplayer_embedded_player_gzip +
+        bfplayer_embedded_player_gzip_size - 8U);
+    return checksum == expected_checksum ? 1 : 0;
+}
+
+static int install_player_image(int* changed) {
+    uint8_t output[64U * 1024U];
+    char temporary[512];
+    z_stream stream;
+    int descriptor = -1;
+    int inflate_result = Z_OK;
+    int matches;
+    int result = 0;
+    const int was_verified = bfplayer_player_image_verified;
+
+    matches = installed_player_matches();
+    if (matches < 0) {
+        return matches;
+    }
+    if (matches > 0) {
+        (void)chmod(BFPLAYER_PLAYER_PATH, 0755);
+        if (changed) {
+            *changed = 0;
+        }
+        bfplayer_player_image_verified = 1;
+        launcher_log(
+            "player image ready source=%s bytes=%lu",
+            was_verified ? "cached-validation" : "crc32-validation",
+            (unsigned long)BFPLAYER_PLAYER_UNCOMPRESSED_SIZE);
+        return 0;
+    }
+    if (snprintf(
+            temporary,
+            sizeof(temporary),
+            "%s.tmp.%ld",
+            BFPLAYER_PLAYER_PATH,
+            (long)getpid()) >= (int)sizeof(temporary)) {
+        return -EOVERFLOW;
+    }
+    descriptor = open(
+        temporary,
+        O_WRONLY | O_CREAT | O_TRUNC,
+        0755);
+    if (descriptor < 0) {
+        return -errno;
+    }
+    memset(&stream, 0, sizeof(stream));
+    stream.next_in = (Bytef*)bfplayer_embedded_player_gzip;
+    stream.avail_in = (uInt)bfplayer_embedded_player_gzip_size;
+    inflate_result = inflateInit2(&stream, 15 + 16);
+    if (inflate_result != Z_OK) {
+        result = -EIO;
+        goto cleanup;
+    }
+    do {
+        size_t offset = 0;
+        stream.next_out = output;
+        stream.avail_out = (uInt)sizeof(output);
+        inflate_result = inflate(&stream, Z_NO_FLUSH);
+        if (inflate_result != Z_OK && inflate_result != Z_STREAM_END) {
+            result = -EIO;
+            break;
+        }
+        const size_t produced = sizeof(output) - stream.avail_out;
+        while (offset < produced) {
+            const ssize_t written = write(
+                descriptor,
+                output + offset,
+                produced - offset);
+            if (written <= 0) {
+                result = -(written == 0 ? ENOSPC : errno);
+                break;
+            }
+            offset += (size_t)written;
+        }
+        if (result != 0) {
+            break;
+        }
+    } while (inflate_result != Z_STREAM_END);
+    (void)inflateEnd(&stream);
+    if (result == 0 &&
+        (inflate_result != Z_STREAM_END ||
+         stream.total_in != (uLong)bfplayer_embedded_player_gzip_size ||
+         stream.total_out != (uLong)BFPLAYER_PLAYER_UNCOMPRESSED_SIZE)) {
+        result = -EIO;
+    }
+    if (result == 0 && fsync(descriptor) != 0) {
+        result = -errno;
+    }
+
+cleanup:
+    if (descriptor >= 0 && close(descriptor) != 0 && result == 0) {
+        result = -errno;
+    }
+    if (result != 0) {
+        (void)unlink(temporary);
+        return result;
+    }
+    if (rename(temporary, BFPLAYER_PLAYER_PATH) != 0) {
+        result = -errno;
+        (void)unlink(temporary);
+        return result;
+    }
+    (void)chmod(BFPLAYER_PLAYER_PATH, 0755);
+    bfplayer_player_image_verified = 1;
+    if (changed) {
+        *changed = 1;
+    }
+    launcher_log(
+        "player image ready source=stream-install bytes=%lu",
+        (unsigned long)BFPLAYER_PLAYER_UNCOMPRESSED_SIZE);
+    return 0;
+}
+
 uint8_t* fs_readfile(const char* path, size_t* size) {
     struct stat info;
     uint8_t* bytes = NULL;
@@ -339,7 +528,7 @@ static int install_runtime_assets(void) {
         "{\n"
         "  \"name\": \"BFplayer\",\n"
         "  \"version\": \"%s\",\n"
-        "  \"launch\": \"embedded-standalone\",\n"
+        "  \"launch\": \"standalone-mmap\",\n"
         "  \"loopback\": \"%s:%d\",\n"
         "  \"websrv\": false\n"
         "}\n",
@@ -361,6 +550,10 @@ static int install_runtime_assets(void) {
         (result = mkdir_if_needed(BFPLAYER_RUNTIME_DIR "/sce_sys")) != 0) {
         return result;
     }
+    if ((result = install_player_image(&changed)) != 0) {
+        return result;
+    }
+    changed_files += changed;
     if ((result = update_file_atomic(
             BFPLAYER_FONT_DIR "/NotoSans-Regular.ttf",
             bfplayer_font_ttf,
@@ -771,19 +964,19 @@ static void send_response(
     }
 }
 
-static int launch_embedded_player(void) {
+static int launch_installed_player(void) {
     static struct timespec last_successful_launch = {0, 0};
     static pid_t active_player_pid = -1;
     char* argv[] = {NULL};
     char* envp[] = {NULL};
-    uint8_t* player = NULL;
-    z_stream stream;
-    int inflate_result;
     int stdio_descriptor = open(
         BFPLAYER_PLAYER_LOG_PATH,
         O_WRONLY | O_CREAT | O_APPEND,
         0600);
     pid_t player_pid;
+    uint8_t* mapped_player = MAP_FAILED;
+    struct stat player_info;
+    int player_descriptor = -1;
     struct timespec now = {0, 0};
 
     (void)clock_gettime(CLOCK_MONOTONIC, &now);
@@ -836,57 +1029,78 @@ static int launch_embedded_player(void) {
         }
         return -1;
     }
-    memset(&stream, 0, sizeof(stream));
-    player = malloc((size_t)BFPLAYER_PLAYER_UNCOMPRESSED_SIZE);
-    if (!player) {
+    launcher_log("launch stage=runtime-ready");
+    player_descriptor = open(
+        BFPLAYER_PLAYER_PATH,
+        O_RDONLY | O_NOFOLLOW);
+    if (player_descriptor < 0 ||
+        fstat(player_descriptor, &player_info) != 0 ||
+        !S_ISREG(player_info.st_mode) ||
+        (uintmax_t)player_info.st_size !=
+            (uintmax_t)BFPLAYER_PLAYER_UNCOMPRESSED_SIZE) {
+        const int player_error = errno ? errno : EINVAL;
         launcher_log(
-            "player decompress allocation failed bytes=%lu",
+            "player map validation failed errno=%d bytes=%lu",
+            player_error,
             (unsigned long)BFPLAYER_PLAYER_UNCOMPRESSED_SIZE);
+        if (player_descriptor >= 0) {
+            close(player_descriptor);
+        }
         if (stdio_descriptor >= 0) {
             close(stdio_descriptor);
         }
         return -1;
     }
-    stream.next_in = (Bytef*)bfplayer_embedded_player_gzip;
-    stream.avail_in = (uInt)bfplayer_embedded_player_gzip_size;
-    stream.next_out = player;
-    stream.avail_out = (uInt)BFPLAYER_PLAYER_UNCOMPRESSED_SIZE;
-    inflate_result = inflateInit2(&stream, 15 + 16);
-    if (inflate_result == Z_OK) {
-        inflate_result = inflate(&stream, Z_FINISH);
-        (void)inflateEnd(&stream);
-    }
-    if (inflate_result != Z_STREAM_END ||
-        stream.total_out != (uLong)BFPLAYER_PLAYER_UNCOMPRESSED_SIZE ||
-        stream.total_in != (uLong)bfplayer_embedded_player_gzip_size ||
-        player[0] != 0x7f || player[1] != 'E' ||
-        player[2] != 'L' || player[3] != 'F' || player[4] != 2U) {
+    mapped_player = mmap(
+        NULL,
+        (size_t)BFPLAYER_PLAYER_UNCOMPRESSED_SIZE,
+        PROT_READ,
+        MAP_PRIVATE,
+        player_descriptor,
+        0);
+    close(player_descriptor);
+    player_descriptor = -1;
+    if (mapped_player == MAP_FAILED ||
+        mapped_player[0] != 0x7f || mapped_player[1] != 'E' ||
+        mapped_player[2] != 'L' || mapped_player[3] != 'F' ||
+        mapped_player[4] != 2U) {
+        const int map_error = errno ? errno : ENOEXEC;
         launcher_log(
-            "player decompress failed zlib=%d in=%lu/%lu out=%lu/%lu",
-            inflate_result,
-            (unsigned long)stream.total_in,
-            bfplayer_embedded_player_gzip_size,
-            (unsigned long)stream.total_out,
+            "player map failed errno=%d bytes=%lu",
+            map_error,
             (unsigned long)BFPLAYER_PLAYER_UNCOMPRESSED_SIZE);
-        free(player);
+        if (mapped_player != MAP_FAILED) {
+            (void)munmap(
+                mapped_player,
+                (size_t)BFPLAYER_PLAYER_UNCOMPRESSED_SIZE);
+        }
         if (stdio_descriptor >= 0) {
             close(stdio_descriptor);
         }
         return -1;
     }
+    launcher_log(
+        "launch stage=map-ready bytes=%lu",
+        (unsigned long)BFPLAYER_PLAYER_UNCOMPRESSED_SIZE);
+    launcher_log("launch stage=hbldr-begin");
     player_pid = hbldr_launch_buffer(
         BFPLAYER_RUNTIME_DIR,
         BFPLAYER_PLAYER_PATH,
         stdio_descriptor,
         argv,
         envp,
-        player);
-    free(player);
+        mapped_player);
+    launcher_log(
+        "launch stage=hbldr-return player_pid=%ld",
+        (long)player_pid);
+    (void)munmap(
+        mapped_player,
+        (size_t)BFPLAYER_PLAYER_UNCOMPRESSED_SIZE);
     if (stdio_descriptor >= 0) {
         close(stdio_descriptor);
     }
     launcher_log(
-        "launch result=%s player_pid=%ld compressed_bytes=%lu player_bytes=%lu",
+        "launch result=%s player_pid=%ld mode=mmap-installed compressed_bytes=%lu player_bytes=%lu",
         player_pid > 0 ? "started" : "failed",
         (long)player_pid,
         bfplayer_embedded_player_gzip_size,
@@ -964,7 +1178,7 @@ static void serve_forever(int listener) {
             send_response(connection, 200, "text/html", launch_page);
             close(connection);
             launcher_log("request route=/launch");
-            (void)launch_embedded_player();
+            (void)launch_installed_player();
         } else if (bfplayer_request_is_shutdown(request)) {
             send_response(connection, 200, "text/plain", "Shutting down\n");
             close(connection);

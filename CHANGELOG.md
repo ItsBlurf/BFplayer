@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.1.0-alpha.30 - low-memory standalone launch
+
+- Stream the embedded compressed player to an atomically replaced runtime file
+  with a fixed 64 KiB buffer instead of allocating the full decompressed image.
+- Verify an existing runtime player by regular-file identity, size, ELF header,
+  and gzip CRC32 before trusting it after reinjection.
+- Launch the verified runtime image through a read-only private file mapping,
+  removing the former 36 MB launch-time heap allocation and decompression pass.
+- Retain singleton ownership and player locking around clean reinjection, and
+  add diagnostics identifying cached, CRC-verified, streamed, and mapped launch
+  paths.
+
 ## 0.1.0-alpha.29 - startup panic diagnostics
 
 - Added durable startup-stage markers before diagnostics initialization and

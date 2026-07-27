@@ -91,6 +91,18 @@ assert(launcher.includes('hbldr_launch_buffer'));
 assert(launcher.includes('build/ps5/bfplayer.elf.gz'));
 assert(launcher.includes('inflateInit2'));
 assert(launcher.includes('BFPLAYER_PLAYER_UNCOMPRESSED_SIZE'));
+assert(launcher.includes('install_player_image'));
+assert(launcher.includes('installed_player_matches'));
+assert(launcher.includes('source=stream-install'));
+assert(launcher.includes('"crc32-validation"'));
+assert(launcher.includes('mode=mmap-installed'));
+assert(launcher.includes('launch stage=runtime-ready'));
+assert(launcher.includes('launch stage=map-ready'));
+assert(launcher.includes('launch stage=hbldr-begin'));
+assert(launcher.includes('launch stage=hbldr-return'));
+assert(launcher.includes('O_RDONLY | O_NOFOLLOW'));
+assert(launcher.includes('MAP_PRIVATE'));
+assert(launcher.includes('munmap'));
 assert(launcher.includes('assets/fonts/NotoSans-Regular.ttf'));
 assert(launcher.includes('assets/tile/param.json'));
 assert(launcher.includes('assets/icon0.png'));
@@ -120,6 +132,12 @@ assert(launcher.includes('history.back()'));
 assert(!launcher.includes('microhttpd'));
 assert(!launcher.includes('#include "websrv'));
 assert(!launcher.includes('8080'));
+const playerLaunch = launcher.slice(
+    launcher.indexOf('static int launch_installed_player(void)'),
+    launcher.indexOf('static void serve_forever'));
+assert(playerLaunch.includes('mmap('));
+assert(!playerLaunch.includes('malloc('));
+assert(!playerLaunch.includes('inflate('));
 const launcherMain = launcher.slice(launcher.indexOf('int main(void)'));
 assert(
     launcherMain.indexOf('acquire_instance_lock()') <

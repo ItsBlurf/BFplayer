@@ -40,6 +40,9 @@ for (const marker of [
   "boot-stage stage=",
   "BFPLAYER_FATAL_SIGNAL",
   "playback-heartbeat ",
+  "player image ready",
+  "launch stage=",
+  "mode=mmap-installed",
 ]) {
   assert(collector.includes(`'${marker}'`), `collector omits ${marker}`);
 }

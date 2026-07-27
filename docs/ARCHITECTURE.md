@@ -148,11 +148,12 @@ The supported release is one injectable payload:
 bfplayer-standalone.elf
 ```
 
-At startup it writes only the small font, icon, and runtime manifest required
-by the embedded player, repairs `/system_ex/app/PSMC00001`, and registers
-`/user/app/PSMC00001/sce_sys`. It also removes the obsolete `PSMR00001`
-registration created by alpha.11/alpha.12. The
-player is launched from its compressed embedded bytes, so no separate player
-ELF transfer or HBL installation is required. AppInst and kernel-system imports
-belong to the outer resident launcher; the embedded player ELF retains its
-narrower import boundary. See `docs/STANDALONE_LAUNCHER.md`.
+At startup it streams the compressed embedded player into a CRC-verified,
+atomically replaced `/data/homebrew/BFplayer/bfplayer.elf`, writes the small
+font, icon, and runtime manifest, repairs `/system_ex/app/PSMC00001`, and
+registers `/user/app/PSMC00001/sce_sys`. It also removes the obsolete
+`PSMR00001` registration created by alpha.11/alpha.12. Tile launch maps the
+verified runtime image read-only rather than allocating a second decompressed
+copy. No separate player transfer or HBL installation is required. AppInst and
+kernel-system imports belong to the outer resident launcher; the player ELF
+retains its narrower import boundary. See `docs/STANDALONE_LAUNCHER.md`.
