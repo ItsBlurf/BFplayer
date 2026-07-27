@@ -88,6 +88,11 @@ if(BUILD_TESTING)
             COMMAND "${BFPLAYER_NODE_EXECUTABLE}"
                     "${CMAKE_CURRENT_SOURCE_DIR}/tests/naming_tests.js"
         )
+        add_test(
+            NAME startup_diagnostics_tests
+            COMMAND "${BFPLAYER_NODE_EXECUTABLE}"
+                    "${CMAKE_CURRENT_SOURCE_DIR}/tests/startup_diagnostics_tests.js"
+        )
     endif()
 
     set(BFPLAYER_SQLITE_AMALGAMATION

@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.1.0-alpha.29 - startup panic diagnostics
+
+- Added durable startup-stage markers before diagnostics initialization and
+  around SDL, SDL_kitchensink, window, renderer, and controller setup, allowing
+  a launch-time crash or kernel panic to be narrowed to the last completed
+  initialization boundary.
+- Extended the log collector to produce `diagnostic-summary.txt` with marker
+  counts, the last matching record, and bounded tails for every retrieved log.
+- Added structural regression coverage for startup-stage ordering and collector
+  coverage.
+
 ## 0.1.0-alpha.28 - complete internal BFplayer identity
 
 - Renamed the remaining internal namespace, public header tree, build symbols,

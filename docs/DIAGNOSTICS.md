@@ -18,6 +18,9 @@ final crash marker directly to the log descriptor when possible.
 
 The log includes:
 
+- ordered `BFPLAYER_BOOT_STAGE`/`boot-stage` markers spanning process entry,
+  singleton locking, legacy migration, diagnostics, SDL, SDL_kitchensink,
+  window, renderer, controller, and main-loop entry;
 - UTC timestamps, severity, process ID, working directory, system identity,
   arguments, and the installed build-manifest.json;
 - SDL and SDL_kitchensink versions plus SDL internal warnings/errors;
@@ -42,9 +45,10 @@ server on port 2121. From the project directory, use the collection helper:
 
     .\collect-logs.ps1 -ConsoleHost '<PS5_IP>'
 
-It creates a timestamped diagnostics/session-* folder containing the available logs,
-the matching local build-manifest.json, and collection.txt with byte counts and
-SHA-256 hashes. If the FTP client
+It creates a timestamped diagnostics/session-* folder containing the available
+logs, the matching local build-manifest.json, collection.txt with byte counts
+and SHA-256 hashes, and diagnostic-summary.txt with important marker counts,
+last matches, and bounded log tails. If the FTP client
 cannot address the absolute path, use the PS5 file browser or shell service to
 copy the same two files to a reachable staging directory, then download them.
 Also send the exact media/subtitle filenames, the button sequence immediately

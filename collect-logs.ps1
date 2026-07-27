@@ -41,6 +41,7 @@ $summary = @(
     "host=$ConsoleHost",
     "port=$FtpPort"
 )
+$downloaded = @()
 
 foreach ($file in $files) {
     $local = Join-Path $OutputDirectory $file.Name
@@ -56,6 +57,7 @@ foreach ($file in $files) {
     $item = Get-Item -LiteralPath $local
     $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $local).Hash.ToLowerInvariant()
     $summary += "file=$($file.Name) bytes=$($item.Length) sha256=$hash"
+    $downloaded += $local
     Write-Host "Downloaded $($file.Name) ($($item.Length) bytes)"
 }
 
@@ -67,4 +69,40 @@ if (Test-Path -LiteralPath $manifest) {
     Copy-Item -LiteralPath $manifest -Destination (Join-Path $OutputDirectory 'build-manifest.json') -Force
     Write-Host 'Copied matching local build-manifest.json'
 }
+
+$analysis = @(
+    "generated_utc=$([DateTime]::UtcNow.ToString('o'))",
+    "downloaded_logs=$($downloaded.Count)"
+)
+$patterns = @(
+    'start version=',
+    'request route=/launch',
+    'launch result=',
+    'launch coalesced',
+    'BFPLAYER_BOOT_STAGE',
+    'boot-stage stage=',
+    'application-start build=',
+    'video-source ',
+    'playback-format ',
+    'playback-heartbeat ',
+    'BFPLAYER_FATAL_SIGNAL',
+    'application-end '
+)
+foreach ($local in $downloaded) {
+    $analysis += ''
+    $analysis += "file=$([IO.Path]::GetFileName($local))"
+    foreach ($pattern in $patterns) {
+        $matches = @(Select-String -LiteralPath $local -SimpleMatch $pattern)
+        $analysis += "marker=$pattern count=$($matches.Count)"
+        if ($matches.Count -gt 0) {
+            $analysis += "last=$($matches[-1].Line)"
+        }
+    }
+    $analysis += 'tail-begin'
+    $analysis += @(Get-Content -LiteralPath $local -Tail 40)
+    $analysis += 'tail-end'
+}
+[IO.File]::WriteAllLines(
+    (Join-Path $OutputDirectory 'diagnostic-summary.txt'),
+    $analysis)
 Write-Host "Diagnostics saved to $OutputDirectory"

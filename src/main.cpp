@@ -125,6 +125,24 @@ enum class PlayerLockResult {
     error,
 };
 
+void boot_stage_stderr(const char* stage) noexcept {
+    std::fprintf(
+        stderr,
+        "BFPLAYER_BOOT_STAGE stage=%s pid=%ld\n",
+        stage ? stage : "<unknown>",
+        static_cast<long>(getpid()));
+    std::fflush(stderr);
+}
+
+void boot_stage(const char* stage) noexcept {
+    boot_stage_stderr(stage);
+    bfplayer::diagnostics_log(
+        bfplayer::DiagnosticLevel::info,
+        "boot-stage stage=%s pid=%ld",
+        stage ? stage : "<unknown>",
+        static_cast<long>(getpid()));
+}
+
 class PlayerInstanceLock {
 public:
     PlayerInstanceLock() = default;
@@ -2679,7 +2697,9 @@ void return_to_playstation_home() {
 } // namespace
 
 int main(int argc, char** argv) {
+    boot_stage_stderr("process-entry");
     PlayerInstanceLock player_instance_lock;
+    boot_stage_stderr("player-lock-acquire-begin");
     const PlayerLockResult lock_result = player_instance_lock.acquire();
     if (lock_result != PlayerLockResult::acquired) {
         std::fprintf(
@@ -2689,8 +2709,12 @@ int main(int argc, char** argv) {
                 : "BFplayer launch stopped: unable to acquire player lock\n");
         return lock_result == PlayerLockResult::already_running ? 0 : 1;
     }
+    boot_stage_stderr("player-lock-acquired");
+    boot_stage_stderr("legacy-migration-begin");
     migrate_legacy_library_database();
+    boot_stage_stderr("legacy-migration-complete");
     bfplayer::diagnostics_init(argc, argv);
+    boot_stage("diagnostics-ready");
     bfplayer::diagnostics_install_ffmpeg();
     SDL_LogSetOutputFunction(sdl_log_output, nullptr);
     log_installed_manifest(argc > 0 ? argv[0] : nullptr);
@@ -2705,14 +2729,17 @@ int main(int argc, char** argv) {
     app.ui_logo = executable_asset_path(
         argc > 0 ? argv[0] : nullptr,
         "sce_sys/icon0.png");
+    boot_stage("sdl-init-begin");
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_GAMECONTROLLER) != 0) {
         log_sdl("SDL_Init");
         bfplayer::diagnostics_shutdown();
         return 1;
     }
+    boot_stage("sdl-init-complete");
     Kit_SetHint(KIT_HINT_THREAD_COUNT, kVideoDecoderThreads);
     Kit_SetHint(KIT_HINT_VIDEO_BUFFER_PACKETS, kVideoPacketBufferCount);
     Kit_SetHint(KIT_HINT_VIDEO_BUFFER_FRAMES, kVideoFrameBufferCount);
+    boot_stage("kitchensink-init-begin");
     if (Kit_Init(KIT_INIT_NETWORK | KIT_INIT_ASS) != 0) {
         bfplayer::diagnostics_log(
             bfplayer::DiagnosticLevel::error,
@@ -2722,6 +2749,7 @@ int main(int argc, char** argv) {
         bfplayer::diagnostics_shutdown();
         return 1;
     }
+    boot_stage("kitchensink-init-complete");
     Kit_Version kitchensink_version{};
     Kit_GetVersion(&kitchensink_version);
     SDL_version sdl_version{};
@@ -2740,6 +2768,7 @@ int main(int argc, char** argv) {
         Kit_GetHint(KIT_HINT_VIDEO_BUFFER_PACKETS),
         Kit_GetHint(KIT_HINT_VIDEO_BUFFER_FRAMES));
 
+    boot_stage("window-create-begin");
     app.window = SDL_CreateWindow(
         "BFplayer",
         SDL_WINDOWPOS_UNDEFINED,
@@ -2753,6 +2782,8 @@ int main(int argc, char** argv) {
         bfplayer::diagnostics_shutdown();
         return 1;
     }
+    boot_stage("window-create-complete");
+    boot_stage("renderer-create-begin");
     app.renderer = create_renderer(app.window);
     if (!app.renderer) {
         log_sdl("SDL_CreateRenderer");
@@ -2760,12 +2791,14 @@ int main(int argc, char** argv) {
         bfplayer::diagnostics_shutdown();
         return 1;
     }
+    boot_stage("renderer-create-complete");
     for (int i = 0; i < SDL_NumJoysticks(); ++i) {
         if (SDL_IsGameController(i)) {
             app.controller = SDL_GameControllerOpen(i);
             break;
         }
     }
+    boot_stage("controller-open-complete");
 
     int result = 0;
     const char* media_path = nullptr;
@@ -2793,8 +2826,10 @@ int main(int argc, char** argv) {
         }
     }
     if (media_path) {
+        boot_stage("player-loop-enter");
         result = run_player(app, media_path, subtitle_path) == PlaybackOutcome::error ? 1 : 0;
     } else {
+        boot_stage("library-loop-enter");
         result = run_library(app, initial_sources);
     }
 
