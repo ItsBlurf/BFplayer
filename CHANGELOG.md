@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.1.0-alpha.25 - VP9 threading and YUV color fix
+
+- Enable frame and slice threading together when FFmpeg reports that a video
+  decoder supports both, instead of discarding slice threading whenever frame
+  threading is available.
+- Log the threading modes that FFmpeg actually activated for each video.
+- Map planar YUV420 output to SDL `IYUV`, matching FFmpeg's Y/U/V plane order,
+  instead of `YV12`, whose Y/V/U order could swap chroma planes.
+
 ## 0.1.0-alpha.24 - BFplayer rename and 4K WebM optimization
 
 - Renamed the product, runtime paths, logs, packages, and visible tile metadata

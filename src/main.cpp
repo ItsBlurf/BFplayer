@@ -2061,9 +2061,11 @@ PlaybackOutcome run_player(
             sample_aspect_denominator);
     ps5mc::diagnostics_log(
         ps5mc::DiagnosticLevel::info,
-        "playback-format video=%s threads=%d output=%dx%d format=%u audio=%s threads=%d %dHz/%dch duration_s=%.3f",
+        "playback-format video=%s threads=%d frame_threading=%u slice_threading=%u output=%dx%d format=%u audio=%s threads=%d %dHz/%dch duration_s=%.3f",
         info.video_codec.name,
         info.video_codec.threads,
+        info.video_codec.frame_threading,
+        info.video_codec.slice_threading,
         info.video_format.width,
         info.video_format.height,
         static_cast<unsigned int>(info.video_format.format),

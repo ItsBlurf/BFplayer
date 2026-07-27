@@ -28,7 +28,7 @@ enum AVPixelFormat Kit_FindBestAVPixelFormat(const enum AVPixelFormat fmt)
 unsigned int Kit_FindSDLPixelFormat(const enum AVPixelFormat fmt) {
     switch(fmt) {
         case AV_PIX_FMT_YUV420P:
-            return SDL_PIXELFORMAT_YV12;
+            return SDL_PIXELFORMAT_IYUV;
         case AV_PIX_FMT_YUYV422:
             return SDL_PIXELFORMAT_YUY2;
         case AV_PIX_FMT_UYVY422:
@@ -77,6 +77,7 @@ enum AVPixelFormat Kit_FindAVPixelFormat(const unsigned int fmt)
 {
     switch(fmt) {
         case SDL_PIXELFORMAT_YV12:
+        case SDL_PIXELFORMAT_IYUV:
             return AV_PIX_FMT_YUV420P;
         case SDL_PIXELFORMAT_YUY2:
             return AV_PIX_FMT_YUYV422;

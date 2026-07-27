@@ -25,6 +25,25 @@ const player = fs.readFileSync(
 const playbackOsd = fs.readFileSync(
     path.join(root, 'src', 'ui', 'playback_osd.cpp'),
     'utf8');
+const kitchensinkDecoder = fs.readFileSync(
+    path.join(
+        root,
+        'vendor',
+        'SDL_kitchensink',
+        'src',
+        'internal',
+        'kitdecoder.c'),
+    'utf8');
+const kitchensinkVideoUtils = fs.readFileSync(
+    path.join(
+        root,
+        'vendor',
+        'SDL_kitchensink',
+        'src',
+        'internal',
+        'video',
+        'kitvideoutils.c'),
+    'utf8');
 const build = fs.readFileSync(path.join(root, 'build.ps1'), 'utf8');
 
 assert.strictEqual(param.applicationCategoryType, 65536);
@@ -185,6 +204,13 @@ assert(player.includes('app.settings.long_seek_seconds'));
 assert(player.includes(
     'Kit_SetHint(KIT_HINT_THREAD_COUNT, kVideoDecoderThreads)'));
 assert(player.includes('constexpr int kVideoDecoderThreads = 16'));
+assert(player.includes('frame_threading=%u slice_threading=%u'));
+assert(kitchensinkDecoder.includes(
+    'codec_ctx->thread_type |= FF_THREAD_FRAME'));
+assert(kitchensinkDecoder.includes(
+    'codec_ctx->thread_type |= FF_THREAD_SLICE'));
+assert(kitchensinkVideoUtils.includes(
+    'return SDL_PIXELFORMAT_IYUV'));
 assert(player.includes('make_video_format_request'));
 assert(player.includes(
     'video-output-request source=%dx%d output=%dx%d downscale=%d'));

@@ -152,11 +152,14 @@ Kit_Decoder *Kit_CreateDecoder(
 
     // Attempt to set up threading, if supported.
     codec_ctx->thread_count = thread_count;
+    codec_ctx->thread_type = 0;
     if(codec->capabilities & AV_CODEC_CAP_FRAME_THREADS) {
-        codec_ctx->thread_type = FF_THREAD_FRAME;
-    } else if(codec->capabilities & AV_CODEC_CAP_SLICE_THREADS) {
-        codec_ctx->thread_type = FF_THREAD_SLICE;
-    } else {
+        codec_ctx->thread_type |= FF_THREAD_FRAME;
+    }
+    if(codec->capabilities & AV_CODEC_CAP_SLICE_THREADS) {
+        codec_ctx->thread_type |= FF_THREAD_SLICE;
+    }
+    if(codec_ctx->thread_type == 0) {
         codec_ctx->thread_count = 1; // Disable threading
     }
 
@@ -247,6 +250,10 @@ int Kit_GetDecoderCodecInfo(const Kit_Decoder *decoder, Kit_Codec *codec) {
         return 1;
     }
     codec->threads = decoder->codec_ctx->thread_count;
+    codec->frame_threading =
+        (decoder->codec_ctx->active_thread_type & FF_THREAD_FRAME) != 0;
+    codec->slice_threading =
+        (decoder->codec_ctx->active_thread_type & FF_THREAD_SLICE) != 0;
     snprintf(codec->name, KIT_CODEC_NAME_MAX, "%s", decoder->codec_ctx->codec->name);
     snprintf(codec->description, KIT_CODEC_DESC_MAX, "%s", decoder->codec_ctx->codec->long_name);
     return 0;
