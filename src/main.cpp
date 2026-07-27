@@ -8,6 +8,7 @@ extern "C" {
 #include <libavutil/dict.h>
 #include <libavutil/error.h>
 #include <libavutil/mem.h>
+#include <libavutil/pixdesc.h>
 }
 
 #include "ps5mc/external_subtitles.hpp"
@@ -61,6 +62,9 @@ constexpr int kWindowHeight = 1080;
 constexpr int kAudioBufferBytes = 64 * 1024;
 constexpr int kSubtitleAtlasSize = 4096;
 constexpr int kSubtitleFragments = 1024;
+constexpr int kVideoDecoderThreads = 8;
+constexpr int kVideoPacketBufferCount = 64;
+constexpr int kVideoFrameBufferCount = 3;
 
 enum class PlaybackOverlay {
     none,
@@ -110,6 +114,18 @@ enum class PlaybackOutcome {
     error,
 };
 
+struct VideoSourceInfo {
+    const char* codec = "none";
+    const char* pixel_format = "unknown";
+    int profile = -1;
+    int width = 0;
+    int height = 0;
+    int bit_depth = 0;
+    double frame_rate = 0.0;
+    std::int64_t bit_rate = 0;
+    bool demanding_software_decode = false;
+};
+
 void close_media(App& app);
 
 void log_sdl(const char* operation) {
@@ -118,6 +134,54 @@ void log_sdl(const char* operation) {
         "sdl operation=%s error=%s",
         operation ? operation : "<unknown>",
         SDL_GetError());
+}
+
+VideoSourceInfo inspect_video_source(
+    const AVFormatContext* format,
+    int stream_index) {
+    VideoSourceInfo info{};
+    if (!format || stream_index < 0 ||
+        stream_index >= static_cast<int>(format->nb_streams)) {
+        return info;
+    }
+    const AVStream* stream = format->streams[stream_index];
+    if (!stream || !stream->codecpar) {
+        return info;
+    }
+    const AVCodecParameters* parameters = stream->codecpar;
+    info.codec = avcodec_get_name(parameters->codec_id);
+    info.profile = parameters->profile;
+    info.width = parameters->width;
+    info.height = parameters->height;
+    info.bit_rate = parameters->bit_rate > 0
+        ? parameters->bit_rate
+        : format->bit_rate;
+    const auto pixel_format =
+        static_cast<AVPixelFormat>(parameters->format);
+    if (const char* name = av_get_pix_fmt_name(pixel_format)) {
+        info.pixel_format = name;
+    }
+    if (const AVPixFmtDescriptor* descriptor =
+            av_pix_fmt_desc_get(pixel_format)) {
+        info.bit_depth = descriptor->comp[0].depth;
+    }
+    const AVRational guessed_rate =
+        av_guess_frame_rate(const_cast<AVFormatContext*>(format),
+                            const_cast<AVStream*>(stream), nullptr);
+    if (guessed_rate.num > 0 && guessed_rate.den > 0) {
+        info.frame_rate = av_q2d(guessed_rate);
+    }
+    const std::int64_t pixels =
+        static_cast<std::int64_t>(info.width) * info.height;
+    const bool expensive_codec =
+        parameters->codec_id == AV_CODEC_ID_VP9 ||
+        parameters->codec_id == AV_CODEC_ID_AV1 ||
+        parameters->codec_id == AV_CODEC_ID_HEVC;
+    info.demanding_software_decode =
+        pixels >= 3840LL * 2160LL &&
+        (info.frame_rate >= 50.0 ||
+         (expensive_codec && info.bit_depth > 8));
+    return info;
 }
 
 void sdl_log_output(
@@ -1691,6 +1755,21 @@ PlaybackOutcome run_player(
         Kit_GetBestSourceStream(app.source, KIT_STREAMTYPE_VIDEO);
     const int initial_audio =
         Kit_GetBestSourceStream(app.source, KIT_STREAMTYPE_AUDIO);
+    const VideoSourceInfo source_video = inspect_video_source(
+        static_cast<const AVFormatContext*>(app.source->format_ctx),
+        initial_video);
+    ps5mc::diagnostics_log(
+        ps5mc::DiagnosticLevel::info,
+        "video-source codec=%s profile=%d pix_fmt=%s bit_depth=%d size=%dx%d fps=%.3f bitrate=%lld demanding_software_decode=%d",
+        source_video.codec,
+        source_video.profile,
+        source_video.pixel_format,
+        source_video.bit_depth,
+        source_video.width,
+        source_video.height,
+        source_video.frame_rate,
+        static_cast<long long>(source_video.bit_rate),
+        source_video.demanding_software_decode ? 1 : 0);
     // Kitchensink requires a video decoder for subtitle layout. Audio-only
     // files with timed lyrics must still open instead of failing creation.
     const int initial_subtitle =
@@ -1809,11 +1888,14 @@ PlaybackOutcome run_player(
     Kit_GetPlayerInfo(app.player, &info);
     ps5mc::diagnostics_log(
         ps5mc::DiagnosticLevel::info,
-        "playback-format video=%s %dx%d audio=%s %dHz/%dch duration_s=%.3f",
+        "playback-format video=%s threads=%d output=%dx%d format=%u audio=%s threads=%d %dHz/%dch duration_s=%.3f",
         info.video_codec.name,
+        info.video_codec.threads,
         info.video_format.width,
         info.video_format.height,
+        static_cast<unsigned int>(info.video_format.format),
         info.audio_codec.name,
+        info.audio_codec.threads,
         info.audio_format.sample_rate,
         info.audio_format.channels,
         Kit_GetPlayerDuration(app.player));
@@ -1839,6 +1921,10 @@ PlaybackOutcome run_player(
                 pending_resume_seconds,
                 Kit_GetError());
         }
+    } else if (source_video.demanding_software_decode) {
+        app.osd.show(
+            "High-load 4K video: software decoding may drop frames",
+            10000);
     } else {
         app.osd.show(
             "Cross Play/Pause   D-pad Seek   Touchpad Controls   Options Menu",
@@ -1846,6 +1932,8 @@ PlaybackOutcome run_player(
     }
     Uint64 last_resume_save = SDL_GetTicks64();
     Uint64 last_diagnostics = last_resume_save;
+    std::uint64_t video_updates = 0;
+    std::uint64_t video_empty_polls = 0;
     static_assert(kAudioBufferBytes % sizeof(std::int16_t) == 0);
     std::array<std::int16_t, kAudioBufferBytes / sizeof(std::int16_t)> audio_buffer{};
     std::array<SDL_Rect, kSubtitleFragments> subtitle_sources{};
@@ -1900,7 +1988,12 @@ PlaybackOutcome run_player(
         SDL_SetRenderDrawColor(app.renderer, 0, 0, 0, 255);
         SDL_RenderClear(app.renderer);
         if (app.video) {
-            Kit_GetPlayerVideoSDLTexture(app.player, app.video, nullptr);
+            if (Kit_GetPlayerVideoSDLTexture(
+                    app.player, app.video, nullptr) == 0) {
+                ++video_updates;
+            } else {
+                ++video_empty_polls;
+            }
             const ps5mc::VideoLayout layout = player_video_layout(app);
             const SDL_Rect source{
                 layout.source.x,
@@ -1964,20 +2057,62 @@ PlaybackOutcome run_player(
 
         const Uint64 now = SDL_GetTicks64();
         if (now - last_diagnostics >= 5000) {
+            unsigned int video_frames_length = 0;
+            unsigned int video_frames_capacity = 0;
+            unsigned int video_packets_length = 0;
+            unsigned int video_packets_capacity = 0;
+            unsigned int audio_frames_length = 0;
+            unsigned int audio_frames_capacity = 0;
+            unsigned int audio_packets_length = 0;
+            unsigned int audio_packets_capacity = 0;
+            if (Kit_GetPlayerVideoStream(app.player) >= 0) {
+                Kit_GetPlayerVideoBufferState(
+                    app.player,
+                    &video_frames_length,
+                    &video_frames_capacity,
+                    &video_packets_length,
+                    &video_packets_capacity);
+            }
+            if (Kit_GetPlayerAudioStream(app.player) >= 0) {
+                Kit_GetPlayerAudioBufferState(
+                    app.player,
+                    &audio_frames_length,
+                    &audio_frames_capacity,
+                    &audio_packets_length,
+                    &audio_packets_capacity);
+            }
+            const double diagnostics_seconds =
+                static_cast<double>(now - last_diagnostics) / 1000.0;
+            const double video_update_rate = diagnostics_seconds > 0.0
+                ? static_cast<double>(video_updates) / diagnostics_seconds
+                : 0.0;
             ps5mc::diagnostics_log(
                 ps5mc::DiagnosticLevel::info,
-                "playback-heartbeat path=%s position_s=%.3f duration_s=%.3f paused=%d state=%d audio_queued=%u external_subtitle=%d delay_ms=%lld scale=%s aspect=%s crop=%s",
+                "playback-heartbeat path=%s position_s=%.3f duration_s=%.3f paused=%d state=%d video_updates=%llu video_update_fps=%.2f video_empty_polls=%llu video_frames=%u/%u video_packets=%u/%u audio_frames=%u/%u audio_packets=%u/%u audio_queued=%u external_subtitle=%d delay_ms=%lld scale=%s aspect=%s crop=%s",
                 app.current_media_path.c_str(),
                 Kit_GetPlayerPosition(app.player),
                 Kit_GetPlayerDuration(app.player),
                 app.paused ? 1 : 0,
                 Kit_GetPlayerState(app.player),
+                static_cast<unsigned long long>(video_updates),
+                video_update_rate,
+                static_cast<unsigned long long>(video_empty_polls),
+                video_frames_length,
+                video_frames_capacity,
+                video_packets_length,
+                video_packets_capacity,
+                audio_frames_length,
+                audio_frames_capacity,
+                audio_packets_length,
+                audio_packets_capacity,
                 app.audio != 0 ? SDL_GetQueuedAudioSize(app.audio) : 0U,
                 app.external_subtitle_index,
                 static_cast<long long>(app.subtitle_delay_ms),
                 ps5mc::video_scale_mode_name(app.video_scale_mode),
                 ps5mc::video_aspect_mode_name(app.video_aspect_mode),
                 ps5mc::video_crop_mode_name(app.video_crop_mode));
+            video_updates = 0;
+            video_empty_polls = 0;
             last_diagnostics = now;
         }
         if (database_available && source_persistence_allowed &&
@@ -2309,6 +2444,9 @@ int main(int argc, char** argv) {
         ps5mc::diagnostics_shutdown();
         return 1;
     }
+    Kit_SetHint(KIT_HINT_THREAD_COUNT, kVideoDecoderThreads);
+    Kit_SetHint(KIT_HINT_VIDEO_BUFFER_PACKETS, kVideoPacketBufferCount);
+    Kit_SetHint(KIT_HINT_VIDEO_BUFFER_FRAMES, kVideoFrameBufferCount);
     if (Kit_Init(KIT_INIT_NETWORK | KIT_INIT_ASS) != 0) {
         ps5mc::diagnostics_log(
             ps5mc::DiagnosticLevel::error,
@@ -2324,13 +2462,17 @@ int main(int argc, char** argv) {
     SDL_GetVersion(&sdl_version);
     ps5mc::diagnostics_log(
         ps5mc::DiagnosticLevel::info,
-        "libraries sdl=%u.%u.%u kitchensink=%u.%u.%u",
+        "libraries sdl=%u.%u.%u kitchensink=%u.%u.%u cpu_count=%d decoder_threads=%d video_packet_buffers=%d video_frame_buffers=%d",
         sdl_version.major,
         sdl_version.minor,
         sdl_version.patch,
         kitchensink_version.major,
         kitchensink_version.minor,
-        kitchensink_version.patch);
+        kitchensink_version.patch,
+        SDL_GetCPUCount(),
+        Kit_GetHint(KIT_HINT_THREAD_COUNT),
+        Kit_GetHint(KIT_HINT_VIDEO_BUFFER_PACKETS),
+        Kit_GetHint(KIT_HINT_VIDEO_BUFFER_FRAMES));
 
     app.window = SDL_CreateWindow(
         "PS5 Media Center",

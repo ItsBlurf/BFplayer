@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.1.0-alpha.22 - WebM decode diagnostics test build
+
+- Explicitly use eight FFmpeg decoder threads instead of depending on runtime
+  CPU autodetection, which can otherwise leave 4K VP9 decoding single-threaded.
+- Enlarge the video packet queue from 16 to 64 and decoded-frame queue from 2
+  to 3 to better absorb removable-storage read jitter.
+- Log source codec, profile, pixel format, bit depth, resolution, frame rate,
+  bitrate, actual decoder thread counts, queue fill, and delivered-frame rate.
+- Warn when a 4K high-frame-rate or 10-bit VP9/AV1/HEVC source is likely to
+  exceed the current software decoder's real-time capacity.
+
 ## 0.1.0-alpha.21 - Circle input safety test build
 
 - Stop Circle from launching the selected video or playback queue at the

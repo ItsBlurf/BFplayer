@@ -23,6 +23,10 @@ Playback is powered by FFmpeg 7.0.1, SDL2, SDL_kitchensink, and libass. Decoding
 is currently software-based, so demanding 4K HEVC or AV1 files may not play
 smoothly.
 
+The same limitation applies to 4K 50/60 fps VP9 WebM, especially 10-bit HDR
+files. The player uses eight decoder threads and enlarged video buffers, but
+these formats can still exceed the PS5 homebrew software-decoding budget.
+
 Every video starts in **Original** aspect mode. The player uses the display
 ratio reported by the stream, including anamorphic pixel-ratio metadata, and
 falls back to the decoded frame dimensions when that metadata is unavailable.

@@ -177,6 +177,14 @@ assert(player.includes('"Unmute audio" : "Mute audio"'));
 assert(player.includes('kSettingShortSeekSeconds'));
 assert(player.includes('app.settings.short_seek_seconds'));
 assert(player.includes('app.settings.long_seek_seconds'));
+assert(player.includes(
+    'Kit_SetHint(KIT_HINT_THREAD_COUNT, kVideoDecoderThreads)'));
+assert(player.includes(
+    'Kit_SetHint(KIT_HINT_VIDEO_BUFFER_PACKETS, kVideoPacketBufferCount)'));
+assert(player.includes(
+    'Kit_SetHint(KIT_HINT_VIDEO_BUFFER_FRAMES, kVideoFrameBufferCount)'));
+assert(player.includes('video_update_fps=%.2f'));
+assert(player.includes('demanding_software_decode'));
 assert(player.includes('sceSystemServiceGetAppIdOfRunningBigApp'));
 assert(player.includes('sceSystemServiceGetAppTitleId'));
 assert(player.includes('sceSystemServiceKillApp(app_id, -1, 0, 0)'));
