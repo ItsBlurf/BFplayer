@@ -23,6 +23,7 @@
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/time.h>
+#include <sys/wait.h>
 #include <time.h>
 #include <unistd.h>
 #include <zlib.h>
@@ -772,6 +773,7 @@ static void send_response(
 
 static int launch_embedded_player(void) {
     static struct timespec last_successful_launch = {0, 0};
+    static pid_t active_player_pid = -1;
     char* argv[] = {NULL};
     char* envp[] = {NULL};
     uint8_t* player = NULL;
@@ -785,6 +787,31 @@ static int launch_embedded_player(void) {
     struct timespec now = {0, 0};
 
     (void)clock_gettime(CLOCK_MONOTONIC, &now);
+    if (active_player_pid > 0) {
+        const pid_t previous_pid = active_player_pid;
+        const pid_t reaped = waitpid(previous_pid, NULL, WNOHANG);
+        if (reaped == previous_pid) {
+            launcher_log(
+                "previous player exited player_pid=%ld",
+                (long)previous_pid);
+            active_player_pid = -1;
+        } else if (kill(previous_pid, 0) == 0 || errno == EPERM) {
+            launcher_log(
+                "launch coalesced reason=player-already-running player_pid=%ld",
+                (long)previous_pid);
+            if (stdio_descriptor >= 0) {
+                close(stdio_descriptor);
+            }
+            return 0;
+        } else {
+            const int process_error = errno;
+            launcher_log(
+                "previous player no longer running player_pid=%ld errno=%d",
+                (long)previous_pid,
+                process_error);
+            active_player_pid = -1;
+        }
+    }
     const int64_t elapsed_ms =
         last_successful_launch.tv_sec == 0
             ? INT64_MAX
@@ -865,6 +892,7 @@ static int launch_embedded_player(void) {
         ps5mc_embedded_player_gzip_size,
         (unsigned long)PS5MC_PLAYER_UNCOMPRESSED_SIZE);
     if (player_pid > 0) {
+        active_player_pid = player_pid;
         (void)clock_gettime(CLOCK_MONOTONIC, &last_successful_launch);
     }
     return player_pid > 0 ? 0 : -1;

@@ -14,7 +14,7 @@ or a fatal filesystem error.
    the alpha.15 standalone payload. Verify it removes the obsolete Games
    entry, recreates its files, leaves exactly one dashboard tile in Media, and
    shows the
-   Media Center icon in the active-app switcher, launches with no media
+   BFplayer icon in the active-app switcher, launches with no media
    argument, and exits cleanly through the Options menu. Verify the dark launch countdown
    returns/closes, or follow its PS-button fallback.
 2. Play a local 720p H.264/AAC MP4 with no subtitles for ten minutes.

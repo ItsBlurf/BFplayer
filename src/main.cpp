@@ -40,6 +40,7 @@ extern "C" {
 #include <limits>
 #include <optional>
 #include <string>
+#include <sys/file.h>
 #include <sys/stat.h>
 #include <unistd.h>
 #include <utility>
@@ -116,6 +117,66 @@ enum class PlaybackOutcome {
     finished,
     user_return,
     error,
+};
+
+enum class PlayerLockResult {
+    acquired,
+    already_running,
+    error,
+};
+
+class PlayerInstanceLock {
+public:
+    PlayerInstanceLock() = default;
+    PlayerInstanceLock(const PlayerInstanceLock&) = delete;
+    PlayerInstanceLock& operator=(const PlayerInstanceLock&) = delete;
+
+    ~PlayerInstanceLock() {
+        if (descriptor_ >= 0) {
+            (void)flock(descriptor_, LOCK_UN);
+            close(descriptor_);
+        }
+    }
+
+    [[nodiscard]] PlayerLockResult acquire() noexcept {
+        constexpr const char* directory = "/data/BFplayer";
+        constexpr const char* path = "/data/BFplayer/player.lock";
+        if (mkdir(directory, 0777) != 0 && errno != EEXIST) {
+            return PlayerLockResult::error;
+        }
+        descriptor_ = open(path, O_RDWR | O_CREAT, 0600);
+        if (descriptor_ < 0) {
+            return PlayerLockResult::error;
+        }
+        if (flock(descriptor_, LOCK_EX | LOCK_NB) != 0) {
+            const int lock_error = errno;
+            close(descriptor_);
+            descriptor_ = -1;
+            return lock_error == EWOULDBLOCK || lock_error == EAGAIN
+                ? PlayerLockResult::already_running
+                : PlayerLockResult::error;
+        }
+
+        char owner[64];
+        const int length = std::snprintf(
+            owner,
+            sizeof(owner),
+            "pid=%ld\n",
+            static_cast<long>(getpid()));
+        if (length > 0) {
+            (void)ftruncate(descriptor_, 0);
+            (void)lseek(descriptor_, 0, SEEK_SET);
+            (void)write(
+                descriptor_,
+                owner,
+                static_cast<std::size_t>(
+                    std::min(length, static_cast<int>(sizeof(owner) - 1))));
+        }
+        return PlayerLockResult::acquired;
+    }
+
+private:
+    int descriptor_ = -1;
 };
 
 struct VideoSourceInfo {
@@ -2618,6 +2679,16 @@ void return_to_playstation_home() {
 } // namespace
 
 int main(int argc, char** argv) {
+    PlayerInstanceLock player_instance_lock;
+    const PlayerLockResult lock_result = player_instance_lock.acquire();
+    if (lock_result != PlayerLockResult::acquired) {
+        std::fprintf(
+            stderr,
+            lock_result == PlayerLockResult::already_running
+                ? "BFplayer launch ignored: another player is already running\n"
+                : "BFplayer launch stopped: unable to acquire player lock\n");
+        return lock_result == PlayerLockResult::already_running ? 0 : 1;
+    }
     migrate_legacy_library_database();
     ps5mc::diagnostics_init(argc, argv);
     ps5mc::diagnostics_install_ffmpeg();
@@ -2625,7 +2696,7 @@ int main(int argc, char** argv) {
     log_installed_manifest(argc > 0 ? argv[0] : nullptr);
     ps5mc::diagnostics_log(
         ps5mc::DiagnosticLevel::info,
-        "application-start build=%s",
+        "application-start build=%s player_lock=acquired",
         PS5MC_VERSION);
     App app{};
     app.fallback_font = executable_asset_path(

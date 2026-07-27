@@ -42,7 +42,9 @@ tile in the Media section and stays resident to launch the player.
 
 Nothing needs to be copied to `/data/homebrew` beforehand. The payload creates
 and maintains its own runtime folder. Reinjection preserves the library,
-settings, sources, playback history, and logs.
+settings, sources, playback history, and logs. Repeated tile launches are
+coalesced, and a player-instance lock prevents two BFplayer processes from
+initializing PS5 video memory at the same time.
 
 ## Library controls
 

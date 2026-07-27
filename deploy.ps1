@@ -40,4 +40,4 @@ New-Item -ItemType Directory -Force -Path $logDir | Out-Null
         "sha256=$((Get-FileHash -Algorithm SHA256 -LiteralPath $payload).Hash.ToLowerInvariant())"
     ))
 
-Write-Host 'Standalone Media Center launcher injected.'
+Write-Host 'Standalone BFplayer launcher injected.'

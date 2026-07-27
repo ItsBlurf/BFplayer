@@ -5,7 +5,7 @@ file required for installation and normal startup.
 
 The payload:
 
-1. contains the complete stripped Media Center player ELF in gzip-compressed
+1. contains the complete stripped BFplayer player ELF in gzip-compressed
    form and verifies it while expanding it in memory for launch;
 2. writes its small runtime font, icon, and manifest assets under
    `/data/homebrew/BFplayer`;
@@ -24,8 +24,8 @@ window, so the visible fallback says `Press O to close this window`; Circle
 dismisses it without opening the PlayStation control center.
 
 After successful injection setup, the resident launcher sends a native PS5
-notification confirming that Media Center is loaded and available in Media.
-When the user chooses Exit Media Center, the native player closes its
+notification confirming that BFplayer is loaded and available in Media.
+When the user chooses Exit BFplayer, the native player closes its
 resources and terminates the active BigApp host through SystemService so the
 console can return to PlayStation Home. It verifies that the active title is
 `PSMC00001` first and refuses to terminate an unrelated BigApp.

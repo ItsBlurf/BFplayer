@@ -25,6 +25,9 @@ const player = fs.readFileSync(
 const playbackOsd = fs.readFileSync(
     path.join(root, 'src', 'ui', 'playback_osd.cpp'),
     'utf8');
+const diagnostics = fs.readFileSync(
+    path.join(root, 'src', 'core', 'diagnostics.cpp'),
+    'utf8');
 const kitchensinkDecoder = fs.readFileSync(
     path.join(
         root,
@@ -76,6 +79,10 @@ assert(launcher.includes('acquire_instance_lock'));
 assert(launcher.includes('flock(descriptor, LOCK_EX | LOCK_NB)'));
 assert(launcher.includes('PS5MC_INSTANCE_LOCK_PATH'));
 assert(launcher.includes('serialized takeover lock acquired'));
+assert(launcher.includes('active_player_pid'));
+assert(launcher.includes('reason=player-already-running'));
+assert(launcher.includes('kill(previous_pid, 0)'));
+assert(launcher.includes('waitpid(previous_pid, NULL, WNOHANG)'));
 assert(launcher.includes('regular_file_matches'));
 assert(launcher.includes('update_file_atomic'));
 assert(launcher.includes('runtime assets version=%s changed_files=%d'));
@@ -163,6 +170,12 @@ assert(libraryUi.includes('"R3"'));
 assert(libraryUi.includes('"Sort"'));
 assert(libraryUi.includes('FooterGlyph::triangle, "", "Remove"'));
 assert(libraryUi.includes('draw_logo(impl_->renderer, impl_->logo_texture'));
+assert(libraryUi.includes('title = "BFplayer"'));
+assert(libraryUi.includes('"Exit BFplayer"'));
+assert(!libraryUi.includes('title = "Media Center"'));
+assert(!libraryUi.includes('"Exit Media Center"'));
+assert(diagnostics.includes('BFPLAYER_FATAL_SIGNAL'));
+assert(diagnostics.includes('BFPLAYER_LOG_TRUNCATED'));
 assert(!libraryUi.includes('std::string("Sort: ")'));
 assert(libraryUi.includes('library_item_name_less'));
 assert(libraryUi.includes('previous_series'));
@@ -237,6 +250,10 @@ assert(player.includes('sceSystemServiceGetAppIdOfRunningBigApp'));
 assert(player.includes('sceSystemServiceGetAppTitleId'));
 assert(player.includes('sceSystemServiceKillApp(app_id, -1, 0, 0)'));
 assert(player.includes('return_to_playstation_home();'));
+assert(player.includes('class PlayerInstanceLock'));
+assert(player.includes('"/data/BFplayer/player.lock"'));
+assert(player.includes('LOCK_EX | LOCK_NB'));
+assert(player.includes('another player is already running'));
 assert(player.includes('kMediaCenterTitleId = "PSMC00001"'));
 assert(player.includes('reason=unexpected-bigapp'));
 assert(!player.includes('subtitle_delay_mode'),

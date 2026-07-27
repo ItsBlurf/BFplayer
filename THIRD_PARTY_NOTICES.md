@@ -39,7 +39,7 @@ from <https://ffmpeg.org/releases/>.
 
 `src/launcher/core/hbldr.c`, `elfldr.c`, and `pt.c` originate from John
 Törnblom's ps5-payload-websrv project. The local hbldr copy is modified to
-remove websrv-specific headers and to accept the Media Center ELF directly
+remove websrv-specific headers and to accept the BFplayer ELF directly
 from the standalone payload image. Those files and the combined standalone
 launcher are GPL-3.0-or-later. The complete license is in `LICENSE`.
 

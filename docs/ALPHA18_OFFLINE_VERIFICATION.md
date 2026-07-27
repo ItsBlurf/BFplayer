@@ -34,5 +34,5 @@ artifacts.
 | Embedded stripped player | 36,177,808 | `829a599e654be3bdedc6fb660c9d8947003288d74dfe6d564c622a1bef90db68` |
 
 The hardware gate is to confirm the toast appears after injection, the launch
-page closes automatically or dismisses with Circle, and Exit Media Center
+page closes automatically or dismisses with Circle, and Exit BFplayer
 returns to PlayStation Home instead of leaving a black surface.

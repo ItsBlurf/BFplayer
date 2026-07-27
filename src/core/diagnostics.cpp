@@ -129,7 +129,7 @@ void write_locked(const char* data, std::size_t length) noexcept {
 void crash_signal_handler(int signal_number) noexcept {
     if (g_crash_descriptor >= 0) {
         static constexpr char marker[] =
-            "\nPS5MC_FATAL_SIGNAL: application terminated by a fatal signal\n";
+            "\nBFPLAYER_FATAL_SIGNAL: application terminated by a fatal signal\n";
         (void)::write(g_crash_descriptor, marker, sizeof(marker) - 1U);
     }
     std::_Exit(128 + signal_number);
@@ -299,7 +299,8 @@ void diagnostics_log_v(
             // The cap is intentional: keep the tail from becoming an I/O
             // denial-of-service during a noisy decoder failure.
             g_truncated = false;
-            const char marker[] = "PS5MC_LOG_TRUNCATED: maximum size reached\n";
+            const char marker[] =
+                "BFPLAYER_LOG_TRUNCATED: maximum size reached\n";
             if (g_bytes + sizeof(marker) - 1U <= kMaximumLogBytes) {
                 write_locked(marker, sizeof(marker) - 1U);
             }

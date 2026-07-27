@@ -2791,7 +2791,7 @@ struct LibraryUi::Impl {
             std::string subtitle;
             switch (active_overlay) {
                 case LibraryOverlay::menu:
-                    title = "Media Center";
+                    title = "BFplayer";
                     subtitle = "Choose what you want to do";
                     rows = {
                         "Add media",
@@ -2799,7 +2799,7 @@ struct LibraryUi::Impl {
                         "Controls & shortcuts",
                         "Playback settings",
                         "About & diagnostics",
-                        "Exit Media Center",
+                        "Exit BFplayer",
                     };
                     add_footer_hint(FooterGlyph::cross, "", "Select");
                     add_footer_hint(FooterGlyph::circle, "", "Close");

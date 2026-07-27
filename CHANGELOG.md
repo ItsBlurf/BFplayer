@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.1.0-alpha.27 - BFplayer naming completion
+
+- Replaced the remaining visible `Media Center` menu, exit, deployment, and
+  diagnostic labels with `BFplayer`.
+- Renamed the host CMake project while preserving the existing title ID and
+  internal compatibility identifiers required to update installed tiles.
+- Prevent multiple player processes from initializing SDL/video memory at the
+  same time: the launcher tracks its active child and the player holds a
+  non-blocking cross-reinjection lock before any SDL initialization.
+- Added static coverage preventing the old visible menu labels from returning.
+
 ## 0.1.0-alpha.26 - source aspect and safe playback geometry
 
 - Read display-aspect metadata from the original demuxed stream so proportional
