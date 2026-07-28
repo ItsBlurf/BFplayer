@@ -2,7 +2,7 @@
 
 BFplayer is a native media library and player for jailbroken
 PlayStation 5 consoles. It runs as a single payload, installs its own tile in
-the Media section, and does not require websrv or Homebrew Launcher.
+the Media section, and does not require websrv or Homebrew Launcher(lightly bundeled inside running on 9040 so it doesnt conflict with HBL/websrv).
 
 <img width="1920" height="1080" alt="20260728_013154_00032112 jpg" src="https://github.com/user-attachments/assets/4f542583-3c66-493d-ac3c-aa42e55ff79e" />
 ## Features
