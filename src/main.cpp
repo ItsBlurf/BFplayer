@@ -23,6 +23,8 @@ extern "C" {
 #include "bfplayer/player_settings.hpp"
 #include "bfplayer/safe_read_file.hpp"
 #include "bfplayer/source_uri.hpp"
+#include "bfplayer/subtitle_browser.hpp"
+#include "bfplayer/subtitle_provider.hpp"
 #include "bfplayer/video_layout.hpp"
 
 #include <algorithm>
@@ -75,6 +77,49 @@ enum class PlaybackOverlay {
     menu,
     controls,
     settings,
+    subtitles,
+    subtitle_browser,
+    subtitle_online,
+};
+
+enum class SubtitleMenuKind {
+    off,
+    embedded,
+    external,
+    browse,
+    online,
+};
+
+struct SubtitleMenuItem {
+    SubtitleMenuKind kind = SubtitleMenuKind::off;
+    int index = -1;
+    std::string label;
+};
+
+enum class SubtitleJobType {
+    none,
+    search,
+    download,
+};
+
+struct SubtitleJob {
+    SDL_Thread* thread = nullptr;
+    std::atomic<bool> done{false};
+    SubtitleJobType type = SubtitleJobType::none;
+    std::string api_key;
+    std::string media_path;
+    std::string languages;
+    bfplayer::OnlineSubtitle selected;
+    bfplayer::OnlineSubtitleSearch search;
+    bfplayer::OnlineSubtitleDownload download;
+    std::string saved_path;
+    std::string error;
+};
+
+enum class TextEditMode {
+    none,
+    subdl_api_key,
+    subtitle_languages,
 };
 
 struct App {
@@ -101,6 +146,15 @@ struct App {
     bfplayer::PlayerSettings settings;
     PlaybackOverlay playback_overlay = PlaybackOverlay::none;
     int playback_overlay_selected = 0;
+    bfplayer::SubtitleBrowserResult subtitle_browser;
+    int subtitle_browser_selected = 0;
+    int subtitle_browser_first = 0;
+    std::vector<bfplayer::OnlineSubtitle> online_subtitles;
+    SubtitleJob subtitle_job;
+    TextEditMode text_edit_mode = TextEditMode::none;
+    std::string text_edit_buffer;
+    bfplayer::PlayerSettings text_edit_previous_settings;
+    bool ime_was_visible = false;
     bfplayer::VideoScaleMode video_scale_mode = bfplayer::VideoScaleMode::fit;
     bfplayer::VideoAspectMode video_aspect_mode =
         bfplayer::VideoAspectMode::default_ratio;
@@ -530,6 +584,16 @@ bfplayer::PlayerSettings load_player_settings(
             value) &&
         bfplayer::parse_setting_boolean(value, boolean)) {
         settings.auto_subtitles = boolean;
+    }
+    if (database.get_setting(
+            std::string(bfplayer::kSettingSubdlApiKey),
+            value)) {
+        settings.subdl_api_key = value;
+    }
+    if (database.get_setting(
+            std::string(bfplayer::kSettingSubtitleLanguages),
+            value)) {
+        settings.subtitle_languages = value;
     }
     return bfplayer::normalized_player_settings(settings);
 }
@@ -1450,6 +1514,10 @@ bool persist_active_player_settings(App& app) {
              settings.resume_playback ? "1" : "0"},
             {std::string(bfplayer::kSettingAutoSubtitles),
              settings.auto_subtitles ? "1" : "0"},
+            {std::string(bfplayer::kSettingSubdlApiKey),
+             settings.subdl_api_key},
+            {std::string(bfplayer::kSettingSubtitleLanguages),
+             settings.subtitle_languages},
         });
     if (!saved) {
         bfplayer::diagnostics_log(
@@ -1467,22 +1535,232 @@ bool persist_active_player_settings(App& app) {
         static_cast<std::uint64_t>(settings.osd_duration_ms));
     bfplayer::diagnostics_log(
         bfplayer::DiagnosticLevel::info,
-        "player-settings live-save volume=%d short_seek=%d long_seek=%d osd_ms=%d resume=%d auto_subtitles=%d scale=%s aspect=%s crop=%s",
+        "player-settings live-save volume=%d short_seek=%d long_seek=%d osd_ms=%d resume=%d auto_subtitles=%d subdl_key=%d subtitle_languages=%s scale=%s aspect=%s crop=%s",
         settings.volume_percent,
         settings.short_seek_seconds,
         settings.long_seek_seconds,
         settings.osd_duration_ms,
         settings.resume_playback ? 1 : 0,
         settings.auto_subtitles ? 1 : 0,
+        settings.subdl_api_key.empty() ? 0 : 1,
+        settings.subtitle_languages.c_str(),
         bfplayer::video_scale_mode_name(app.video_scale_mode),
         bfplayer::video_aspect_mode_name(app.video_aspect_mode),
         bfplayer::video_crop_mode_name(app.video_crop_mode));
     return true;
 }
 
+std::string path_filename(const std::string& path) {
+    const std::size_t slash = path.find_last_of("/\\");
+    return slash == std::string::npos
+        ? path
+        : path.substr(slash + 1);
+}
+
+std::vector<SubtitleMenuItem> subtitle_menu_items(const App& app) {
+    std::vector<SubtitleMenuItem> items;
+    items.push_back({SubtitleMenuKind::off, -1, "Off"});
+    int stream = Kit_GetNextSourceStream(
+        app.source,
+        KIT_STREAMTYPE_SUBTITLE,
+        -1,
+        0);
+    while (stream >= 0 && items.size() < 64) {
+        items.push_back({
+            SubtitleMenuKind::embedded,
+            stream,
+            "Embedded  |  " +
+                track_description(app, stream)});
+        stream = Kit_GetNextSourceStream(
+            app.source,
+            KIT_STREAMTYPE_SUBTITLE,
+            stream,
+            0);
+    }
+    for (std::size_t index = 0;
+         index < app.subtitle_sidecars.size() && items.size() < 96;
+         ++index) {
+        items.push_back({
+            SubtitleMenuKind::external,
+            static_cast<int>(index),
+            "File  |  " +
+                path_filename(app.subtitle_sidecars[index])});
+    }
+    items.push_back({
+        SubtitleMenuKind::browse,
+        -1,
+        "Browse subtitle files..."});
+    items.push_back({
+        SubtitleMenuKind::online,
+        -1,
+        app.settings.subdl_api_key.empty()
+            ? "Download from SubDL  |  API key not set"
+            : "Download from SubDL  |  " +
+                  app.settings.subtitle_languages});
+    return items;
+}
+
+std::string online_subtitle_label(
+    const bfplayer::OnlineSubtitle& subtitle) {
+    std::string label = subtitle.language.empty()
+        ? "Unknown language"
+        : subtitle.language;
+    if (subtitle.hearing_impaired) {
+        label += " CC";
+    }
+    if (!subtitle.fps.empty() && subtitle.fps != "0") {
+        label += "  |  " + subtitle.fps + " fps";
+    }
+    label += "  |  " + subtitle.release_name;
+    return label;
+}
+
+void refresh_subtitle_browser_overlay(App& app) {
+    constexpr int kVisibleSubtitleRows = 8;
+    const int count =
+        static_cast<int>(app.subtitle_browser.entries.size());
+    app.subtitle_browser_selected = std::clamp(
+        app.subtitle_browser_selected,
+        0,
+        std::max(0, count - 1));
+    app.subtitle_browser_first = std::clamp(
+        app.subtitle_browser_first,
+        std::max(
+            0,
+            app.subtitle_browser_selected -
+                kVisibleSubtitleRows + 1),
+        app.subtitle_browser_selected);
+    app.subtitle_browser_first = std::min(
+        app.subtitle_browser_first,
+        std::max(0, count - kVisibleSubtitleRows));
+    std::vector<std::string> rows;
+    const int end = std::min(
+        count,
+        app.subtitle_browser_first + kVisibleSubtitleRows);
+    for (int index = app.subtitle_browser_first; index < end; ++index) {
+        const auto& entry =
+            app.subtitle_browser.entries[static_cast<std::size_t>(index)];
+        rows.push_back(
+            entry.directory
+                ? "[Folder]  " + entry.name
+                : entry.name);
+    }
+    if (rows.empty()) {
+        rows.push_back("No subtitle files in this folder");
+    }
+    app.osd.show_panel(
+        "Choose subtitle file - Circle: parent - Options: cancel  |  " +
+            app.subtitle_browser.path,
+        std::move(rows),
+        count == 0
+            ? -1
+            : app.subtitle_browser_selected -
+                  app.subtitle_browser_first);
+}
+
+void refresh_text_edit_overlay(App& app) {
+    const bool editing_key =
+        app.text_edit_mode == TextEditMode::subdl_api_key;
+    std::string shown;
+    if (editing_key) {
+        shown.assign(
+            std::min<std::size_t>(app.text_edit_buffer.size(), 48),
+            '*');
+        if (shown.empty()) {
+            shown = "(empty clears the key)";
+        }
+    } else {
+        shown = app.text_edit_buffer.empty()
+            ? "(example: en,ar,fr)"
+            : app.text_edit_buffer;
+    }
+    app.osd.show_panel(
+        editing_key
+            ? "Enter your SubDL API key - Return: save - Circle: cancel"
+            : "Subtitle languages - comma-separated codes - Return: save",
+        {std::move(shown)},
+        -1);
+}
+
 void refresh_playback_overlay(App& app) {
     if (app.playback_overlay == PlaybackOverlay::none) {
         app.osd.hide_panel();
+        return;
+    }
+    if (app.text_edit_mode != TextEditMode::none) {
+        refresh_text_edit_overlay(app);
+        return;
+    }
+    if (app.playback_overlay == PlaybackOverlay::subtitle_browser) {
+        refresh_subtitle_browser_overlay(app);
+        return;
+    }
+    if (app.playback_overlay == PlaybackOverlay::subtitle_online) {
+        std::vector<std::string> rows;
+        if (app.subtitle_job.thread &&
+            !app.subtitle_job.done.load(std::memory_order_acquire)) {
+            rows.push_back(
+                app.subtitle_job.type == SubtitleJobType::search
+                    ? "Searching SubDL..."
+                    : "Downloading subtitle...");
+            app.osd.show_panel(
+                "Online subtitles",
+                std::move(rows),
+                -1);
+            return;
+        }
+        constexpr int kVisibleRows = 12;
+        const int count =
+            static_cast<int>(app.online_subtitles.size());
+        app.playback_overlay_selected = std::clamp(
+            app.playback_overlay_selected,
+            0,
+            std::max(0, count - 1));
+        const int first = std::clamp(
+            app.playback_overlay_selected - kVisibleRows + 1,
+            0,
+            std::max(0, count - kVisibleRows));
+        const int end = std::min(count, first + kVisibleRows);
+        for (int index = first; index < end; ++index) {
+            rows.push_back(
+                online_subtitle_label(
+                    app.online_subtitles[
+                        static_cast<std::size_t>(index)]));
+        }
+        if (rows.empty()) {
+            rows.push_back("No results");
+        }
+        app.osd.show_panel(
+            "SubDL results - Cross: download - Circle: back",
+            std::move(rows),
+            app.online_subtitles.empty()
+                ? -1
+                : app.playback_overlay_selected - first);
+        return;
+    }
+    if (app.playback_overlay == PlaybackOverlay::subtitles) {
+        const auto items = subtitle_menu_items(app);
+        std::vector<std::string> rows;
+        constexpr int kVisibleRows = 12;
+        const int count = static_cast<int>(items.size());
+        app.playback_overlay_selected = std::clamp(
+            app.playback_overlay_selected,
+            0,
+            std::max(0, count - 1));
+        const int first = std::clamp(
+            app.playback_overlay_selected - kVisibleRows + 1,
+            0,
+            std::max(0, count - kVisibleRows));
+        const int end = std::min(count, first + kVisibleRows);
+        rows.reserve(static_cast<std::size_t>(end - first));
+        for (int index = first; index < end; ++index) {
+            rows.push_back(
+                items[static_cast<std::size_t>(index)].label);
+        }
+        app.osd.show_panel(
+            "Subtitles - Cross: select - Circle: back",
+            std::move(rows),
+            app.playback_overlay_selected - first);
         return;
     }
     if (app.playback_overlay == PlaybackOverlay::controls) {
@@ -1493,7 +1771,7 @@ void refresh_playback_overlay(App& app) {
                 "D-pad Left/Right  Seek short step",
                 "D-pad Down/Up     Seek long step",
                 "L1 / R1           Previous / next chapter",
-                "Circle            Change subtitle track",
+                "Circle            Quick-change subtitle track",
                 "Square            Change audio track",
                 "Triangle          Change video track",
                 "L3 / R3           Volume down / up",
@@ -1501,7 +1779,7 @@ void refresh_playback_overlay(App& app) {
                 "R2 + Triangle     Aspect ratio",
                 "L2+R2+Triangle    Scale mode",
                 "Touchpad          Show this controls page",
-                "Options           Menu, mute, settings, return",
+                "Options           Menu, subtitles, settings, return",
             },
             -1);
         return;
@@ -1531,6 +1809,12 @@ void refresh_playback_overlay(App& app) {
                     (app.settings.resume_playback ? "On" : "Off"),
                 std::string("Automatically select subtitles  ") +
                     (app.settings.auto_subtitles ? "On" : "Off"),
+                std::string("SubDL API key                   ") +
+                    (app.settings.subdl_api_key.empty()
+                         ? "Not set"
+                         : "Set"),
+                "Download languages               " +
+                    app.settings.subtitle_languages,
                 "Restore playback defaults",
             },
             app.playback_overlay_selected);
@@ -1540,6 +1824,7 @@ void refresh_playback_overlay(App& app) {
         "Playback menu",
         {
             "Resume playback",
+            "Subtitles",
             "View all controls",
             "Playback settings",
             app.volume_percent == 0 ? "Unmute audio" : "Mute audio",
@@ -1562,7 +1847,281 @@ void open_playback_overlay(App& app, PlaybackOverlay overlay) {
             ? "menu"
             : (overlay == PlaybackOverlay::controls
                    ? "controls"
-                   : "settings"));
+                   : (overlay == PlaybackOverlay::settings
+                          ? "settings"
+                          : (overlay == PlaybackOverlay::subtitles
+                                 ? "subtitles"
+                                 : (overlay ==
+                                            PlaybackOverlay::subtitle_browser
+                                        ? "subtitle-browser"
+                                        : "subtitle-online")))));
+}
+
+void erase_last_utf8_codepoint(std::string& value) {
+    if (value.empty()) {
+        return;
+    }
+    value.pop_back();
+    while (!value.empty() &&
+           (static_cast<unsigned char>(value.back()) & 0xc0U) == 0x80U) {
+        value.pop_back();
+    }
+}
+
+void begin_text_edit(App& app, TextEditMode mode) {
+    if (app.text_edit_mode != TextEditMode::none) {
+        return;
+    }
+    app.text_edit_previous_settings = app.settings;
+    app.text_edit_mode = mode;
+    app.text_edit_buffer =
+        mode == TextEditMode::subtitle_languages
+        ? app.settings.subtitle_languages
+        : std::string{};
+    app.ime_was_visible = false;
+    SDL_StartTextInput();
+    refresh_playback_overlay(app);
+}
+
+void finish_text_edit(App& app, bool commit) {
+    if (app.text_edit_mode == TextEditMode::none) {
+        return;
+    }
+    const TextEditMode mode = app.text_edit_mode;
+    app.text_edit_mode = TextEditMode::none;
+    app.ime_was_visible = false;
+    SDL_StopTextInput();
+    if (!commit) {
+        app.settings = app.text_edit_previous_settings;
+        app.text_edit_buffer.clear();
+        refresh_playback_overlay(app);
+        return;
+    }
+    if (mode == TextEditMode::subdl_api_key) {
+        app.settings.subdl_api_key = app.text_edit_buffer;
+    } else {
+        app.settings.subtitle_languages = app.text_edit_buffer;
+    }
+    app.text_edit_buffer.clear();
+    if (!persist_active_player_settings(app)) {
+        app.settings = app.text_edit_previous_settings;
+        app.osd.show("Unable to save subtitle download settings", 8000);
+    }
+    refresh_playback_overlay(app);
+}
+
+bool load_subtitle_browser(App& app, const std::string& path) {
+    bfplayer::SubtitleBrowserResult result =
+        bfplayer::list_subtitle_directory(path);
+    if (!result.ok()) {
+        bfplayer::diagnostics_log(
+            bfplayer::DiagnosticLevel::error,
+            "subtitle-browser failed path=%s error=%s",
+            path.c_str(),
+            result.error.c_str());
+        app.osd.show(result.error, 8000);
+        return false;
+    }
+    app.subtitle_browser = std::move(result);
+    app.subtitle_browser_selected = 0;
+    app.subtitle_browser_first = 0;
+    app.playback_overlay = PlaybackOverlay::subtitle_browser;
+    refresh_playback_overlay(app);
+    bfplayer::diagnostics_log(
+        bfplayer::DiagnosticLevel::info,
+        "subtitle-browser opened path=%s entries=%zu",
+        app.subtitle_browser.path.c_str(),
+        app.subtitle_browser.entries.size());
+    return true;
+}
+
+void open_subtitle_browser(App& app) {
+    std::string initial = "/";
+    if (!bfplayer::is_network_uri(app.current_media_path)) {
+        initial =
+            bfplayer::subtitle_browser_parent(app.current_media_path);
+    }
+    if (!load_subtitle_browser(app, initial) && initial != "/") {
+        (void)load_subtitle_browser(app, "/");
+    }
+}
+
+int subtitle_job_entry(void* userdata) {
+    auto* job = static_cast<SubtitleJob*>(userdata);
+    if (!job) {
+        return 1;
+    }
+    if (job->type == SubtitleJobType::search) {
+        job->search = bfplayer::search_subdl(
+            job->api_key,
+            job->media_path,
+            job->languages);
+        if (!job->search.ok()) {
+            job->error = job->search.error;
+        }
+    } else if (job->type == SubtitleJobType::download) {
+        job->download =
+            bfplayer::download_subdl(job->api_key, job->selected);
+        if (!job->download.ok()) {
+            job->error = job->download.error;
+        } else if (!bfplayer::save_downloaded_subtitle(
+                       "/data/BFplayer/subtitles",
+                       job->media_path,
+                       job->selected,
+                       job->download,
+                       job->saved_path,
+                       job->error)) {
+            job->download.bytes.clear();
+        }
+    } else {
+        job->error = "Invalid subtitle job";
+    }
+    job->done.store(true, std::memory_order_release);
+    return job->error.empty() ? 0 : 1;
+}
+
+bool start_subtitle_job(App& app, SubtitleJobType type) {
+    if (app.subtitle_job.thread) {
+        app.osd.show("A subtitle request is already running");
+        return false;
+    }
+    app.subtitle_job.done.store(false, std::memory_order_release);
+    app.subtitle_job.type = type;
+    app.subtitle_job.api_key = app.settings.subdl_api_key;
+    app.subtitle_job.media_path = app.current_media_path;
+    app.subtitle_job.languages = app.settings.subtitle_languages;
+    app.subtitle_job.search = {};
+    app.subtitle_job.download = {};
+    app.subtitle_job.saved_path.clear();
+    app.subtitle_job.error.clear();
+    app.subtitle_job.thread = SDL_CreateThread(
+        subtitle_job_entry,
+        type == SubtitleJobType::search
+            ? "bfplayer-subtitle-search"
+            : "bfplayer-subtitle-download",
+        &app.subtitle_job);
+    if (!app.subtitle_job.thread) {
+        app.subtitle_job.error =
+            std::string("Unable to start subtitle request: ") +
+            SDL_GetError();
+        app.subtitle_job.type = SubtitleJobType::none;
+        app.osd.show(app.subtitle_job.error, 8000);
+        return false;
+    }
+    app.playback_overlay = PlaybackOverlay::subtitle_online;
+    app.playback_overlay_selected = 0;
+    refresh_playback_overlay(app);
+    return true;
+}
+
+void start_subtitle_search(App& app) {
+    if (app.settings.subdl_api_key.empty()) {
+        app.playback_overlay = PlaybackOverlay::settings;
+        app.playback_overlay_selected = 9;
+        app.osd.show(
+            "Set your free SubDL API key, then try Download again",
+            8000);
+        refresh_playback_overlay(app);
+        return;
+    }
+    app.online_subtitles.clear();
+    if (start_subtitle_job(app, SubtitleJobType::search)) {
+        bfplayer::diagnostics_log(
+            bfplayer::DiagnosticLevel::info,
+            "subtitle-provider search provider=subdl languages=%s media=%s",
+            app.settings.subtitle_languages.c_str(),
+            bfplayer::redact_uri_secrets(
+                app.current_media_path).c_str());
+    }
+}
+
+void start_subtitle_download(
+    App& app,
+    const bfplayer::OnlineSubtitle& subtitle) {
+    app.subtitle_job.selected = subtitle;
+    if (start_subtitle_job(app, SubtitleJobType::download)) {
+        bfplayer::diagnostics_log(
+            bfplayer::DiagnosticLevel::info,
+            "subtitle-provider download provider=subdl language=%s id=%s",
+            subtitle.language.c_str(),
+            subtitle.id.c_str());
+    }
+}
+
+void consume_subtitle_job(App& app) {
+    if (!app.subtitle_job.thread ||
+        !app.subtitle_job.done.load(std::memory_order_acquire)) {
+        return;
+    }
+    SDL_WaitThread(app.subtitle_job.thread, nullptr);
+    app.subtitle_job.thread = nullptr;
+    const SubtitleJobType completed = app.subtitle_job.type;
+    app.subtitle_job.type = SubtitleJobType::none;
+    if (!app.subtitle_job.error.empty()) {
+        bfplayer::diagnostics_log(
+            bfplayer::DiagnosticLevel::error,
+            "subtitle-provider failed provider=subdl operation=%s error=%s",
+            completed == SubtitleJobType::search ? "search" : "download",
+            app.subtitle_job.error.c_str());
+        const std::string error = app.subtitle_job.error;
+        app.subtitle_job.error.clear();
+        app.playback_overlay =
+            completed == SubtitleJobType::search
+            ? PlaybackOverlay::subtitles
+            : PlaybackOverlay::subtitle_online;
+        app.osd.show(error, 8000);
+        refresh_playback_overlay(app);
+        return;
+    }
+    if (completed == SubtitleJobType::search) {
+        app.online_subtitles =
+            std::move(app.subtitle_job.search.subtitles);
+        app.playback_overlay = PlaybackOverlay::subtitle_online;
+        app.playback_overlay_selected = 0;
+        bfplayer::diagnostics_log(
+            bfplayer::DiagnosticLevel::info,
+            "subtitle-provider results provider=subdl count=%zu",
+            app.online_subtitles.size());
+        refresh_playback_overlay(app);
+        return;
+    }
+    const std::string saved = app.subtitle_job.saved_path;
+    if (!saved.empty()) {
+        const auto existing = std::find(
+            app.subtitle_sidecars.begin(),
+            app.subtitle_sidecars.end(),
+            saved);
+        int index = 0;
+        if (existing == app.subtitle_sidecars.end()) {
+            app.subtitle_sidecars.push_back(saved);
+            index =
+                static_cast<int>(app.subtitle_sidecars.size() - 1);
+        } else {
+            index = static_cast<int>(
+                std::distance(app.subtitle_sidecars.begin(), existing));
+        }
+        app.playback_overlay = PlaybackOverlay::none;
+        refresh_playback_overlay(app);
+        if (open_external_subtitle(app, index)) {
+            app.osd.show(
+                "Downloaded and selected: " +
+                    path_filename(saved),
+                8000);
+        }
+        bfplayer::diagnostics_log(
+            bfplayer::DiagnosticLevel::info,
+            "subtitle-provider installed provider=subdl path=%s",
+            saved.c_str());
+    }
+}
+
+void stop_subtitle_job(App& app) {
+    if (app.subtitle_job.thread) {
+        SDL_WaitThread(app.subtitle_job.thread, nullptr);
+        app.subtitle_job.thread = nullptr;
+    }
+    app.subtitle_job.type = SubtitleJobType::none;
+    app.subtitle_job.done.store(false, std::memory_order_release);
 }
 
 bool handle_playback_overlay_button(
@@ -1571,9 +2130,171 @@ bool handle_playback_overlay_button(
     if (app.playback_overlay == PlaybackOverlay::none) {
         return false;
     }
+    if (app.text_edit_mode != TextEditMode::none) {
+        // The PS5 IME owns controller input until it closes.
+        return true;
+    }
     if (button == bfplayer::kControllerOptionsButton) {
-        app.playback_overlay = PlaybackOverlay::none;
+        app.playback_overlay =
+            app.playback_overlay == PlaybackOverlay::subtitle_browser
+            ? PlaybackOverlay::subtitles
+            : PlaybackOverlay::none;
         refresh_playback_overlay(app);
+        return true;
+    }
+    if (app.playback_overlay == PlaybackOverlay::subtitle_browser) {
+        const int count =
+            static_cast<int>(app.subtitle_browser.entries.size());
+        if (button == SDL_CONTROLLER_BUTTON_B) {
+            if (app.subtitle_browser.path == "/") {
+                open_playback_overlay(app, PlaybackOverlay::subtitles);
+            } else {
+                (void)load_subtitle_browser(
+                    app,
+                    bfplayer::subtitle_browser_parent(
+                        app.subtitle_browser.path));
+            }
+            return true;
+        }
+        int delta = 0;
+        if (button == SDL_CONTROLLER_BUTTON_DPAD_UP) {
+            delta = -1;
+        } else if (button == SDL_CONTROLLER_BUTTON_DPAD_DOWN) {
+            delta = 1;
+        } else if (button == SDL_CONTROLLER_BUTTON_LEFTSHOULDER) {
+            delta = -8;
+        } else if (button == SDL_CONTROLLER_BUTTON_RIGHTSHOULDER) {
+            delta = 8;
+        }
+        if (delta != 0) {
+            app.subtitle_browser_selected = std::clamp(
+                app.subtitle_browser_selected + delta,
+                0,
+                std::max(0, count - 1));
+            refresh_playback_overlay(app);
+            return true;
+        }
+        if (button == SDL_CONTROLLER_BUTTON_A && count > 0) {
+            const auto selected =
+                app.subtitle_browser.entries[
+                    static_cast<std::size_t>(
+                        app.subtitle_browser_selected)];
+            if (selected.directory) {
+                (void)load_subtitle_browser(app, selected.path);
+            } else {
+                const auto existing = std::find(
+                    app.subtitle_sidecars.begin(),
+                    app.subtitle_sidecars.end(),
+                    selected.path);
+                int index = 0;
+                if (existing == app.subtitle_sidecars.end()) {
+                    app.subtitle_sidecars.push_back(selected.path);
+                    index = static_cast<int>(
+                        app.subtitle_sidecars.size() - 1);
+                } else {
+                    index = static_cast<int>(
+                        std::distance(
+                            app.subtitle_sidecars.begin(),
+                            existing));
+                }
+                app.playback_overlay = PlaybackOverlay::none;
+                refresh_playback_overlay(app);
+                (void)open_external_subtitle(app, index);
+            }
+        }
+        return true;
+    }
+    if (app.playback_overlay == PlaybackOverlay::subtitle_online) {
+        if (app.subtitle_job.thread) {
+            return true;
+        }
+        if (button == SDL_CONTROLLER_BUTTON_B) {
+            open_playback_overlay(app, PlaybackOverlay::subtitles);
+            return true;
+        }
+        const int count =
+            static_cast<int>(app.online_subtitles.size());
+        if (count > 0 &&
+            (button == SDL_CONTROLLER_BUTTON_DPAD_UP ||
+             button == SDL_CONTROLLER_BUTTON_DPAD_DOWN)) {
+            const int direction =
+                button == SDL_CONTROLLER_BUTTON_DPAD_UP ? -1 : 1;
+            app.playback_overlay_selected =
+                (app.playback_overlay_selected + count + direction) %
+                count;
+            refresh_playback_overlay(app);
+            return true;
+        }
+        if (button == SDL_CONTROLLER_BUTTON_A && count > 0) {
+            start_subtitle_download(
+                app,
+                app.online_subtitles[
+                    static_cast<std::size_t>(
+                        app.playback_overlay_selected)]);
+        }
+        return true;
+    }
+    if (app.playback_overlay == PlaybackOverlay::subtitles) {
+        if (button == SDL_CONTROLLER_BUTTON_B) {
+            open_playback_overlay(app, PlaybackOverlay::menu);
+            return true;
+        }
+        const auto items = subtitle_menu_items(app);
+        const int count = static_cast<int>(items.size());
+        if (button == SDL_CONTROLLER_BUTTON_DPAD_UP ||
+            button == SDL_CONTROLLER_BUTTON_DPAD_DOWN) {
+            const int direction =
+                button == SDL_CONTROLLER_BUTTON_DPAD_UP ? -1 : 1;
+            app.playback_overlay_selected =
+                (app.playback_overlay_selected + count + direction) %
+                count;
+            refresh_playback_overlay(app);
+            return true;
+        }
+        if (button != SDL_CONTROLLER_BUTTON_A || count == 0) {
+            return true;
+        }
+        const SubtitleMenuItem& selected =
+            items[static_cast<std::size_t>(
+                app.playback_overlay_selected)];
+        switch (selected.kind) {
+            case SubtitleMenuKind::off:
+                app.external_subtitles.close();
+                app.external_subtitle_index = -1;
+                if (Kit_GetPlayerSubtitleStream(app.player) >= 0) {
+                    (void)set_stream(
+                        app,
+                        KIT_STREAMTYPE_SUBTITLE,
+                        -1);
+                }
+                app.playback_overlay = PlaybackOverlay::none;
+                refresh_playback_overlay(app);
+                app.osd.show("Subtitles: Off");
+                break;
+            case SubtitleMenuKind::embedded:
+                app.external_subtitles.close();
+                app.external_subtitle_index = -1;
+                if (set_stream(
+                        app,
+                        KIT_STREAMTYPE_SUBTITLE,
+                        selected.index)) {
+                    app.playback_overlay = PlaybackOverlay::none;
+                    refresh_playback_overlay(app);
+                }
+                break;
+            case SubtitleMenuKind::external:
+                if (open_external_subtitle(app, selected.index)) {
+                    app.playback_overlay = PlaybackOverlay::none;
+                    refresh_playback_overlay(app);
+                }
+                break;
+            case SubtitleMenuKind::browse:
+                open_subtitle_browser(app);
+                break;
+            case SubtitleMenuKind::online:
+                start_subtitle_search(app);
+                break;
+        }
         return true;
     }
     if (button == SDL_CONTROLLER_BUTTON_B) {
@@ -1594,7 +2315,7 @@ bool handle_playback_overlay_button(
             const int direction =
                 button == SDL_CONTROLLER_BUTTON_DPAD_UP ? -1 : 1;
             app.playback_overlay_selected =
-                (app.playback_overlay_selected + 10 + direction) % 10;
+                (app.playback_overlay_selected + 12 + direction) % 12;
             refresh_playback_overlay(app);
             return true;
         }
@@ -1606,7 +2327,11 @@ bool handle_playback_overlay_button(
                 app.video_aspect_mode;
             const bfplayer::VideoCropMode previous_crop =
                 app.video_crop_mode;
-            app.settings = {};
+            bfplayer::PlayerSettings defaults{};
+            defaults.subdl_api_key = app.settings.subdl_api_key;
+            defaults.subtitle_languages =
+                app.settings.subtitle_languages;
+            app.settings = std::move(defaults);
             app.video_scale_mode = bfplayer::VideoScaleMode::fit;
             app.video_aspect_mode =
                 bfplayer::VideoAspectMode::default_ratio;
@@ -1625,6 +2350,21 @@ bool handle_playback_overlay_button(
         if (button != SDL_CONTROLLER_BUTTON_A &&
             button != SDL_CONTROLLER_BUTTON_DPAD_LEFT &&
             button != SDL_CONTROLLER_BUTTON_DPAD_RIGHT) {
+            return true;
+        }
+        if (button == SDL_CONTROLLER_BUTTON_A &&
+            app.playback_overlay_selected == 9) {
+            begin_text_edit(app, TextEditMode::subdl_api_key);
+            return true;
+        }
+        if (button == SDL_CONTROLLER_BUTTON_A &&
+            app.playback_overlay_selected == 10) {
+            begin_text_edit(app, TextEditMode::subtitle_languages);
+            return true;
+        }
+        if ((app.playback_overlay_selected == 9 ||
+             app.playback_overlay_selected == 10) &&
+            button != SDL_CONTROLLER_BUTTON_A) {
             return true;
         }
         const int direction =
@@ -1687,14 +2427,20 @@ bool handle_playback_overlay_button(
                 app.settings.auto_subtitles =
                     !app.settings.auto_subtitles;
                 break;
-            case 9:
-                app.settings = {};
+            case 11: {
+                bfplayer::PlayerSettings defaults{};
+                defaults.subdl_api_key =
+                    app.settings.subdl_api_key;
+                defaults.subtitle_languages =
+                    app.settings.subtitle_languages;
+                app.settings = std::move(defaults);
                 app.video_scale_mode = bfplayer::VideoScaleMode::fit;
                 app.video_aspect_mode =
                     bfplayer::VideoAspectMode::default_ratio;
                 app.video_crop_mode =
                     bfplayer::VideoCropMode::default_crop;
                 break;
+            }
             default:
                 return true;
         }
@@ -1713,11 +2459,11 @@ bool handle_playback_overlay_button(
         const int direction =
             button == SDL_CONTROLLER_BUTTON_DPAD_UP ? -1 : 1;
         app.playback_overlay_selected =
-            (app.playback_overlay_selected + 6 + direction) % 6;
+            (app.playback_overlay_selected + 7 + direction) % 7;
         refresh_playback_overlay(app);
         return true;
     }
-    if (app.playback_overlay_selected == 4 &&
+    if (app.playback_overlay_selected == 5 &&
         (button == SDL_CONTROLLER_BUTTON_DPAD_LEFT ||
          button == SDL_CONTROLLER_BUTTON_DPAD_RIGHT)) {
         adjust_subtitle_delay(
@@ -1735,21 +2481,24 @@ bool handle_playback_overlay_button(
             refresh_playback_overlay(app);
             break;
         case 1:
-            open_playback_overlay(app, PlaybackOverlay::controls);
+            open_playback_overlay(app, PlaybackOverlay::subtitles);
             break;
         case 2:
-            open_playback_overlay(app, PlaybackOverlay::settings);
+            open_playback_overlay(app, PlaybackOverlay::controls);
             break;
         case 3:
+            open_playback_overlay(app, PlaybackOverlay::settings);
+            break;
+        case 4:
             toggle_mute(app);
             refresh_playback_overlay(app);
             break;
-        case 4:
+        case 5:
             app.subtitle_delay_ms = 0;
             app.osd.show("Subtitle timing reset to 0 ms");
             refresh_playback_overlay(app);
             break;
-        case 5:
+        case 6:
             app.playback_running = false;
             bfplayer::diagnostics_log(
                 bfplayer::DiagnosticLevel::info,
@@ -1849,11 +2598,40 @@ void on_controller_button(App& app, SDL_GameControllerButton button) {
 void pump_events(App& app) {
     SDL_Event event{};
     while (SDL_PollEvent(&event)) {
+        if (event.type == SDL_QUIT) {
+            app.running = false;
+            app.playback_running = false;
+            continue;
+        }
+        if (app.text_edit_mode != TextEditMode::none) {
+            if (event.type == SDL_TEXTINPUT) {
+                const std::size_t maximum =
+                    app.text_edit_mode == TextEditMode::subdl_api_key
+                    ? 256
+                    : 96;
+                app.text_edit_buffer.append(event.text.text);
+                while (app.text_edit_buffer.size() > maximum) {
+                    erase_last_utf8_codepoint(app.text_edit_buffer);
+                }
+                refresh_playback_overlay(app);
+            } else if (event.type == SDL_KEYDOWN) {
+                if (event.key.keysym.sym == SDLK_RETURN ||
+                    event.key.keysym.sym == SDLK_KP_ENTER) {
+                    finish_text_edit(app, true);
+                } else if (event.key.keysym.sym == SDLK_ESCAPE) {
+                    finish_text_edit(app, false);
+                } else if (event.key.keysym.sym == SDLK_BACKSPACE) {
+                    erase_last_utf8_codepoint(app.text_edit_buffer);
+                    refresh_playback_overlay(app);
+                } else if (event.key.keysym.sym == SDLK_DELETE) {
+                    app.text_edit_buffer.clear();
+                    refresh_playback_overlay(app);
+                }
+            }
+            // Do not let IME controller events also change playback.
+            continue;
+        }
         switch (event.type) {
-            case SDL_QUIT:
-                app.running = false;
-                app.playback_running = false;
-                break;
             case SDL_CONTROLLERDEVICEADDED:
                 if (!app.controller && SDL_IsGameController(event.cdevice.which)) {
                     app.controller = SDL_GameControllerOpen(event.cdevice.which);
@@ -1919,6 +2697,26 @@ void pump_events(App& app) {
                 break;
         }
     }
+}
+
+void update_text_input_state(App& app) {
+#if defined(BFPLAYER_PS5)
+    if (app.text_edit_mode == TextEditMode::none) {
+        return;
+    }
+    SDL_Window* window = SDL_RenderGetWindow(app.renderer);
+    const bool shown =
+        window &&
+        SDL_IsScreenKeyboardShown(window) == SDL_TRUE;
+    if (shown) {
+        app.ime_was_visible = true;
+    } else if (app.ime_was_visible) {
+        // The PS5 backend emits text + Return for OK, but no event for cancel.
+        finish_text_edit(app, false);
+    }
+#else
+    (void)app;
+#endif
 }
 
 PlaybackOutcome run_player(
@@ -2252,6 +3050,8 @@ PlaybackOutcome run_player(
     while (app.running && app.playback_running &&
            Kit_GetPlayerState(app.player) != KIT_STOPPED) {
         pump_events(app);
+        update_text_input_state(app);
+        consume_subtitle_job(app);
 
         if (!app.paused && app.audio != 0) {
             const Uint32 queued = SDL_GetQueuedAudioSize(app.audio);
@@ -2452,6 +3252,10 @@ PlaybackOutcome run_player(
             last_resume_save = now;
         }
     }
+    if (app.text_edit_mode != TextEditMode::none) {
+        finish_text_edit(app, false);
+    }
+    stop_subtitle_job(app);
     const double final_position = Kit_GetPlayerPosition(app.player);
     const double final_duration = Kit_GetPlayerDuration(app.player);
     const bool reached_end =
@@ -2530,12 +3334,19 @@ void close_media(App& app) {
     app.player = nullptr;
     app.source = nullptr;
     app.subtitle_sidecars.clear();
+    app.subtitle_browser = {};
+    app.subtitle_browser_selected = 0;
+    app.subtitle_browser_first = 0;
+    app.online_subtitles.clear();
     app.current_media_path.clear();
     app.external_subtitle_index = -1;
     app.playback_running = false;
     app.paused = false;
     app.playback_overlay = PlaybackOverlay::none;
     app.playback_overlay_selected = 0;
+    app.text_edit_mode = TextEditMode::none;
+    app.text_edit_buffer.clear();
+    app.ime_was_visible = false;
 }
 
 int run_library(

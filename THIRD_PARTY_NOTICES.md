@@ -35,6 +35,13 @@ The exact FFmpeg configure string embedded in PacBrew's `libavcodec.a` includes
 `--enable-nonfree`. Corresponding FFmpeg source for version 7.0.1 is available
 from <https://ffmpeg.org/releases/>.
 
+## Optional online subtitle service
+
+BFplayer can search and download subtitle files from the official SubDL API
+when a user supplies their own API key. No SubDL credential is bundled.
+Use of that optional service is governed by
+<https://subdl.com/terms> and its published API limits.
+
 ## Standalone BigApp loader
 
 `src/launcher/core/hbldr.c`, `elfldr.c`, and `pt.c` originate from John

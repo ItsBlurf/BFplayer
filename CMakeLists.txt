@@ -16,6 +16,8 @@ add_library(bfplayer_core STATIC
     src/core/playlist.cpp
     src/core/safe_read_file.cpp
     src/core/source_uri.cpp
+    src/core/subtitle_browser.cpp
+    src/core/subtitle_provider.cpp
     src/core/video_layout.cpp
 )
 target_include_directories(bfplayer_core PUBLIC include)
@@ -59,6 +61,14 @@ if(BUILD_TESTING)
     add_executable(source_uri_tests tests/source_uri_tests.cpp)
     target_link_libraries(source_uri_tests PRIVATE bfplayer_core)
     add_test(NAME source_uri_tests COMMAND source_uri_tests)
+
+    add_executable(subtitle_provider_tests tests/subtitle_provider_tests.cpp)
+    target_link_libraries(subtitle_provider_tests PRIVATE bfplayer_core)
+    add_test(NAME subtitle_provider_tests COMMAND subtitle_provider_tests)
+
+    add_executable(subtitle_browser_tests tests/subtitle_browser_tests.cpp)
+    target_link_libraries(subtitle_browser_tests PRIVATE bfplayer_core)
+    add_test(NAME subtitle_browser_tests COMMAND subtitle_browser_tests)
 
     add_executable(playlist_tests tests/playlist_tests.cpp)
     target_link_libraries(playlist_tests PRIVATE bfplayer_core)

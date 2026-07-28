@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.1.0-alpha.32 - external and online subtitles
+
+- Added an Options > Subtitles screen for embedded tracks, detected sidecars,
+  manually browsed subtitle files, and downloaded subtitles
+- Added a safe subtitle-only file browser that starts beside the playing video
+- Added optional SubDL search and download using the user's own API key and
+  preferred language list
+- Download subtitles in the background, save them atomically under
+  `/data/BFplayer/subtitles`, and select them without restarting the video
+- Keep API keys out of URLs and logs; accept downloads only from SubDL's
+  official HTTPS hosts
+
 ## 0.1.0-alpha.31 - responsive seek and track switching
 
 - Wake the demuxer immediately for seeks instead of waiting for full buffers

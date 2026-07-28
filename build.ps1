@@ -113,6 +113,8 @@ try {
         'src\core\playlist.cpp',
         'src\core\safe_read_file.cpp',
         'src\core\source_uri.cpp',
+        'src\core\subtitle_browser.cpp',
+        'src\core\subtitle_provider.cpp',
         'src\core\video_layout.cpp',
         'src\core\video_thumbnail.cpp',
         'src\core\library_database.cpp',

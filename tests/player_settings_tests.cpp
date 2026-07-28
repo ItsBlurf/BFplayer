@@ -22,12 +22,20 @@ int main() {
     invalid.short_seek_seconds = 7;
     invalid.long_seek_seconds = -1;
     invalid.osd_duration_ms = 17;
+    invalid.subdl_api_key = " key\r\nvalue ";
+    invalid.subtitle_languages = " EN; AR,fa ";
     const bfplayer::PlayerSettings normalized =
         bfplayer::normalized_player_settings(invalid);
     check(normalized.volume_percent == 100, "volume is clamped");
     check(normalized.short_seek_seconds == 10, "invalid short seek resets");
     check(normalized.long_seek_seconds == 60, "invalid long seek resets");
     check(normalized.osd_duration_ms == 4000, "invalid OSD duration resets");
+    check(
+        normalized.subdl_api_key == "keyvalue",
+        "provider API key removes unsafe whitespace");
+    check(
+        normalized.subtitle_languages == "en,ar,fa",
+        "subtitle languages normalize");
 
     int integer = 0;
     check(bfplayer::parse_setting_integer("30", 0, 100, integer) &&

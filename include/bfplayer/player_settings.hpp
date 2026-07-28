@@ -17,6 +17,10 @@ inline constexpr std::string_view kSettingResumePlayback =
     "playback.resume_enabled";
 inline constexpr std::string_view kSettingAutoSubtitles =
     "playback.auto_subtitles";
+inline constexpr std::string_view kSettingSubdlApiKey =
+    "subtitles.subdl_api_key";
+inline constexpr std::string_view kSettingSubtitleLanguages =
+    "subtitles.download_languages";
 
 struct PlayerSettings {
     int volume_percent = 100;
@@ -25,6 +29,8 @@ struct PlayerSettings {
     int osd_duration_ms = 4000;
     bool resume_playback = true;
     bool auto_subtitles = true;
+    std::string subdl_api_key;
+    std::string subtitle_languages = "en";
 };
 
 [[nodiscard]] PlayerSettings normalized_player_settings(

@@ -11,6 +11,7 @@ the Media section, and does not require websrv or Homebrew Launcher(lightly bund
 - Manual media sources with an optional whole-library import
 - Resume playback, favorites, search, sorting, and playback queues
 - Embedded and external subtitles with timing adjustment
+- In-player subtitle browser and optional SubDL search/download
 - Audio, video, subtitle, and chapter selection
 - Aspect-ratio, crop, and scaling controls
 - Local artwork or an automatically generated video preview
@@ -82,6 +83,21 @@ TV shows.
 
 Display controls are available through the playback menu and controller
 shortcuts, including scaling, aspect ratio, and crop mode.
+
+### External and online subtitles
+
+Open **Options > Subtitles** while a video is playing. The list contains
+embedded tracks, matching files found beside the video, and any subtitle chosen
+through **Browse subtitle files**. The browser starts in the video's folder and
+shows only folders and supported subtitle files.
+
+Optional online search uses the official SubDL API. In **Playback settings**,
+select **SubDL API key** and enter a key from a free SubDL account, then set
+**Download languages** to comma-separated codes such as `en,ar,fr`. BFplayer
+searches by the playing release filename, downloads in the background, stores
+the selected file under `/data/BFplayer/subtitles`, and activates it without
+restarting playback. The key is sent only in HTTPS request headers and is not
+written to logs or URLs. SubDL's own quotas and terms apply.
 
 ## Logs
 

@@ -1,4 +1,5 @@
 #include "bfplayer/player_settings.hpp"
+#include "bfplayer/subtitle_provider.hpp"
 
 #include <algorithm>
 #include <array>
@@ -50,6 +51,21 @@ PlayerSettings normalized_player_settings(PlayerSettings settings) noexcept {
             settings.osd_duration_ms) == osd_choices.end()) {
         settings.osd_duration_ms = 4000;
     }
+    settings.subdl_api_key.erase(
+        std::remove_if(
+            settings.subdl_api_key.begin(),
+            settings.subdl_api_key.end(),
+            [](unsigned char character) {
+                return character < 0x21U || character > 0x7eU ||
+                       character == '\r' || character == '\n';
+            }),
+        settings.subdl_api_key.end());
+    if (settings.subdl_api_key.size() > 256) {
+        settings.subdl_api_key.resize(256);
+    }
+    settings.subtitle_languages =
+        normalize_subtitle_languages(
+            std::move(settings.subtitle_languages));
     return settings;
 }
 

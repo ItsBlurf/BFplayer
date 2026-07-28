@@ -247,6 +247,16 @@ assert(player.includes('create_subtitle_texture'),
     'subtitle switching updates only the subtitle texture');
 assert(player.includes('track-switch refresh'),
     'audio and subtitle switches refresh around the current position');
+assert(player.includes('PlaybackOverlay::subtitles'),
+    'playback options expose a dedicated subtitle screen');
+assert(player.includes('Browse subtitle files...'),
+    'subtitle screen exposes the local subtitle browser');
+assert(player.includes('Download from SubDL'),
+    'subtitle screen exposes optional online search');
+assert(player.includes('subtitle-provider search provider=subdl'),
+    'online search emits credential-free diagnostics');
+assert(!player.includes('api_key='),
+    'player never adds provider API keys to URLs');
 assert(!player.includes(
     'type == KIT_STREAMTYPE_VIDEO || type == KIT_STREAMTYPE_SUBTITLE'),
     'subtitle switching does not rebuild the video texture');

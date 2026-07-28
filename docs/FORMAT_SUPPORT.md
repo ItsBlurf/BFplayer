@@ -106,6 +106,8 @@ and a user-selectable deinterlace filter are not implemented.
 | Live embedded track switching/Off | Implemented |
 | External SRT, SSA/ASS, WebVTT and FFmpeg text formats | Implemented with independent demuxer + libass |
 | Multiple matching sidecars | Implemented, natural-order cycle |
+| Browse any local subtitle while playing | Implemented through Options > Subtitles |
+| Online subtitle search/download | Optional SubDL API integration; user API key and provider quotas apply |
 | External subtitle timing | Implemented, -10 to +10 seconds |
 | External SUP/PGS or IDX+SUB bitmap | Implemented with palette/index/geometry validation, a 30-second decode deadline, packet/event limits, and a bounded 256 MiB decoded-cue cache |
 
