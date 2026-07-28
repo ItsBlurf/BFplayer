@@ -6,6 +6,9 @@
 - Added an online provider chooser with unavailable providers shown in grey
 - Added wraparound navigation to the media library and every file/menu list
 - Added accelerating held D-pad navigation for long lists
+- Added a ready-to-copy `BFplayer-websrv.zip` for direct websrv launch
+- Added clean exit support for websrv's `FAKE00000` BigApp host
+- Added a clear AI-assisted development notice and contributor credits
 
 ## 0.1.0-alpha.33 - subtitle search and browser fixes
 

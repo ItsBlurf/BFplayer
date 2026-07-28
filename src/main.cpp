@@ -3727,6 +3727,7 @@ void cleanup(App& app) {
 
 void return_to_playstation_home() {
     constexpr const char* kBFplayerTitleId = "PSMC00001";
+    constexpr const char* kWebsrvTitleId = "FAKE00000";
     const int app_id = sceSystemServiceGetAppIdOfRunningBigApp();
     if (app_id <= 0) {
         bfplayer::diagnostics_log(
@@ -3746,7 +3747,11 @@ void return_to_playstation_home() {
             static_cast<unsigned int>(title_result));
         return;
     }
-    if (std::strcmp(title_id.data(), kBFplayerTitleId) != 0) {
+    const bool is_bfplayer_host =
+        std::strcmp(title_id.data(), kBFplayerTitleId) == 0;
+    const bool is_websrv_host =
+        std::strcmp(title_id.data(), kWebsrvTitleId) == 0;
+    if (!is_bfplayer_host && !is_websrv_host) {
         bfplayer::diagnostics_log(
             bfplayer::DiagnosticLevel::error,
             "home-return skipped reason=unexpected-bigapp app_id=%d title_id=%s",

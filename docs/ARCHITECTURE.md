@@ -142,7 +142,7 @@ decoder objects are pulled from the static SDL_image archive.
 
 ## Packaging
 
-The supported release is one injectable payload:
+The primary release is one injectable payload:
 
 ```text
 bfplayer-standalone.elf
@@ -157,3 +157,21 @@ verified runtime image read-only rather than allocating a second decompressed
 copy. No separate player transfer or HBL installation is required. AppInst and
 kernel-system imports belong to the outer resident launcher; the player ELF
 retains its narrower import boundary. See `docs/STANDALONE_LAUNCHER.md`.
+
+An optional compatibility package is also provided:
+
+```text
+BFplayer-websrv.zip
+└── BFplayer
+    ├── eboot.elf
+    ├── assets/fonts
+    ├── sce_sys/icon0.png
+    └── build-manifest.json
+```
+
+This ZIP contains the player and its runtime assets without the standalone
+installer, Media tile, embedded player copy, or port 9040 listener. websrv
+discovers `eboot.elf`, supplies the BFplayer folder as the working directory,
+and performs the BigApp transition through its existing `FAKE00000` host.
+BFplayer recognizes both the standalone `PSMC00001` host and websrv's
+`FAKE00000` host when returning to PlayStation Home.

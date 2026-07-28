@@ -1,8 +1,13 @@
 # BFplayer
 
+**AI-assisted development:** BFplayer has been developed with OpenAI Codex.
+ItsBlurf directs the project and tests releases on real PS5 hardware.
+
 BFplayer is a native media library and player for jailbroken
-PlayStation 5 consoles. It runs as a single payload, installs its own tile in
-the Media section, and does not require websrv or Homebrew Launcher(lightly bundeled inside running on 9040 so it doesnt conflict with HBL/websrv).
+PlayStation 5 consoles. The standalone release installs its own tile in the
+Media section and does not require websrv or Homebrew Launcher. A separate
+websrv-ready ZIP is available for people who already use websrv and do not
+want BFplayer's standalone launcher running in the background.
 
 <img width="1920" height="1080" alt="20260728_013154_00032112 jpg" src="https://github.com/user-attachments/assets/4f542583-3c66-493d-ac3c-aa42e55ff79e" />
 ## Features
@@ -36,6 +41,8 @@ to the current video.
 
 ## Install
 
+### Standalone Media tile
+
 Download `bfplayer-standalone.elf` from the latest release and inject
 that payload after each jailbreak. It installs or updates the **BFplayer**
 tile in the Media section and stays resident to launch the player.
@@ -45,6 +52,17 @@ and maintains its own runtime folder. Reinjection preserves the library,
 settings, sources, playback history, and logs. Repeated tile launches are
 coalesced, and a player-instance lock prevents two BFplayer processes from
 initializing PS5 video memory at the same time.
+
+### websrv
+
+Download `BFplayer-websrv.zip` from the latest release and extract its
+`BFplayer` folder into a websrv homebrew root such as `/data/homebrew`,
+`/mnt/usb0/homebrew`, or `/mnt/ext0/homebrew`. The final entrypoint is
+`BFplayer/eboot.elf`.
+
+websrv launches the player directly, so this method does not use
+`bfplayer-standalone.elf`, the Media tile, port 9040, or BFplayer's resident
+launcher. See [docs/WEBSRV.md](docs/WEBSRV.md) for the exact package layout.
 
 ## Library controls
 
@@ -142,9 +160,27 @@ Release artifacts are written to `dist/`.
   media encoding.
 
 See [docs/STANDALONE_LAUNCHER.md](docs/STANDALONE_LAUNCHER.md) for launcher
-details and [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for bundled
-components and licenses.
-,
+details, [docs/WEBSRV.md](docs/WEBSRV.md) for the websrv package, and
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for bundled components and
+licenses.
+
+## Contributors
+
+- ItsBlurf: project direction, PS5 testing, and releases
+- OpenAI Codex: AI-assisted implementation, review, and documentation
+
+## Acknowledgements
+
+- John Törnblom and
+  [ps5-payload-websrv](https://github.com/ps5-payload-dev/websrv) for the
+  BigApp and ELF loading foundation and the websrv homebrew format
+- [FFmpeg and ffplay](https://ffmpeg.org/) for the media and playback
+  foundation
+- [PacBrew](https://github.com/ps5-payload-dev/pacbrew), SDL2, and
+  SDL_kitchensink for making the PS5 playback stack possible
+- [VLC](https://www.videolan.org/vlc/) for the display aspect, crop, and
+  scaling behavior used as a reference
+
 ## License
 
 GPL-3.0-or-later. See [LICENSE](LICENSE).

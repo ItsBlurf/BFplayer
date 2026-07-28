@@ -41,6 +41,8 @@ $buildDir = Join-Path $projectRoot 'build\ps5'
 $distDir = Join-Path $projectRoot 'dist'
 $packageRoot = Join-Path $projectRoot 'build\package'
 $packageDir = Join-Path $packageRoot 'BFplayer-standalone'
+$websrvPackageDir = Join-Path $packageRoot 'BFplayer'
+$websrvVerifyDir = Join-Path $packageRoot 'BFplayer-websrv-verify'
 New-Item -ItemType Directory -Force -Path $buildDir, $distDir | Out-Null
 $legacyLowerStem = 'ps5-' + 'media-' + 'center'
 $legacyUpperStem = 'PS5-' + 'Media' + 'Center'
@@ -408,6 +410,200 @@ try {
         (Join-Path $distDir 'BFplayer-standalone.zip.sha256'),
         "$zipHash  BFplayer-standalone.zip`n")
 
+    $resolvedWebsrvPackageDir = [IO.Path]::GetFullPath($websrvPackageDir)
+    if (-not $resolvedWebsrvPackageDir.StartsWith(
+            $expectedPackagePrefix,
+            [StringComparison]::OrdinalIgnoreCase)) {
+        throw "Refusing to clean websrv package staging outside $packageRoot"
+    }
+    if (Test-Path -LiteralPath $resolvedWebsrvPackageDir) {
+        Remove-Item -LiteralPath $resolvedWebsrvPackageDir -Recurse -Force
+    }
+    New-Item -ItemType Directory -Force -Path `
+        $websrvPackageDir, `
+        (Join-Path $websrvPackageDir 'assets\fonts'), `
+        (Join-Path $websrvPackageDir 'sce_sys') | Out-Null
+
+    $websrvEboot = Join-Path $websrvPackageDir 'eboot.elf'
+    Copy-Item -LiteralPath $elf -Destination $websrvEboot -Force
+    Copy-Item `
+        -LiteralPath (Join-Path $projectRoot 'assets\fonts\NotoSans-Regular.ttf') `
+        -Destination (Join-Path $websrvPackageDir 'assets\fonts') `
+        -Force
+    Copy-Item `
+        -LiteralPath (Join-Path $projectRoot 'assets\fonts\OFL.txt') `
+        -Destination (Join-Path $websrvPackageDir 'assets\fonts') `
+        -Force
+    Copy-Item `
+        -LiteralPath (Join-Path $projectRoot 'assets\icon0.png') `
+        -Destination (Join-Path $websrvPackageDir 'sce_sys\icon0.png') `
+        -Force
+    Copy-Item `
+        -LiteralPath (Join-Path $projectRoot 'docs\WEBSRV.md') `
+        -Destination (Join-Path $websrvPackageDir 'INSTALL.md') `
+        -Force
+    Copy-Item `
+        -LiteralPath (Join-Path $projectRoot 'LICENSE') `
+        -Destination $websrvPackageDir `
+        -Force
+    Copy-Item `
+        -LiteralPath (Join-Path $projectRoot 'THIRD_PARTY_NOTICES.md') `
+        -Destination $websrvPackageDir `
+        -Force
+
+    $websrvPayloadFiles = @(
+        'eboot.elf',
+        'assets\fonts\NotoSans-Regular.ttf',
+        'assets\fonts\OFL.txt',
+        'sce_sys\icon0.png',
+        'INSTALL.md',
+        'LICENSE',
+        'THIRD_PARTY_NOTICES.md'
+    )
+    $websrvFileManifest = @(
+        foreach ($relativePath in $websrvPayloadFiles) {
+            $payloadPath = Join-Path $websrvPackageDir $relativePath
+            $payloadItem = Get-Item -LiteralPath $payloadPath
+            [ordered]@{
+                path = $relativePath.Replace('\', '/')
+                bytes = $payloadItem.Length
+                sha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath $payloadPath).Hash.ToLowerInvariant()
+            }
+        }
+    )
+    $websrvManifest = [ordered]@{
+        name = 'BFplayer'
+        version = $version
+        target = 'x86_64-sie-ps5'
+        package = 'websrv homebrew folder'
+        install_directory = 'BFplayer'
+        entrypoint = 'BFplayer/eboot.elf'
+        websrv_required = $true
+        resident_bfplayer_launcher = $false
+        runtime_data = '/data/BFplayer'
+        pacbrew = 'v0.37'
+        ffmpeg = '7.0.1'
+        player_sha256 = $hash
+        built_utc = $manifest.built_utc
+        files = $websrvFileManifest
+    }
+    [IO.File]::WriteAllText(
+        (Join-Path $websrvPackageDir 'build-manifest.json'),
+        (($websrvManifest | ConvertTo-Json -Depth 5) + "`n"))
+
+    $expectedWebsrvFiles = @(
+        $websrvPayloadFiles + @('build-manifest.json') |
+            ForEach-Object { $_.Replace('\', '/') } |
+            Sort-Object
+    )
+    $actualWebsrvFiles = @(
+        Get-ChildItem -LiteralPath $websrvPackageDir -File -Recurse |
+            ForEach-Object {
+                $_.FullName.Substring($websrvPackageDir.Length + 1).Replace('\', '/')
+            } |
+            Sort-Object
+    )
+    $websrvDifference = Compare-Object $expectedWebsrvFiles $actualWebsrvFiles
+    if ($websrvDifference) {
+        throw "Websrv staging contains a missing or unexpected file: $($websrvDifference | Out-String)"
+    }
+    if ((Get-FileHash -Algorithm SHA256 -LiteralPath $websrvEboot).Hash.ToLowerInvariant() -ne $hash) {
+        throw 'Websrv eboot.elf does not match the built BFplayer ELF.'
+    }
+
+    $elfStream = [IO.File]::OpenRead($websrvEboot)
+    try {
+        $elfMagic = New-Object byte[] 4
+        if ($elfStream.Read($elfMagic, 0, $elfMagic.Length) -ne $elfMagic.Length -or
+            $elfMagic[0] -ne 0x7f -or
+            $elfMagic[1] -ne 0x45 -or
+            $elfMagic[2] -ne 0x4c -or
+            $elfMagic[3] -ne 0x46) {
+            throw 'Websrv eboot.elf is not an ELF file.'
+        }
+    }
+    finally {
+        $elfStream.Dispose()
+    }
+
+    $iconPath = Join-Path $websrvPackageDir 'sce_sys\icon0.png'
+    $iconStream = [IO.File]::OpenRead($iconPath)
+    try {
+        $pngMagic = New-Object byte[] 8
+        if ($iconStream.Read($pngMagic, 0, $pngMagic.Length) -ne $pngMagic.Length -or
+            [BitConverter]::ToString($pngMagic) -ne '89-50-4E-47-0D-0A-1A-0A') {
+            throw 'Websrv sce_sys/icon0.png is not a PNG file.'
+        }
+    }
+    finally {
+        $iconStream.Dispose()
+    }
+
+    $websrvZip = Join-Path $distDir 'BFplayer-websrv.zip'
+    Compress-Archive `
+        -Path $websrvPackageDir `
+        -DestinationPath $websrvZip `
+        -CompressionLevel Optimal `
+        -Force
+
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+    $websrvArchive = [IO.Compression.ZipFile]::OpenRead($websrvZip)
+    try {
+        $archiveFiles = @(
+            $websrvArchive.Entries |
+                Where-Object { $_.Name } |
+                ForEach-Object { $_.FullName.Replace('\', '/') } |
+                Sort-Object
+        )
+        $expectedArchiveFiles = @(
+            $expectedWebsrvFiles |
+                ForEach-Object { "BFplayer/$_" } |
+                Sort-Object
+        )
+        $archiveDifference = Compare-Object $expectedArchiveFiles $archiveFiles
+        if ($archiveDifference) {
+            throw "Websrv ZIP contains a missing or unexpected file: $($archiveDifference | Out-String)"
+        }
+        if ($archiveFiles -contains 'BFplayer/homebrew.js') {
+            throw 'Websrv ZIP must launch eboot.elf directly, not through homebrew.js.'
+        }
+    }
+    finally {
+        $websrvArchive.Dispose()
+    }
+
+    $resolvedWebsrvVerifyDir = [IO.Path]::GetFullPath($websrvVerifyDir)
+    if (-not $resolvedWebsrvVerifyDir.StartsWith(
+            $expectedPackagePrefix,
+            [StringComparison]::OrdinalIgnoreCase)) {
+        throw "Refusing to clean websrv verification staging outside $packageRoot"
+    }
+    if (Test-Path -LiteralPath $resolvedWebsrvVerifyDir) {
+        Remove-Item -LiteralPath $resolvedWebsrvVerifyDir -Recurse -Force
+    }
+    [IO.Compression.ZipFile]::ExtractToDirectory($websrvZip, $websrvVerifyDir)
+    foreach ($relativePath in $expectedWebsrvFiles) {
+        $stagedPath = Join-Path $websrvPackageDir $relativePath
+        $extractedPath = Join-Path (Join-Path $websrvVerifyDir 'BFplayer') $relativePath
+        if (-not (Test-Path -LiteralPath $extractedPath -PathType Leaf)) {
+            throw "Websrv ZIP verification is missing $relativePath"
+        }
+        $stagedHash =
+            (Get-FileHash -Algorithm SHA256 -LiteralPath $stagedPath).Hash
+        $extractedHash =
+            (Get-FileHash -Algorithm SHA256 -LiteralPath $extractedPath).Hash
+        if ($stagedHash -ne $extractedHash) {
+            throw "Websrv ZIP verification hash mismatch: $relativePath"
+        }
+    }
+    Remove-Item -LiteralPath $resolvedWebsrvVerifyDir -Recurse -Force
+
+    $websrvZipHash =
+        (Get-FileHash -Algorithm SHA256 -LiteralPath $websrvZip).Hash.ToLowerInvariant()
+    [IO.File]::WriteAllText(
+        (Join-Path $distDir 'BFplayer-websrv.zip.sha256'),
+        "$websrvZipHash  BFplayer-websrv.zip`n")
+
     $logDir = Join-Path $workspaceRoot 'logs\build'
     New-Item -ItemType Directory -Force -Path $logDir | Out-Null
     [IO.File]::WriteAllLines(
@@ -426,10 +622,14 @@ try {
             "standalone_sha256=$standaloneHash",
             "package=$zip",
             "package_sha256=$zipHash",
+            "websrv_package=$websrvZip",
+            "websrv_package_sha256=$websrvZipHash",
             "built_utc=$($manifest.built_utc)"
         ))
     Get-Item -LiteralPath $standalone | Select-Object FullName, Length
+    Get-Item -LiteralPath $websrvZip | Select-Object FullName, Length
     Write-Host "SHA256 $standaloneHash"
+    Write-Host "WEBSRV SHA256 $websrvZipHash"
 }
 finally {
     Pop-Location

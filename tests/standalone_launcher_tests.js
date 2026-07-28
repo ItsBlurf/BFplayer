@@ -332,6 +332,8 @@ assert(player.includes('"/data/BFplayer/player.lock"'));
 assert(player.includes('LOCK_EX | LOCK_NB'));
 assert(player.includes('another player is already running'));
 assert(player.includes('kBFplayerTitleId = "PSMC00001"'));
+assert(player.includes('kWebsrvTitleId = "FAKE00000"'));
+assert(player.includes('!is_bfplayer_host && !is_websrv_host'));
 assert(player.includes('reason=unexpected-bigapp'));
 assert(!player.includes('subtitle_delay_mode'),
     'D-pad seeking must not be captured by a hidden subtitle-delay mode');
@@ -345,8 +347,11 @@ assert(build.includes(
 assert(!build.includes("'lib\\libSDL_kitchensink.a'"));
 assert(build.includes("'--strip-all'"));
 assert(build.includes('GZipStream'));
-assert(!build.includes(
-    "$zip = Join-Path $distDir 'BFplayer-websrv.zip'"));
+assert(build.includes(
+    "$websrvZip = Join-Path $distDir 'BFplayer-websrv.zip'"));
+assert(build.includes("'BFplayer/eboot.elf'"));
+assert(build.includes('resident_bfplayer_launcher = $false'));
+assert(build.includes("'BFplayer/homebrew.js'"));
 assert(!build.includes(
     "$tileInstaller = Join-Path $distDir 'bfplayer-tile-installer.elf'"));
 
