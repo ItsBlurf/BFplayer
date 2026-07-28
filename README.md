@@ -119,7 +119,7 @@ Release artifacts are written to `dist/`.
 See [docs/STANDALONE_LAUNCHER.md](docs/STANDALONE_LAUNCHER.md) for launcher
 details and [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for bundled
 components and licenses.
-
+,
 ## License
 
 GPL-3.0-or-later. See [LICENSE](LICENSE).
