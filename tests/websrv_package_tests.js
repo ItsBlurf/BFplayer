@@ -30,7 +30,10 @@ assert(player.includes('kWebsrvTitleId = "FAKE00000"'));
 assert(player.includes('!is_bfplayer_host && !is_websrv_host'));
 
 const readmeTop = readme.split(/\r?\n/).slice(0, 10).join('\n');
-assert(readmeTop.includes('developed with OpenAI Codex'));
+const normalizedReadmeTop = readmeTop.replace(/\s+/g, ' ');
+assert(normalizedReadmeTop.includes(
+    'I used OpenAI Codex while developing BFplayer'));
+assert(normalizedReadmeTop.includes('I make the decisions'));
 assert(readme.includes('## Contributors'));
 assert(readme.includes('OpenAI Codex'));
 assert(readme.includes('## Acknowledgements'));

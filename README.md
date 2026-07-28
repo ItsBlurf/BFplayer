@@ -1,7 +1,7 @@
 # BFplayer
 
-**AI-assisted development:** BFplayer has been developed with OpenAI Codex.
-ItsBlurf directs the project and tests releases on real PS5 hardware.
+**AI use notice:** I used OpenAI Codex while developing BFplayer. I make the
+decisions and test every release on my own PS5.
 
 BFplayer is a native media library and player for jailbroken
 PlayStation 5 consoles. The standalone release installs its own tile in the
@@ -166,8 +166,10 @@ licenses.
 
 ## Contributors
 
-- ItsBlurf: project direction, PS5 testing, and releases
-- OpenAI Codex: AI-assisted implementation, review, and documentation
+- **ItsBlurf:** I started and maintain BFplayer, make the project decisions,
+  test it on my PS5, and handle releases.
+- **OpenAI Codex:** I use it to help with implementation, review, and
+  documentation.
 
 ## Acknowledgements
 
