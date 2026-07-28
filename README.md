@@ -99,6 +99,9 @@ the selected file under `/data/BFplayer/subtitles`, and activates it without
 restarting playback. The key is sent only in HTTPS request headers and is not
 written to logs or URLs. SubDL's own quotas and terms apply.
 
+For fan edits or unusual release names that cannot be identified from the
+filename, choose **Search SubDL by title** and enter the movie or show name.
+
 ## Logs
 
 Runtime logs are stored under:

@@ -22,6 +22,9 @@ const libraryUi = fs.readFileSync(
 const player = fs.readFileSync(
     path.join(root, 'src', 'main.cpp'),
     'utf8');
+const subtitleBrowser = fs.readFileSync(
+    path.join(root, 'src', 'core', 'subtitle_browser.cpp'),
+    'utf8');
 const demuxThread = fs.readFileSync(
     path.join(
         root,
@@ -251,8 +254,14 @@ assert(player.includes('PlaybackOverlay::subtitles'),
     'playback options expose a dedicated subtitle screen');
 assert(player.includes('Browse subtitle files...'),
     'subtitle screen exposes the local subtitle browser');
-assert(player.includes('Download from SubDL'),
+assert(player.includes('Search SubDL by filename'),
     'subtitle screen exposes optional online search');
+assert(player.includes('Search SubDL by title...'),
+    'subtitle screen exposes manual-title fallback');
+assert(player.includes('SubDL request failed - Circle: back'),
+    'provider failures remain visible');
+assert(subtitleBrowser.includes('dirfd(directory)'),
+    'PS5 subtitle traversal uses the descriptor owned by DIR');
 assert(player.includes('subtitle-provider search provider=subdl'),
     'online search emits credential-free diagnostics');
 assert(!player.includes('api_key='),

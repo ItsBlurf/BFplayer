@@ -764,11 +764,26 @@ std::string subdl_search_url(
         filename.resize(512);
     }
     return
-        "https://api.subdl.com/api/v2/subtitles/search?file_name=" +
+        "https://api.subdl.com/api/v2/files/search?filename=" +
         percent_encode(filename) +
         "&languages=" +
         percent_encode(normalize_subtitle_languages(languages)) +
-        "&subs_per_page=30&unpack=1&client=custom_integration";
+        "&subs_per_page=30";
+}
+
+std::string subdl_title_search_url(
+    const std::string& title,
+    const std::string& languages) {
+    std::string bounded_title = title;
+    if (bounded_title.size() > 256) {
+        bounded_title.resize(256);
+    }
+    return
+        "https://api.subdl.com/api/v2/subtitles/search?film_name=" +
+        percent_encode(bounded_title) +
+        "&languages=" +
+        percent_encode(normalize_subtitle_languages(languages)) +
+        "&subs_per_page=30&unpack=1";
 }
 
 OnlineSubtitleSearch parse_subdl_search_json(const std::string& json) {
@@ -816,6 +831,34 @@ OnlineSubtitleSearch search_subdl(
 #else
     (void)api_key;
     (void)media_filename;
+    (void)languages;
+    return {{}, "SubDL network access is available only in the PS5 build"};
+#endif
+}
+
+OnlineSubtitleSearch search_subdl_title(
+    const std::string& api_key,
+    const std::string& title,
+    const std::string& languages) {
+#if defined(BFPLAYER_PS5)
+    std::vector<std::uint8_t> bytes;
+    std::string error;
+    if (!read_https(
+            subdl_title_search_url(title, languages),
+            api_key,
+            true,
+            kMaximumJsonBytes,
+            bytes,
+            error)) {
+        return {{}, std::move(error)};
+    }
+    return parse_subdl_search_json(
+        std::string(
+            reinterpret_cast<const char*>(bytes.data()),
+            bytes.size()));
+#else
+    (void)api_key;
+    (void)title;
     (void)languages;
     return {{}, "SubDL network access is available only in the PS5 build"};
 #endif

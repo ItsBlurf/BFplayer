@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.0-alpha.33 - subtitle search and browser fixes
+
+- Fixed PS5 folder enumeration in the in-player subtitle browser
+- Switched SubDL lookup to its dedicated filename-search endpoint
+- Kept provider errors visible instead of immediately closing the search view
+- Added manual title search for custom or unusual release filenames
+
 ## 0.1.0-alpha.32 - external and online subtitles
 
 - Added an Options > Subtitles screen for embedded tracks, detected sidecars,

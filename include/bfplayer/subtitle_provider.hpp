@@ -37,11 +37,18 @@ struct OnlineSubtitleDownload {
 [[nodiscard]] std::string subdl_search_url(
     const std::string& media_filename,
     const std::string& languages);
+[[nodiscard]] std::string subdl_title_search_url(
+    const std::string& title,
+    const std::string& languages);
 [[nodiscard]] OnlineSubtitleSearch parse_subdl_search_json(
     const std::string& json);
 [[nodiscard]] OnlineSubtitleSearch search_subdl(
     const std::string& api_key,
     const std::string& media_filename,
+    const std::string& languages);
+[[nodiscard]] OnlineSubtitleSearch search_subdl_title(
+    const std::string& api_key,
+    const std::string& title,
     const std::string& languages);
 [[nodiscard]] OnlineSubtitleDownload download_subdl(
     const std::string& api_key,

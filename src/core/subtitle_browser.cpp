@@ -173,6 +173,15 @@ SubtitleBrowserResult list_subtitle_directory(
             std::to_string(value) + ")";
         return output;
     }
+    const int directory_descriptor = dirfd(directory);
+    if (directory_descriptor < 0) {
+        const int value = errno != 0 ? errno : EBADF;
+        closedir(directory);
+        output.error =
+            "Unable to access subtitle folder entries (errno " +
+            std::to_string(value) + ")";
+        return output;
+    }
     std::size_t seen = 0;
     int fatal_error = 0;
     for (;;) {
@@ -200,7 +209,7 @@ SubtitleBrowserResult list_subtitle_directory(
         }
         struct stat status {};
         if (fstatat(
-                descriptor,
+                directory_descriptor,
                 item->d_name,
                 &status,
                 AT_SYMLINK_NOFOLLOW) != 0) {

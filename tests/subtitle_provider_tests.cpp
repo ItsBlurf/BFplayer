@@ -30,15 +30,28 @@ int main() {
         "/mnt/usb0/Dune Part Two [2024].mkv",
         "EN,AR");
     check(
-        url.find("file_name=Dune%20Part%20Two%20%5B2024%5D.mkv") !=
+        url.find(
+            "/api/v2/files/search?filename="
+            "Dune%20Part%20Two%20%5B2024%5D.mkv") !=
             std::string::npos,
-        "filename is encoded without exposing a local path");
+        "dedicated filename search is used without exposing a local path");
     check(
         url.find("languages=en%2Car") != std::string::npos,
         "languages are normalized and encoded");
     check(
         url.find("api_key") == std::string::npos,
         "API key is never placed in the URL");
+    const std::string title_url = bfplayer::subdl_title_search_url(
+        "One Piece S01E01",
+        "en,ar");
+    check(
+        title_url.find(
+            "/api/v2/subtitles/search?film_name="
+            "One%20Piece%20S01E01") != std::string::npos,
+        "manual title search uses the film-name endpoint");
+    check(
+        title_url.find("api_key") == std::string::npos,
+        "manual title URL never contains the API key");
 
     const std::string fixture = R"json(
 {
