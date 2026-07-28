@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.0-alpha.34 - reliable browsing and faster navigation
+
+- Replaced subtitle folder enumeration with the PS5-proven `opendir` path
+- Added an online provider chooser with unavailable providers shown in grey
+- Added wraparound navigation to the media library and every file/menu list
+- Added accelerating held D-pad navigation for long lists
+
 ## 0.1.0-alpha.33 - subtitle search and browser fixes
 
 - Fixed PS5 folder enumeration in the in-player subtitle browser

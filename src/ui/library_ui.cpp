@@ -4,6 +4,7 @@
 #include "bfplayer/bulk_import.hpp"
 #include "bfplayer/controller_buttons.hpp"
 #include "bfplayer/diagnostics.hpp"
+#include "bfplayer/list_navigation.hpp"
 #include "bfplayer/library_database.hpp"
 #include "bfplayer/library_scanner.hpp"
 #include "bfplayer/library_view.hpp"
@@ -475,6 +476,7 @@ struct LibraryUi::Impl {
     int saved_library_selected = 0;
     int saved_library_first_visible = 0;
     std::array<bool, SDL_CONTROLLER_BUTTON_MAX> controller_buttons_down{};
+    ListNavigationRepeat navigation_repeat;
     std::vector<Label> row_labels;
     std::vector<Label> browser_help_labels;
     Label title_label;
@@ -654,6 +656,53 @@ struct LibraryUi::Impl {
         SDL_UnlockMutex(mutex);
     }
 
+    void move_vertical(int delta) {
+        if (delta == 0) {
+            return;
+        }
+        SDL_LockMutex(mutex);
+        if (search_editing) {
+            navigation_repeat.reset();
+            SDL_UnlockMutex(mutex);
+            return;
+        }
+        if (overlay != LibraryOverlay::none) {
+            const int item_count =
+                overlay == LibraryOverlay::menu
+                    ? 6
+                    : (overlay == LibraryOverlay::settings ? 7 : 0);
+            if (item_count > 0) {
+                overlay_selected = wrap_list_index(
+                    overlay_selected,
+                    delta,
+                    item_count);
+                ++published_generation;
+            }
+        } else if (browser_mode) {
+            selected = wrap_list_index(
+                selected,
+                delta,
+                static_cast<int>(browser_entries.size()));
+            ++published_generation;
+        } else {
+            const std::vector<std::size_t>& filtered =
+                filtered_indices_locked();
+            selected = wrap_list_index(
+                selected,
+                delta,
+                static_cast<int>(filtered.size()));
+            ++published_generation;
+        }
+        SDL_UnlockMutex(mutex);
+    }
+
+    void tick_navigation() {
+        const int delta = navigation_repeat.poll(SDL_GetTicks64());
+        if (delta != 0) {
+            move_vertical(delta);
+        }
+    }
+
     bool handle_overlay_button(Uint8 button) {
         LibraryOverlay current = LibraryOverlay::none;
         int current_selected = 0;
@@ -685,11 +734,7 @@ struct LibraryUi::Impl {
              button == SDL_CONTROLLER_BUTTON_DPAD_DOWN)) {
             const int delta =
                 button == SDL_CONTROLLER_BUTTON_DPAD_UP ? -1 : 1;
-            SDL_LockMutex(mutex);
-            overlay_selected =
-                (overlay_selected + item_count + delta) % item_count;
-            ++published_generation;
-            SDL_UnlockMutex(mutex);
+            move_vertical(delta);
             return false;
         }
 
@@ -1762,13 +1807,7 @@ struct LibraryUi::Impl {
                 } else {
                     delta = kVisibleRows;
                 }
-                SDL_LockMutex(mutex);
-                selected = std::clamp(
-                    selected + delta,
-                    0,
-                    std::max(0, static_cast<int>(browser_entries.size()) - 1));
-                ++published_generation;
-                SDL_UnlockMutex(mutex);
+                move_vertical(delta);
                 break;
             }
             default:
@@ -3398,6 +3437,7 @@ LibraryAction LibraryUi::handle_event(const SDL_Event& event, std::string& selec
         event.type == SDL_CONTROLLERDEVICEREMOVED) {
         SDL_LockMutex(impl_->mutex);
         impl_->controller_buttons_down.fill(false);
+        impl_->navigation_repeat.reset();
         SDL_UnlockMutex(impl_->mutex);
         diagnostics_log(
             DiagnosticLevel::info,
@@ -3411,6 +3451,12 @@ LibraryAction LibraryUi::handle_event(const SDL_Event& event, std::string& selec
         SDL_LockMutex(impl_->mutex);
         if (event.cbutton.button < impl_->controller_buttons_down.size()) {
             impl_->controller_buttons_down[event.cbutton.button] = false;
+        }
+        if (event.cbutton.button == SDL_CONTROLLER_BUTTON_DPAD_UP) {
+            impl_->navigation_repeat.release(-1);
+        } else if (
+            event.cbutton.button == SDL_CONTROLLER_BUTTON_DPAD_DOWN) {
+            impl_->navigation_repeat.release(1);
         }
         SDL_UnlockMutex(impl_->mutex);
         diagnostics_log(
@@ -3436,6 +3482,12 @@ LibraryAction LibraryUi::handle_event(const SDL_Event& event, std::string& selec
             duplicate_down ? 1 : 0);
         if (duplicate_down) {
             return LibraryAction::none;
+        }
+        if (event.cbutton.button == SDL_CONTROLLER_BUTTON_DPAD_UP) {
+            impl_->navigation_repeat.press(-1, SDL_GetTicks64());
+        } else if (
+            event.cbutton.button == SDL_CONTROLLER_BUTTON_DPAD_DOWN) {
+            impl_->navigation_repeat.press(1, SDL_GetTicks64());
         }
         if (overlay_open) {
             return impl_->handle_overlay_button(event.cbutton.button)
@@ -3739,11 +3791,7 @@ LibraryAction LibraryUi::handle_event(const SDL_Event& event, std::string& selec
         impl_->remove_selected_source();
     }
     if (delta != 0) {
-        SDL_LockMutex(impl_->mutex);
-        const std::vector<std::size_t>& filtered = impl_->filtered_indices_locked();
-        impl_->selected = std::clamp(
-            impl_->selected + delta, 0, std::max(0, static_cast<int>(filtered.size()) - 1));
-        SDL_UnlockMutex(impl_->mutex);
+        impl_->move_vertical(delta);
     }
     if (play || play_queue) {
         SDL_LockMutex(impl_->mutex);
@@ -3782,6 +3830,12 @@ LibraryAction LibraryUi::handle_event(const SDL_Event& event, std::string& selec
         }
     }
     return exit ? LibraryAction::exit : LibraryAction::none;
+}
+
+void LibraryUi::tick_navigation() {
+    if (impl_ && impl_->mutex) {
+        impl_->tick_navigation();
+    }
 }
 
 std::vector<std::string> LibraryUi::playback_queue(

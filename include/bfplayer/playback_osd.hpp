@@ -24,7 +24,8 @@ public:
     void show_panel(
         std::string title,
         std::vector<std::string> rows,
-        int selected);
+        int selected,
+        std::vector<bool> enabled = {});
     void hide_panel();
     [[nodiscard]] bool panel_visible() const noexcept;
     void render(double position_seconds, double duration_seconds, bool paused);

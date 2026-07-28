@@ -254,14 +254,30 @@ assert(player.includes('PlaybackOverlay::subtitles'),
     'playback options expose a dedicated subtitle screen');
 assert(player.includes('Browse subtitle files...'),
     'subtitle screen exposes the local subtitle browser');
-assert(player.includes('Search SubDL by filename'),
-    'subtitle screen exposes optional online search');
-assert(player.includes('Search SubDL by title...'),
-    'subtitle screen exposes manual-title fallback');
+assert(player.includes('Online subtitle providers...'),
+    'subtitle screen exposes the provider chooser');
+assert(player.includes('OpenSubtitles  |  Requires an approved app API key'),
+    'provider chooser explains unavailable OpenSubtitles integration');
+assert(player.includes('Podnapisi  |  No supported public API') &&
+       player.includes('Addic7ed  |  No supported public API'),
+    'provider chooser shows unavailable non-API providers');
+assert(player.includes('Search by video filename') &&
+       player.includes('Search by movie or show title...'),
+    'SubDL provider exposes filename and title search');
 assert(player.includes('SubDL request failed - Circle: back'),
     'provider failures remain visible');
-assert(subtitleBrowser.includes('dirfd(directory)'),
-    'PS5 subtitle traversal uses the descriptor owned by DIR');
+assert(subtitleBrowser.includes('DIR* directory = opendir(output.path.c_str())'),
+    'PS5 subtitle traversal uses the proven opendir path');
+assert(subtitleBrowser.includes('lstat(path.c_str(), &status)'),
+    'subtitle browser falls back when PS5 fstatat is unsupported');
+assert(libraryUi.includes('navigation_repeat.poll(SDL_GetTicks64())') &&
+       libraryUi.includes('wrap_list_index('),
+    'library and Add Media lists support held repeat and wraparound');
+assert(player.includes('app.navigation_repeat.poll(SDL_GetTicks64())') &&
+       player.includes('wrap_list_index('),
+    'playback lists support held repeat and wraparound');
+assert(playbackOsd.includes('const SDL_Color disabled'),
+    'unavailable providers render in grey');
 assert(player.includes('subtitle-provider search provider=subdl'),
     'online search emits credential-free diagnostics');
 assert(!player.includes('api_key='),

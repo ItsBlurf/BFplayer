@@ -100,6 +100,9 @@ SubtitleBrowserResult list_subtitle_directory(
         }
         const auto status = iterator->symlink_status(status_error);
         if (status_error || std::filesystem::is_symlink(status)) {
+            if (status_error) {
+                ++output.unreadable_entries;
+            }
             status_error.clear();
             iterator.increment(iterator_error);
             continue;
@@ -125,6 +128,7 @@ SubtitleBrowserResult list_subtitle_directory(
         output.error = "Unable to read subtitle folder";
         return output;
     }
+    output.entries_seen = seen;
 #else
     struct stat requested_status {};
     if (lstat(output.path.c_str(), &requested_status) != 0 ||
@@ -135,39 +139,12 @@ SubtitleBrowserResult list_subtitle_directory(
             std::to_string(errno != 0 ? errno : ENOTDIR) + ")";
         return output;
     }
-    int flags = O_RDONLY;
-#ifdef O_CLOEXEC
-    flags |= O_CLOEXEC;
-#endif
-#ifdef O_NOFOLLOW
-    flags |= O_NOFOLLOW;
-#endif
-#ifdef O_DIRECTORY
-    flags |= O_DIRECTORY;
-#endif
-    const int descriptor = ::open(output.path.c_str(), flags);
-    if (descriptor < 0) {
-        output.error =
-            "Unable to open subtitle folder (errno " +
-            std::to_string(errno) + ")";
-        return output;
-    }
-    struct stat opened_status {};
-    if (fstat(descriptor, &opened_status) != 0 ||
-        opened_status.st_dev != requested_status.st_dev ||
-        opened_status.st_ino != requested_status.st_ino ||
-        !S_ISDIR(opened_status.st_mode)) {
-        const int value = errno != 0 ? errno : ESTALE;
-        ::close(descriptor);
-        output.error =
-            "Subtitle folder changed while opening (errno " +
-            std::to_string(value) + ")";
-        return output;
-    }
-    DIR* directory = fdopendir(descriptor);
+    // Match BFpilot's proven one-directory picker path. Some PS5 filesystems
+    // reject fstatat for every child; the full-path lstat fallback below is
+    // therefore required even when readdir succeeds.
+    DIR* directory = opendir(output.path.c_str());
     if (!directory) {
         const int value = errno;
-        ::close(descriptor);
         output.error =
             "Unable to read subtitle folder (errno " +
             std::to_string(value) + ")";
@@ -182,7 +159,22 @@ SubtitleBrowserResult list_subtitle_directory(
             std::to_string(value) + ")";
         return output;
     }
+    struct stat opened_status {};
+    if (fstat(directory_descriptor, &opened_status) != 0 ||
+        opened_status.st_dev != requested_status.st_dev ||
+        opened_status.st_ino != requested_status.st_ino ||
+        !S_ISDIR(opened_status.st_mode)) {
+        const int value = errno != 0 ? errno : ESTALE;
+        closedir(directory);
+        output.error =
+            "Subtitle folder changed while opening (errno " +
+            std::to_string(value) + ")";
+        return output;
+    }
     std::size_t seen = 0;
+    std::size_t stat_failures = 0;
+    std::size_t stat_fallbacks = 0;
+    int last_stat_error = 0;
     int fatal_error = 0;
     for (;;) {
         errno = 0;
@@ -213,12 +205,22 @@ SubtitleBrowserResult list_subtitle_directory(
                 item->d_name,
                 &status,
                 AT_SYMLINK_NOFOLLOW) != 0) {
-            const int value = errno;
-            if (fatal_io_error(value)) {
+            int value = errno;
+            ++stat_failures;
+            last_stat_error = value;
+            if (fatal_io_error(value) ||
+                lstat(path.c_str(), &status) != 0) {
+                if (!fatal_io_error(value)) {
+                    value = errno;
+                }
+                if (!fatal_io_error(value)) {
+                    ++output.unreadable_entries;
+                    continue;
+                }
                 fatal_error = value;
                 break;
             }
-            continue;
+            ++stat_fallbacks;
         }
         if (S_ISLNK(status.st_mode)) {
             continue;
@@ -244,8 +246,26 @@ SubtitleBrowserResult list_subtitle_directory(
         output.entries.clear();
         return output;
     }
+    if (seen > 0 && stat_failures == seen && stat_fallbacks == 0) {
+        output.error =
+            "Unable to inspect subtitle folder entries (errno " +
+            std::to_string(
+                last_stat_error != 0 ? last_stat_error : EIO) +
+            ")";
+        output.entries.clear();
+        return output;
+    }
+    output.entries_seen = seen;
+    output.stat_fallbacks = stat_fallbacks;
 #endif
 
+    for (const SubtitleBrowserEntry& entry : output.entries) {
+        if (entry.directory) {
+            ++output.directories;
+        } else {
+            ++output.subtitle_files;
+        }
+    }
     std::sort(
         output.entries.begin(),
         output.entries.end(),

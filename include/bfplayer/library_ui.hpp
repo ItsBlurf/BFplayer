@@ -35,6 +35,7 @@ public:
         const std::vector<MediaSource>& initial_sources = {});
     void close();
     LibraryAction handle_event(const SDL_Event& event, std::string& selected_path);
+    void tick_navigation();
     [[nodiscard]] std::vector<std::string> playback_queue(
         const std::string& selected_path) const;
     void show_notice(std::string message, std::uint64_t milliseconds = 5000);

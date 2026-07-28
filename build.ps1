@@ -108,6 +108,7 @@ try {
         'src\core\diagnostics.cpp',
         'src\core\library_scanner.cpp',
         'src\core\library_view.cpp',
+        'src\core\list_navigation.cpp',
         'src\core\media_sources.cpp',
         'src\core\player_settings.cpp',
         'src\core\playlist.cpp',

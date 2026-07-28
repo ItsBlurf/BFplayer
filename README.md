@@ -100,7 +100,14 @@ restarting playback. The key is sent only in HTTPS request headers and is not
 written to logs or URLs. SubDL's own quotas and terms apply.
 
 For fan edits or unusual release names that cannot be identified from the
-filename, choose **Search SubDL by title** and enter the movie or show name.
+filename, choose **Online subtitle providers > SubDL > Search by movie or show
+title** and enter the name.
+The provider screen also lists OpenSubtitles, Podnapisi, and Addic7ed in grey
+when they cannot be integrated without an approved API or unsupported website
+scraping.
+
+All vertical lists wrap from top to bottom and bottom to top. Holding D-pad Up
+or Down accelerates progressively for large libraries and folders.
 
 ## Logs
 

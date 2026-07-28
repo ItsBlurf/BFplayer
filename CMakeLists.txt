@@ -11,6 +11,7 @@ add_library(bfplayer_core STATIC
     src/core/diagnostics.cpp
     src/core/library_scanner.cpp
     src/core/library_view.cpp
+    src/core/list_navigation.cpp
     src/core/media_sources.cpp
     src/core/player_settings.cpp
     src/core/playlist.cpp
@@ -69,6 +70,10 @@ if(BUILD_TESTING)
     add_executable(subtitle_browser_tests tests/subtitle_browser_tests.cpp)
     target_link_libraries(subtitle_browser_tests PRIVATE bfplayer_core)
     add_test(NAME subtitle_browser_tests COMMAND subtitle_browser_tests)
+
+    add_executable(list_navigation_tests tests/list_navigation_tests.cpp)
+    target_link_libraries(list_navigation_tests PRIVATE bfplayer_core)
+    add_test(NAME list_navigation_tests COMMAND list_navigation_tests)
 
     add_executable(playlist_tests tests/playlist_tests.cpp)
     target_link_libraries(playlist_tests PRIVATE bfplayer_core)

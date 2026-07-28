@@ -42,6 +42,9 @@ int main() {
         bfplayer::list_subtitle_directory(root.string());
     check(result.ok(), "subtitle directory opens");
     check(result.entries.size() == 3, "only folders and subtitle files appear");
+    check(
+        result.directories == 1 && result.subtitle_files == 2,
+        "browser diagnostics classify visible entries");
     if (result.entries.size() == 3) {
         check(
             result.entries[0].directory &&

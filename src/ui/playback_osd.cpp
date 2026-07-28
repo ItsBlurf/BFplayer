@@ -229,15 +229,21 @@ void PlaybackOsd::show(std::string message, std::uint64_t milliseconds) {
 void PlaybackOsd::show_panel(
     std::string title,
     std::vector<std::string> rows,
-    int selected) {
+    int selected,
+    std::vector<bool> enabled) {
     impl_->destroy_panel();
     if (!impl_->renderer || !impl_->font) {
         return;
     }
     const SDL_Color white{244, 247, 255, 255};
-    auto make_texture = [&](const std::string& text, int& width, int& height) {
+    const SDL_Color disabled{126, 137, 154, 255};
+    auto make_texture = [&](
+                            const std::string& text,
+                            int& width,
+                            int& height,
+                            SDL_Color color) {
         SDL_Surface* surface =
-            TTF_RenderUTF8_Blended(impl_->font, text.c_str(), white);
+            TTF_RenderUTF8_Blended(impl_->font, text.c_str(), color);
         if (!surface) {
             return static_cast<SDL_Texture*>(nullptr);
         }
@@ -251,13 +257,17 @@ void PlaybackOsd::show_panel(
     impl_->panel_title_texture = make_texture(
         fit_text_to_width(impl_->font, std::move(title), 1236),
         impl_->panel_title_width,
-        impl_->panel_title_height);
+        impl_->panel_title_height,
+        white);
     impl_->panel_row_textures.reserve(rows.size());
     impl_->panel_row_widths.reserve(rows.size());
     impl_->panel_row_heights.reserve(rows.size());
-    for (std::string& row : rows) {
+    for (std::size_t index = 0; index < rows.size(); ++index) {
+        std::string& row = rows[index];
         int width = 0;
         int height = 0;
+        const bool row_enabled =
+            enabled.empty() || index >= enabled.size() || enabled[index];
         impl_->panel_row_textures.push_back(
             make_texture(
                 fit_text_to_width(
@@ -265,7 +275,8 @@ void PlaybackOsd::show_panel(
                     std::move(row),
                     1232),
                 width,
-                height));
+                height,
+                row_enabled ? white : disabled));
         impl_->panel_row_widths.push_back(width);
         impl_->panel_row_heights.push_back(height);
     }

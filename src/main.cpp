@@ -17,6 +17,7 @@ extern "C" {
 #include "bfplayer/library_database.hpp"
 #include "bfplayer/library_scanner.hpp"
 #include "bfplayer/library_ui.hpp"
+#include "bfplayer/list_navigation.hpp"
 #include "bfplayer/kitchensink_subtitle_timing.h"
 #include "bfplayer/playlist.hpp"
 #include "bfplayer/playback_osd.hpp"
@@ -79,6 +80,8 @@ enum class PlaybackOverlay {
     settings,
     subtitles,
     subtitle_browser,
+    subtitle_providers,
+    subtitle_subdl,
     subtitle_online,
 };
 
@@ -87,8 +90,7 @@ enum class SubtitleMenuKind {
     embedded,
     external,
     browse,
-    online,
-    online_title,
+    providers,
 };
 
 struct SubtitleMenuItem {
@@ -159,6 +161,7 @@ struct App {
     std::string text_edit_buffer;
     bfplayer::PlayerSettings text_edit_previous_settings;
     bool ime_was_visible = false;
+    bfplayer::ListNavigationRepeat navigation_repeat;
     bfplayer::VideoScaleMode video_scale_mode = bfplayer::VideoScaleMode::fit;
     bfplayer::VideoAspectMode video_aspect_mode =
         bfplayer::VideoAspectMode::default_ratio;
@@ -1595,16 +1598,9 @@ std::vector<SubtitleMenuItem> subtitle_menu_items(const App& app) {
         -1,
         "Browse subtitle files..."});
     items.push_back({
-        SubtitleMenuKind::online,
+        SubtitleMenuKind::providers,
         -1,
-        app.settings.subdl_api_key.empty()
-            ? "Search SubDL by filename  |  API key not set"
-            : "Search SubDL by filename  |  " +
-                  app.settings.subtitle_languages});
-    items.push_back({
-        SubtitleMenuKind::online_title,
-        -1,
-        "Search SubDL by title..."});
+        "Online subtitle providers..."});
     return items;
 }
 
@@ -1707,6 +1703,44 @@ void refresh_playback_overlay(App& app) {
     }
     if (app.playback_overlay == PlaybackOverlay::subtitle_browser) {
         refresh_subtitle_browser_overlay(app);
+        return;
+    }
+    if (app.playback_overlay == PlaybackOverlay::subtitle_providers) {
+        app.playback_overlay_selected = std::clamp(
+            app.playback_overlay_selected,
+            0,
+            3);
+        app.osd.show_panel(
+            "Online subtitle providers - grey means unavailable",
+            {
+                app.settings.subdl_api_key.empty()
+                    ? "SubDL  |  API key not set"
+                    : "SubDL  |  Ready  |  " +
+                          app.settings.subtitle_languages,
+                "OpenSubtitles  |  Requires an approved app API key",
+                "Podnapisi  |  No supported public API",
+                "Addic7ed  |  No supported public API",
+            },
+            app.playback_overlay_selected,
+            {true, false, false, false});
+        return;
+    }
+    if (app.playback_overlay == PlaybackOverlay::subtitle_subdl) {
+        app.playback_overlay_selected = std::clamp(
+            app.playback_overlay_selected,
+            0,
+            2);
+        app.osd.show_panel(
+            "SubDL - Cross: select - Circle: providers",
+            {
+                "Search by video filename",
+                "Search by movie or show title...",
+                std::string("API key  |  ") +
+                    (app.settings.subdl_api_key.empty()
+                         ? "Not set"
+                         : "Set"),
+            },
+            app.playback_overlay_selected);
         return;
     }
     if (app.playback_overlay == PlaybackOverlay::subtitle_online) {
@@ -1972,9 +2006,14 @@ bool load_subtitle_browser(App& app, const std::string& path) {
     refresh_playback_overlay(app);
     bfplayer::diagnostics_log(
         bfplayer::DiagnosticLevel::info,
-        "subtitle-browser opened path=%s entries=%zu",
+        "subtitle-browser opened path=%s shown=%zu entries_seen=%zu directories=%zu subtitles=%zu stat_fallbacks=%zu unreadable=%zu",
         app.subtitle_browser.path.c_str(),
-        app.subtitle_browser.entries.size());
+        app.subtitle_browser.entries.size(),
+        app.subtitle_browser.entries_seen,
+        app.subtitle_browser.directories,
+        app.subtitle_browser.subtitle_files,
+        app.subtitle_browser.stat_fallbacks,
+        app.subtitle_browser.unreadable_entries);
     return true;
 }
 
@@ -2201,8 +2240,14 @@ bool handle_playback_overlay_button(
     if (button == bfplayer::kControllerOptionsButton) {
         app.playback_overlay =
             app.playback_overlay == PlaybackOverlay::subtitle_browser
-            ? PlaybackOverlay::subtitles
-            : PlaybackOverlay::none;
+                ? PlaybackOverlay::subtitles
+                : (app.playback_overlay ==
+                           PlaybackOverlay::subtitle_providers
+                       ? PlaybackOverlay::subtitles
+                       : (app.playback_overlay ==
+                                  PlaybackOverlay::subtitle_subdl
+                              ? PlaybackOverlay::subtitle_providers
+                              : PlaybackOverlay::none));
         refresh_playback_overlay(app);
         return true;
     }
@@ -2231,10 +2276,11 @@ bool handle_playback_overlay_button(
             delta = 8;
         }
         if (delta != 0) {
-            app.subtitle_browser_selected = std::clamp(
-                app.subtitle_browser_selected + delta,
-                0,
-                std::max(0, count - 1));
+            app.subtitle_browser_selected =
+                bfplayer::wrap_list_index(
+                    app.subtitle_browser_selected,
+                    delta,
+                    count);
             refresh_playback_overlay(app);
             return true;
         }
@@ -2268,12 +2314,87 @@ bool handle_playback_overlay_button(
         }
         return true;
     }
+    if (app.playback_overlay == PlaybackOverlay::subtitle_providers) {
+        if (button == SDL_CONTROLLER_BUTTON_B) {
+            open_playback_overlay(app, PlaybackOverlay::subtitles);
+            return true;
+        }
+        if (button == SDL_CONTROLLER_BUTTON_DPAD_UP ||
+            button == SDL_CONTROLLER_BUTTON_DPAD_DOWN) {
+            const int direction =
+                button == SDL_CONTROLLER_BUTTON_DPAD_UP ? -1 : 1;
+            app.playback_overlay_selected =
+                bfplayer::wrap_list_index(
+                    app.playback_overlay_selected,
+                    direction,
+                    4);
+            refresh_playback_overlay(app);
+            return true;
+        }
+        if (button == SDL_CONTROLLER_BUTTON_A) {
+            if (app.playback_overlay_selected == 0) {
+                open_playback_overlay(
+                    app,
+                    PlaybackOverlay::subtitle_subdl);
+            } else if (app.playback_overlay_selected == 1) {
+                app.osd.show(
+                    "OpenSubtitles needs a registered application API key",
+                    8000);
+            } else {
+                app.osd.show(
+                    "This provider has no supported public API; website scraping is disabled",
+                    8000);
+            }
+        }
+        return true;
+    }
+    if (app.playback_overlay == PlaybackOverlay::subtitle_subdl) {
+        if (button == SDL_CONTROLLER_BUTTON_B) {
+            open_playback_overlay(
+                app,
+                PlaybackOverlay::subtitle_providers);
+            return true;
+        }
+        if (button == SDL_CONTROLLER_BUTTON_DPAD_UP ||
+            button == SDL_CONTROLLER_BUTTON_DPAD_DOWN) {
+            const int direction =
+                button == SDL_CONTROLLER_BUTTON_DPAD_UP ? -1 : 1;
+            app.playback_overlay_selected =
+                bfplayer::wrap_list_index(
+                    app.playback_overlay_selected,
+                    direction,
+                    3);
+            refresh_playback_overlay(app);
+            return true;
+        }
+        if (button == SDL_CONTROLLER_BUTTON_A) {
+            if (app.playback_overlay_selected == 0) {
+                start_subtitle_search(app);
+            } else if (app.playback_overlay_selected == 1) {
+                if (app.settings.subdl_api_key.empty()) {
+                    start_subtitle_search(app);
+                } else {
+                    begin_text_edit(
+                        app,
+                        TextEditMode::subtitle_search_query);
+                }
+            } else {
+                app.playback_overlay =
+                    PlaybackOverlay::settings;
+                app.playback_overlay_selected = 9;
+                refresh_playback_overlay(app);
+            }
+        }
+        return true;
+    }
     if (app.playback_overlay == PlaybackOverlay::subtitle_online) {
         if (app.subtitle_job.thread) {
             return true;
         }
         if (button == SDL_CONTROLLER_BUTTON_B) {
-            open_playback_overlay(app, PlaybackOverlay::subtitles);
+            open_playback_overlay(
+                app,
+                PlaybackOverlay::subtitle_subdl);
             return true;
         }
         const int count =
@@ -2355,17 +2476,10 @@ bool handle_playback_overlay_button(
             case SubtitleMenuKind::browse:
                 open_subtitle_browser(app);
                 break;
-            case SubtitleMenuKind::online:
-                start_subtitle_search(app);
-                break;
-            case SubtitleMenuKind::online_title:
-                if (app.settings.subdl_api_key.empty()) {
-                    start_subtitle_search(app);
-                } else {
-                    begin_text_edit(
-                        app,
-                        TextEditMode::subtitle_search_query);
-                }
+            case SubtitleMenuKind::providers:
+                open_playback_overlay(
+                    app,
+                    PlaybackOverlay::subtitle_providers);
                 break;
         }
         return true;
@@ -2722,8 +2836,33 @@ void pump_events(App& app) {
                 }
                 break;
             case SDL_CONTROLLERBUTTONDOWN:
+                if (app.playback_overlay != PlaybackOverlay::none &&
+                    app.text_edit_mode == TextEditMode::none) {
+                    if (event.cbutton.button ==
+                        SDL_CONTROLLER_BUTTON_DPAD_UP) {
+                        app.navigation_repeat.press(
+                            -1,
+                            SDL_GetTicks64());
+                    } else if (
+                        event.cbutton.button ==
+                        SDL_CONTROLLER_BUTTON_DPAD_DOWN) {
+                        app.navigation_repeat.press(
+                            1,
+                            SDL_GetTicks64());
+                    }
+                }
                 on_controller_button(
                     app, static_cast<SDL_GameControllerButton>(event.cbutton.button));
+                break;
+            case SDL_CONTROLLERBUTTONUP:
+                if (event.cbutton.button ==
+                    SDL_CONTROLLER_BUTTON_DPAD_UP) {
+                    app.navigation_repeat.release(-1);
+                } else if (
+                    event.cbutton.button ==
+                    SDL_CONTROLLER_BUTTON_DPAD_DOWN) {
+                    app.navigation_repeat.release(1);
+                }
                 break;
             case SDL_KEYDOWN:
                 if (event.key.keysym.sym == SDLK_ESCAPE) {
@@ -2772,6 +2911,20 @@ void pump_events(App& app) {
             default:
                 break;
         }
+    }
+    if (app.playback_overlay == PlaybackOverlay::none ||
+        app.text_edit_mode != TextEditMode::none) {
+        app.navigation_repeat.reset();
+        return;
+    }
+    const int repeated =
+        app.navigation_repeat.poll(SDL_GetTicks64());
+    const SDL_GameControllerButton repeated_button =
+        repeated < 0
+        ? SDL_CONTROLLER_BUTTON_DPAD_UP
+        : SDL_CONTROLLER_BUTTON_DPAD_DOWN;
+    for (int index = 0; index < std::abs(repeated); ++index) {
+        on_controller_button(app, repeated_button);
     }
 }
 
@@ -3424,6 +3577,7 @@ void close_media(App& app) {
     app.text_edit_mode = TextEditMode::none;
     app.text_edit_buffer.clear();
     app.ime_was_visible = false;
+    app.navigation_repeat.reset();
 }
 
 int run_library(
@@ -3551,6 +3705,7 @@ int run_library(
             }
             continue;
         }
+        library.tick_navigation();
         library.render();
         SDL_Delay(8);
     }
