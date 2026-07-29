@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.1.0-alpha.36 - DLNA/NAS playback and tighter A/V sync
+
+- Added an in-app DLNA/UPnP browser for NAS and LAN media servers.
+- Added direct network URL playback for supported FFmpeg protocols.
+- Made audible audio the master playback clock to reduce drift and delayed
+  track changes.
+- Added bounded network buffers, reconnect handling, audio-queue timing, and
+  peak-memory diagnostics.
+- Kept the existing SDL interface after reviewing RmlUi and dlnaplay, avoiding
+  a UI rewrite that would not improve decoding or synchronization.
+
 ## 0.1.0-alpha.35 - matched websrv package
 
 - Rebuilt the standalone and websrv packages from the same player ELF.

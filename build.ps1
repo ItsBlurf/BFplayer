@@ -24,10 +24,12 @@ $required = @(
     'include\SDL2\SDL.h',
     'include\kitchensink2\kitchensink.h',
     'include\SDL2\SDL_image.h',
+    'include\tinyxml2.h',
     'lib\libSDL2.a',
     'lib\libSDL2_image.a',
     'lib\libavformat.a',
-    'lib\libass.a'
+    'lib\libass.a',
+    'lib\libtinyxml2.a'
 )
 foreach ($item in $required) {
     if (-not (Test-Path -LiteralPath (Join-Path $pacbrewHome $item))) {
@@ -108,6 +110,7 @@ try {
         'src\core\artwork.cpp',
         'src\core\bulk_import.cpp',
         'src\core\diagnostics.cpp',
+        'src\core\dlna_protocol.cpp',
         'src\core\library_scanner.cpp',
         'src\core\library_view.cpp',
         'src\core\list_navigation.cpp',
@@ -120,6 +123,7 @@ try {
         'src\core\subtitle_provider.cpp',
         'src\core\video_layout.cpp',
         'src\core\video_thumbnail.cpp',
+        'src\network\dlna_client.cpp',
         'src\core\library_database.cpp',
         'src\core\media_probe.cpp',
         'src\playback\external_subtitles.cpp',
@@ -137,6 +141,7 @@ try {
     }
     $cSources = @(
         'src\playback\kitsubimage_safe.c',
+        'src\playback\kitchensink_audio_clock.c',
         'src\playback\kitchensink_subtitle_timing.c',
         'vendor\SDL_kitchensink\src\kiterror.c',
         'vendor\SDL_kitchensink\src\kitformat.c',
@@ -222,6 +227,7 @@ try {
         '-liconv',
         '-lsamplerate',
         '-lexpat',
+        '-ltinyxml2',
         '-lsqlite3',
         '-lc++',
         '-lc++abi',

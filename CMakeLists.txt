@@ -9,6 +9,7 @@ add_library(bfplayer_core STATIC
     src/core/artwork.cpp
     src/core/bulk_import.cpp
     src/core/diagnostics.cpp
+    src/core/dlna_protocol.cpp
     src/core/library_scanner.cpp
     src/core/library_view.cpp
     src/core/list_navigation.cpp
@@ -63,6 +64,10 @@ if(BUILD_TESTING)
     target_link_libraries(source_uri_tests PRIVATE bfplayer_core)
     add_test(NAME source_uri_tests COMMAND source_uri_tests)
 
+    add_executable(dlna_protocol_tests tests/dlna_protocol_tests.cpp)
+    target_link_libraries(dlna_protocol_tests PRIVATE bfplayer_core)
+    add_test(NAME dlna_protocol_tests COMMAND dlna_protocol_tests)
+
     add_executable(subtitle_provider_tests tests/subtitle_provider_tests.cpp)
     target_link_libraries(subtitle_provider_tests PRIVATE bfplayer_core)
     add_test(NAME subtitle_provider_tests COMMAND subtitle_provider_tests)
@@ -82,6 +87,17 @@ if(BUILD_TESTING)
     add_executable(safe_read_file_tests tests/safe_read_file_tests.cpp)
     target_link_libraries(safe_read_file_tests PRIVATE bfplayer_core)
     add_test(NAME safe_read_file_tests COMMAND safe_read_file_tests)
+
+    add_executable(
+        kitchensink_audio_clock_tests
+        tests/kitchensink_audio_clock_tests.cpp
+        src/playback/kitchensink_audio_clock.c
+    )
+    target_include_directories(kitchensink_audio_clock_tests PRIVATE include)
+    add_test(
+        NAME kitchensink_audio_clock_tests
+        COMMAND kitchensink_audio_clock_tests
+    )
 
     add_executable(
         standalone_route_tests

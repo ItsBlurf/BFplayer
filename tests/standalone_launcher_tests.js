@@ -59,6 +59,27 @@ const kitchensinkVideoUtils = fs.readFileSync(
         'video',
         'kitvideoutils.c'),
     'utf8');
+const kitchensinkPlayer = fs.readFileSync(
+    path.join(
+        root,
+        'vendor',
+        'SDL_kitchensink',
+        'src',
+        'kitplayer.c'),
+    'utf8');
+const kitchensinkAudio = fs.readFileSync(
+    path.join(
+        root,
+        'vendor',
+        'SDL_kitchensink',
+        'src',
+        'internal',
+        'audio',
+        'kitaudio.c'),
+    'utf8');
+const dlnaClient = fs.readFileSync(
+    path.join(root, 'src', 'network', 'dlna_client.cpp'),
+    'utf8');
 const build = fs.readFileSync(path.join(root, 'build.ps1'), 'utf8');
 
 assert.strictEqual(param.applicationCategoryType, 65536);
@@ -306,9 +327,31 @@ assert(player.includes(
     'video-output-request source=%dx%d output=%dx%d downscale=%d'));
 assert(player.includes('migrate_legacy_library_database()'));
 assert(player.includes(
-    'Kit_SetHint(KIT_HINT_VIDEO_BUFFER_PACKETS, kVideoPacketBufferCount)'));
+    'Kit_SetHint(KIT_HINT_VIDEO_BUFFER_PACKETS, policy.video_packets)'));
 assert(player.includes(
-    'Kit_SetHint(KIT_HINT_VIDEO_BUFFER_FRAMES, kVideoFrameBufferCount)'));
+    'Kit_SetHint(KIT_HINT_VIDEO_BUFFER_FRAMES, policy.video_frames)'));
+assert(player.includes('constexpr int kNetworkVideoPacketBufferCount = 128'));
+assert(player.includes('constexpr int kNetworkVideoFrameBufferCount = 4'));
+assert(player.includes(
+    'Kit_SetHint(KIT_HINT_AUDIO_BUFFER_PACKETS, policy.audio_packets)'));
+assert(player.includes('peak_rss_kib=%llu'));
+assert(player.includes('reconnect_on_network_error'));
+assert(kitchensinkPlayer.includes(
+    'const bool audio_primary = audio_stream_index > -1'));
+assert(kitchensinkPlayer.includes(
+    'const bool video_primary = !audio_primary && video_stream_index > -1'));
+assert(kitchensinkAudio.includes(
+    'bfplayer_audio_audible_position('));
+assert(kitchensinkAudio.includes(
+    'best_effort_timestamp == AV_NOPTS_VALUE'));
+assert(libraryUi.includes('"Browse DLNA / NAS"'));
+assert(libraryUi.includes('discover_dlna_servers('));
+assert(libraryUi.includes('browse_dlna_directory('));
+assert(dlnaClient.includes('kMaxHttpResponseBytes'));
+assert(dlnaClient.includes('kMaxSsdpResponses'));
+assert(dlnaClient.includes('kMaxDescribedServers'));
+assert(build.includes("'src\\network\\dlna_client.cpp'"));
+assert(build.includes("'-ltinyxml2'"));
 assert(player.includes('video_update_fps=%.2f'));
 assert(player.includes('demanding_software_decode'));
 assert(player.includes('display_aspect_from_sample_aspect('));

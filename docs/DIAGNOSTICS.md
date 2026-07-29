@@ -28,6 +28,10 @@ The log includes:
 - local/network source policy, redacted source paths, format and stream
   inventory, decoder/audio/video setup, and playback heartbeats every five
   seconds;
+- local/network buffer policy, decoded and compressed queue occupancy, SDL
+  audio queue milliseconds, delivered video-frame rate, and process peak RSS;
+- DLNA discovery, device-description, directory-browse, cancellation,
+  truncation, and selected-resource events without signed URL secrets;
 - pause, seek, chapter, volume, mute, aspect, subtitle-delay, subtitle-track,
   audio-track, video-track, queue, resume, and shutdown events;
 - library roots, scan counts, skipped symlinks/devices, metadata probes,

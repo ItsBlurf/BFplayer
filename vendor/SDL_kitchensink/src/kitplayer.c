@@ -145,8 +145,11 @@ Kit_Player *Kit_CreatePlayer(
     Kit_Timer *timer = NULL;
     Kit_VideoFormatRequest tmp_video_format_request;
     Kit_AudioFormatRequest tmp_audio_format_request;
-    const bool video_primary = video_stream_index > -1;
-    const bool audio_primary = !video_primary && audio_stream_index > -1;
+    // Audio reflects what the viewer is currently hearing because the SDL
+    // backend exposes its queued byte count. Video drives the wall clock only
+    // for video-only media.
+    const bool audio_primary = audio_stream_index > -1;
+    const bool video_primary = !audio_primary && video_stream_index > -1;
 
     if(video_format_request == NULL) {
         Kit_ResetVideoFormatRequest(&tmp_video_format_request);
@@ -678,8 +681,8 @@ int Kit_GetPlayerAspectRatio(const Kit_Player *player, int *num, int *den) {
 static void Kit_IsStreamPrimary(const Kit_Player *player, bool *video_primary, bool *audio_primary) {
     const Kit_Decoder *video_decoder = player->decoders[KIT_VIDEO_INDEX];
     const Kit_Decoder *audio_decoder = player->decoders[KIT_AUDIO_INDEX];
-    *video_primary = video_decoder && video_decoder->stream->index > -1;
-    *audio_primary = audio_decoder && !*video_primary && audio_decoder->stream->index > -1;
+    *audio_primary = audio_decoder && audio_decoder->stream->index > -1;
+    *video_primary = video_decoder && !*audio_primary && video_decoder->stream->index > -1;
 }
 
 int Kit_ClosePlayerStream(Kit_Player *player, const Kit_StreamType type) {

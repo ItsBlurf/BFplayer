@@ -14,7 +14,14 @@ Confirmed demuxer/protocol symbols in the actual static archive:
 | Streaming | HLS, HTTP, HTTPS/TLS, FTP, RTSP, RTMP family, RTP/SRTP, MMST/MMSh, TCP/UDP, SCTP |
 | Subtitle files | ASS/SSA, SRT/SubRip, WebVTT, MicroDVD, SubViewer |
 | Local storage | Safe custom AVIO for primary files on `/data`, `/mnt/usbN`, `/mnt/extN`; restricted FFmpeg file access only for format-declared companions |
-| Network shares | Direct SMB is not linked; use a supported HTTP(S), FTP, or streaming URL exposed by the source |
+| Network libraries | DLNA/UPnP MediaServer discovery and ContentDirectory browsing; direct SMB is not linked |
+| Direct network sources | HTTP(S), FTP, HLS, RTSP, RTMP family, RTP/SRTP, MMST/MMSh, TCP/UDP, SCTP |
+
+The main menu can browse compatible NAS and LAN libraries through DLNA/UPnP,
+or open a direct supported URL. DLNA discovery is limited to the local
+multicast network and the player still treats every returned resource as an
+untrusted bounded network input. A NAS without DLNA can expose HTTP(S), FTP,
+or another listed stream protocol.
 
 Network entries inside local M3U, PLS, and XSPF playlists accept only the
 schemes confirmed in the linked archive and useful for media input:
@@ -83,9 +90,9 @@ silently claim hardware acceleration.
 ## Audio decoders
 
 Confirmed decoders include AAC, AC-3, E-AC-3, ALAC, MP2/MP3, FLAC, Opus,
-Vorbis, DTS/DCA, and TrueHD. FFmpeg downmixes output to 48 kHz stereo float for
-the current PS5 SDL AudioOut backend. Bitstream passthrough and multichannel
-AudioOut are not implemented.
+Vorbis, DTS/DCA, and TrueHD. FFmpeg downmixes output to 48 kHz stereo signed
+16-bit PCM for the current PS5 SDL AudioOut backend. Bitstream passthrough and
+multichannel AudioOut are not implemented.
 
 ## Video presentation
 

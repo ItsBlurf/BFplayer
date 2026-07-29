@@ -57,12 +57,20 @@ or a fatal filesystem error.
    JPEG/PNG artwork and confirm priority/aspect ratio. For a title without
    artwork, verify an interior video-frame preview appears and the old logo
    never appears in the right panel.
-10. Use local playlists containing HTTP/HLS, HTTPS, RTSP, RTMP, and UDP/RTP
-    samples, including clean connection failure. Confirm a URL containing
+10. Open **Browse DLNA / NAS**, discover one server, navigate at least three
+    folder levels, play an item, and return to the same directory and
+    selection. Refresh both the server list and one directory. Cancel one
+    discovery and one browse, then stop the server during a browse and confirm
+    a visible bounded failure. Test direct HTTP/HLS, HTTPS, RTSP, RTMP, and
+    UDP/RTP URLs, including clean connection failure. Confirm a URL containing
     `user:password@` is rejected and a signed query value never appears in
     logs. Direct SMB is outside the standalone build's supported protocols.
-11. Measure 1080p HEVC/VP9, then 4K samples. Treat frame drops as a performance
-    limit, not a reason to stack privileged/debug payloads.
+11. Play a 60 fps H.264 LAN stream for 30 minutes and compare lip sync at the
+    start and end. Seek repeatedly and switch audio/subtitle tracks while
+    watching `audio_queue_ms`, queue occupancy, delivered frame rate, and
+    `peak_rss_kib` in the logs. Then measure 1080p HEVC/VP9 and 4K H.264, VP9,
+    and HEVC samples. Treat frame drops as a software-decoding limit, not a
+    reason to stack privileged/debug payloads.
 
 Never mass-kill processes or restart the BigApp in a loop. Inject only the
 standalone launcher for this test and do not stack websrv or an older Media

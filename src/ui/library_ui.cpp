@@ -4,6 +4,7 @@
 #include "bfplayer/bulk_import.hpp"
 #include "bfplayer/controller_buttons.hpp"
 #include "bfplayer/diagnostics.hpp"
+#include "bfplayer/dlna_client.hpp"
 #include "bfplayer/list_navigation.hpp"
 #include "bfplayer/library_database.hpp"
 #include "bfplayer/library_scanner.hpp"
@@ -11,6 +12,7 @@
 #include "bfplayer/media_sources.hpp"
 #include "bfplayer/media_probe.hpp"
 #include "bfplayer/player_settings.hpp"
+#include "bfplayer/source_uri.hpp"
 #include "bfplayer/video_thumbnail.hpp"
 
 #include <SDL.h>
@@ -54,6 +56,9 @@ constexpr int kFilterCount = 8;
 constexpr std::size_t kMetadataProbeBudget = 512;
 constexpr std::size_t kMetadataFailureBudget = 8;
 constexpr std::size_t kMaxSearchBytes = 512;
+constexpr std::size_t kMaxNetworkUrlBytes = 4096;
+constexpr std::size_t kMaxDlnaObjects = 2000;
+constexpr int kDlnaDiscoveryMilliseconds = 2500;
 constexpr std::size_t kMaxBrowserEntriesSeen = 100000;
 constexpr std::size_t kMaxBrowserItems = 50000;
 constexpr std::size_t kMaxBrowserPathBytes = 4096;
@@ -88,6 +93,68 @@ enum class LibraryOverlay {
     controls,
     about,
 };
+
+enum class DlnaView {
+    none,
+    servers,
+    directory,
+};
+
+enum class DlnaJobType {
+    none,
+    discover,
+    browse,
+};
+
+struct DlnaLevel {
+    std::string object_id;
+    std::string title;
+    std::vector<DlnaObject> objects;
+    int selected = 0;
+    int first_visible = 0;
+    bool truncated = false;
+};
+
+struct DlnaJob {
+    SDL_Thread* thread = nullptr;
+    std::atomic<bool> done{false};
+    std::atomic<bool> cancel{false};
+    DlnaJobType type = DlnaJobType::none;
+    DlnaServer server;
+    std::string object_id;
+    std::string title;
+    std::vector<DlnaServer> servers;
+    DlnaBrowseResult browse;
+    std::string error;
+    bool success = false;
+    bool replace_current = false;
+};
+
+int run_dlna_job(void* opaque) {
+    auto* job = static_cast<DlnaJob*>(opaque);
+    if (!job) {
+        return 1;
+    }
+    if (job->type == DlnaJobType::discover) {
+        job->servers = discover_dlna_servers(
+            kDlnaDiscoveryMilliseconds,
+            job->cancel,
+            job->error);
+        job->success =
+            job->error.empty() ||
+            (!job->servers.empty() && job->error != "Cancelled");
+    } else if (job->type == DlnaJobType::browse) {
+        job->success = browse_dlna_directory(
+            job->server,
+            job->object_id,
+            kMaxDlnaObjects,
+            job->cancel,
+            job->browse,
+            job->error);
+    }
+    job->done.store(true, std::memory_order_release);
+    return job->success ? 0 : 1;
+}
 
 void destroy_label(Label& label) {
     SDL_DestroyTexture(label.texture);
@@ -473,6 +540,14 @@ struct LibraryUi::Impl {
     bool browser_mode = false;
     std::string browser_path;
     std::vector<BrowserEntry> browser_entries;
+    DlnaView dlna_view = DlnaView::none;
+    DlnaJob dlna_job;
+    std::vector<DlnaServer> dlna_servers;
+    DlnaServer active_dlna_server;
+    std::vector<DlnaLevel> dlna_path;
+    bool dlna_busy = false;
+    int dlna_server_selected = 0;
+    int dlna_server_first_visible = 0;
     int saved_library_selected = 0;
     int saved_library_first_visible = 0;
     std::array<bool, SDL_CONTROLLER_BUTTON_MAX> controller_buttons_down{};
@@ -533,6 +608,10 @@ struct LibraryUi::Impl {
     PlayerSettings player_settings;
     bool search_editing = false;
     bool rendered_search_editing = false;
+    bool network_url_editing = false;
+    bool rendered_network_url_editing = false;
+    std::string network_url_edit;
+    std::string rendered_network_url_edit;
     bool ime_was_visible = false;
     bool scanning = false;
     bool cancel_scan = false;
@@ -661,7 +740,7 @@ struct LibraryUi::Impl {
             return;
         }
         SDL_LockMutex(mutex);
-        if (search_editing) {
+        if (search_editing || network_url_editing) {
             navigation_repeat.reset();
             SDL_UnlockMutex(mutex);
             return;
@@ -669,7 +748,7 @@ struct LibraryUi::Impl {
         if (overlay != LibraryOverlay::none) {
             const int item_count =
                 overlay == LibraryOverlay::menu
-                    ? 6
+                    ? 8
                     : (overlay == LibraryOverlay::settings ? 7 : 0);
             if (item_count > 0) {
                 overlay_selected = wrap_list_index(
@@ -678,6 +757,19 @@ struct LibraryUi::Impl {
                     item_count);
                 ++published_generation;
             }
+        } else if (dlna_view != DlnaView::none) {
+            const int item_count =
+                dlna_view == DlnaView::servers
+                    ? static_cast<int>(dlna_servers.size())
+                    : (dlna_path.empty()
+                           ? 0
+                           : static_cast<int>(
+                                 dlna_path.back().objects.size()));
+            selected = wrap_list_index(
+                selected,
+                delta,
+                item_count);
+            ++published_generation;
         } else if (browser_mode) {
             selected = wrap_list_index(
                 selected,
@@ -727,7 +819,7 @@ struct LibraryUi::Impl {
 
         const int item_count =
             current == LibraryOverlay::menu
-                ? 6
+                ? 8
                 : (current == LibraryOverlay::settings ? 7 : 0);
         if (item_count > 0 &&
             (button == SDL_CONTROLLER_BUTTON_DPAD_UP ||
@@ -747,6 +839,16 @@ struct LibraryUi::Impl {
                     break;
                 case 1: {
                     open_overlay(LibraryOverlay::none);
+                    (void)start_dlna_discovery(true);
+                    break;
+                }
+                case 2: {
+                    open_overlay(LibraryOverlay::none);
+                    begin_network_url();
+                    break;
+                }
+                case 3: {
+                    open_overlay(LibraryOverlay::none);
                     bool has_query = false;
                     SDL_LockMutex(mutex);
                     has_query = !search_query.empty();
@@ -758,16 +860,16 @@ struct LibraryUi::Impl {
                     }
                     break;
                 }
-                case 2:
+                case 4:
                     open_overlay(LibraryOverlay::controls);
                     break;
-                case 3:
+                case 5:
                     open_overlay(LibraryOverlay::settings);
                     break;
-                case 4:
+                case 6:
                     open_overlay(LibraryOverlay::about);
                     break;
-                case 5:
+                case 7:
                     return true;
                 default:
                     break;
@@ -967,6 +1069,59 @@ struct LibraryUi::Impl {
         ime_was_visible = false;
         SDL_UnlockMutex(mutex);
         SDL_StartTextInput();
+    }
+
+    void begin_network_url() {
+        SDL_LockMutex(mutex);
+        if (search_editing || network_url_editing) {
+            SDL_UnlockMutex(mutex);
+            return;
+        }
+        network_url_edit.clear();
+        network_url_editing = true;
+        ime_was_visible = false;
+        ++published_generation;
+        SDL_UnlockMutex(mutex);
+        SDL_StartTextInput();
+    }
+
+    std::string finish_network_url(bool commit) {
+        SDL_LockMutex(mutex);
+        std::string value = network_url_edit;
+        network_url_edit.clear();
+        network_url_editing = false;
+        ime_was_visible = false;
+        ++published_generation;
+        SDL_UnlockMutex(mutex);
+        SDL_StopTextInput();
+        if (!commit) {
+            return {};
+        }
+
+        const std::size_t first = value.find_first_not_of(" \t\r\n");
+        const std::size_t last = value.find_last_not_of(" \t\r\n");
+        if (first == std::string::npos) {
+            set_notice("Enter a network media URL", 7000);
+            return {};
+        }
+        value = value.substr(first, last - first + 1);
+        if (!is_supported_stream_uri(value)) {
+            set_notice(
+                "Unsupported URL. Use HTTP, HTTPS, FTP, RTSP, RTP, RTMP, TCP, or UDP",
+                9000);
+            return {};
+        }
+        if (uri_has_credentials(value)) {
+            set_notice(
+                "URLs containing usernames or passwords are not accepted",
+                9000);
+            return {};
+        }
+        diagnostics_log(
+            DiagnosticLevel::info,
+            "network-url accepted path=%s",
+            redact_uri_secrets(value).c_str());
+        return value;
     }
 
     void finish_search(bool commit) {
@@ -1250,6 +1405,361 @@ struct LibraryUi::Impl {
         first_visible = saved_library_first_visible;
         ++published_generation;
         SDL_UnlockMutex(mutex);
+    }
+
+    void clear_dlna_job() {
+        dlna_job.type = DlnaJobType::none;
+        dlna_job.server = {};
+        dlna_job.object_id.clear();
+        dlna_job.title.clear();
+        dlna_job.servers.clear();
+        dlna_job.browse = {};
+        dlna_job.error.clear();
+        dlna_job.success = false;
+        dlna_job.replace_current = false;
+        dlna_job.cancel.store(false, std::memory_order_relaxed);
+        dlna_job.done.store(false, std::memory_order_relaxed);
+    }
+
+    void stop_dlna_job() {
+        if (!dlna_job.thread) {
+            return;
+        }
+        dlna_job.cancel.store(true, std::memory_order_relaxed);
+        SDL_WaitThread(dlna_job.thread, nullptr);
+        dlna_job.thread = nullptr;
+        clear_dlna_job();
+        SDL_LockMutex(mutex);
+        dlna_busy = false;
+        ++published_generation;
+        SDL_UnlockMutex(mutex);
+    }
+
+    bool launch_dlna_job() {
+        dlna_job.cancel.store(false, std::memory_order_relaxed);
+        dlna_job.done.store(false, std::memory_order_relaxed);
+        dlna_job.thread = SDL_CreateThread(
+            run_dlna_job,
+            dlna_job.type == DlnaJobType::discover
+                ? "bfplayer-dlna-discovery"
+                : "bfplayer-dlna-browse",
+            &dlna_job);
+        if (dlna_job.thread) {
+            return true;
+        }
+        const std::string thread_error =
+            std::string("Unable to start network worker: ") +
+            SDL_GetError();
+        clear_dlna_job();
+        SDL_LockMutex(mutex);
+        dlna_busy = false;
+        ++published_generation;
+        SDL_UnlockMutex(mutex);
+        set_notice(thread_error, 8000);
+        diagnostics_log(
+            DiagnosticLevel::error,
+            "dlna-worker create failed error=%s",
+            SDL_GetError());
+        return false;
+    }
+
+    bool start_dlna_discovery(bool entering) {
+        if (dlna_job.thread) {
+            return false;
+        }
+        SDL_LockMutex(mutex);
+        if (entering && dlna_view == DlnaView::none) {
+            saved_library_selected = selected;
+            saved_library_first_visible = first_visible;
+            preferred_selected_path =
+                selected_path_locked();
+        }
+        dlna_view = DlnaView::servers;
+        dlna_busy = true;
+        dlna_servers.clear();
+        dlna_path.clear();
+        active_dlna_server = {};
+        selected = 0;
+        first_visible = 0;
+        ++published_generation;
+        SDL_UnlockMutex(mutex);
+        dlna_job.type = DlnaJobType::discover;
+        diagnostics_log(
+            DiagnosticLevel::info,
+            "dlna-discovery begin wait_ms=%d",
+            kDlnaDiscoveryMilliseconds);
+        return launch_dlna_job();
+    }
+
+    bool start_dlna_browse(
+        const DlnaServer& server,
+        std::string object_id,
+        std::string title,
+        bool replace_current = false) {
+        if (dlna_job.thread) {
+            return false;
+        }
+        SDL_LockMutex(mutex);
+        if (dlna_view == DlnaView::servers) {
+            dlna_server_selected = selected;
+            dlna_server_first_visible = first_visible;
+        } else if (
+            dlna_view == DlnaView::directory &&
+            !dlna_path.empty()) {
+            dlna_path.back().selected = selected;
+            dlna_path.back().first_visible = first_visible;
+        }
+        dlna_busy = true;
+        ++published_generation;
+        SDL_UnlockMutex(mutex);
+        dlna_job.type = DlnaJobType::browse;
+        dlna_job.server = server;
+        dlna_job.object_id = std::move(object_id);
+        dlna_job.title = std::move(title);
+        dlna_job.replace_current = replace_current;
+        diagnostics_log(
+            DiagnosticLevel::info,
+            "dlna-browse begin server=%s object_id=%s replace=%d",
+            server.friendly_name.c_str(),
+            dlna_job.object_id.c_str(),
+            replace_current ? 1 : 0);
+        return launch_dlna_job();
+    }
+
+    void consume_dlna_job_result() {
+        if (!dlna_job.thread ||
+            !dlna_job.done.load(std::memory_order_acquire)) {
+            return;
+        }
+        SDL_WaitThread(dlna_job.thread, nullptr);
+        dlna_job.thread = nullptr;
+
+        const DlnaJobType type = dlna_job.type;
+        const bool success = dlna_job.success;
+        const bool replace_current = dlna_job.replace_current;
+        const std::string title = dlna_job.title;
+        const std::string object_id = dlna_job.object_id;
+        std::string error = dlna_job.error;
+        std::vector<DlnaServer> servers =
+            std::move(dlna_job.servers);
+        DlnaBrowseResult browse =
+            std::move(dlna_job.browse);
+        const DlnaServer server = dlna_job.server;
+        clear_dlna_job();
+
+        SDL_LockMutex(mutex);
+        dlna_busy = false;
+        if (type == DlnaJobType::discover && success) {
+            dlna_servers = std::move(servers);
+            selected = 0;
+            first_visible = 0;
+        } else if (
+            type == DlnaJobType::browse &&
+            success) {
+            if (replace_current && !dlna_path.empty()) {
+                dlna_path.pop_back();
+            }
+            DlnaLevel level;
+            level.object_id = object_id;
+            level.title = title;
+            level.objects = std::move(browse.objects);
+            level.truncated = browse.truncated;
+            dlna_path.push_back(std::move(level));
+            active_dlna_server = server;
+            dlna_view = DlnaView::directory;
+            selected = 0;
+            first_visible = 0;
+        }
+        ++published_generation;
+        SDL_UnlockMutex(mutex);
+
+        if (type == DlnaJobType::discover) {
+            diagnostics_log(
+                success
+                    ? DiagnosticLevel::info
+                    : DiagnosticLevel::error,
+                "dlna-discovery complete success=%d servers=%zu error=%s",
+                success ? 1 : 0,
+                dlna_servers.size(),
+                error.empty() ? "<none>" : error.c_str());
+            if (success && dlna_servers.empty()) {
+                set_notice(
+                    "No DLNA media servers were found on this network",
+                    8000);
+            } else if (!success) {
+                set_notice(
+                    "DLNA discovery failed: " +
+                        (error.empty()
+                             ? std::string("Unknown network error")
+                             : error),
+                    9000);
+            }
+        } else if (type == DlnaJobType::browse) {
+            diagnostics_log(
+                success
+                    ? DiagnosticLevel::info
+                    : DiagnosticLevel::error,
+                "dlna-browse complete success=%d object_id=%s objects=%zu truncated=%d error=%s",
+                success ? 1 : 0,
+                object_id.c_str(),
+                success && !dlna_path.empty()
+                    ? dlna_path.back().objects.size()
+                    : 0U,
+                success && !dlna_path.empty() &&
+                        dlna_path.back().truncated
+                    ? 1
+                    : 0,
+                error.empty() ? "<none>" : error.c_str());
+            if (!success) {
+                set_notice(
+                    "Unable to browse media server: " +
+                        (error.empty()
+                             ? std::string("Unknown network error")
+                             : error),
+                    9000);
+            } else if (!error.empty()) {
+                set_notice(
+                    "Some DLNA results could not be loaded: " + error,
+                    8000);
+            }
+        }
+    }
+
+    void close_dlna_browser() {
+        stop_dlna_job();
+        SDL_LockMutex(mutex);
+        dlna_view = DlnaView::none;
+        dlna_servers.clear();
+        dlna_path.clear();
+        active_dlna_server = {};
+        dlna_busy = false;
+        selected = saved_library_selected;
+        first_visible = saved_library_first_visible;
+        ++published_generation;
+        SDL_UnlockMutex(mutex);
+    }
+
+    void dlna_back() {
+        SDL_LockMutex(mutex);
+        if (dlna_view == DlnaView::directory) {
+            if (dlna_path.size() > 1) {
+                dlna_path.pop_back();
+                selected = dlna_path.back().selected;
+                first_visible =
+                    dlna_path.back().first_visible;
+            } else {
+                dlna_path.clear();
+                dlna_view = DlnaView::servers;
+                selected = dlna_server_selected;
+                first_visible =
+                    dlna_server_first_visible;
+            }
+            ++published_generation;
+            SDL_UnlockMutex(mutex);
+            return;
+        }
+        SDL_UnlockMutex(mutex);
+        close_dlna_browser();
+    }
+
+    std::string handle_dlna_button(Uint8 button) {
+        if (button == kControllerOptionsButton) {
+            close_dlna_browser();
+            return {};
+        }
+        if (button == SDL_CONTROLLER_BUTTON_B) {
+            if (dlna_job.thread) {
+                stop_dlna_job();
+            } else {
+                dlna_back();
+            }
+            return {};
+        }
+
+        SDL_LockMutex(mutex);
+        const bool busy = dlna_busy;
+        const DlnaView view = dlna_view;
+        const int current_selected = selected;
+        const int server_count =
+            static_cast<int>(dlna_servers.size());
+        const int object_count =
+            dlna_path.empty()
+                ? 0
+                : static_cast<int>(
+                      dlna_path.back().objects.size());
+        SDL_UnlockMutex(mutex);
+        if (busy) {
+            return {};
+        }
+        if (button == SDL_CONTROLLER_BUTTON_DPAD_UP ||
+            button == SDL_CONTROLLER_BUTTON_DPAD_DOWN) {
+            move_vertical(
+                button == SDL_CONTROLLER_BUTTON_DPAD_UP ? -1 : 1);
+            return {};
+        }
+        if (button == SDL_CONTROLLER_BUTTON_LEFTSHOULDER ||
+            button == SDL_CONTROLLER_BUTTON_RIGHTSHOULDER) {
+            move_vertical(
+                button == SDL_CONTROLLER_BUTTON_LEFTSHOULDER
+                    ? -kVisibleRows
+                    : kVisibleRows);
+            return {};
+        }
+        if (button == SDL_CONTROLLER_BUTTON_X) {
+            if (view == DlnaView::servers) {
+                (void)start_dlna_discovery(false);
+            } else if (
+                view == DlnaView::directory &&
+                !dlna_path.empty()) {
+                (void)start_dlna_browse(
+                    active_dlna_server,
+                    dlna_path.back().object_id,
+                    dlna_path.back().title,
+                    true);
+            }
+            return {};
+        }
+        if (button != SDL_CONTROLLER_BUTTON_A) {
+            return {};
+        }
+        if (view == DlnaView::servers &&
+            current_selected >= 0 &&
+            current_selected < server_count) {
+            const DlnaServer server =
+                dlna_servers[static_cast<std::size_t>(
+                    current_selected)];
+            (void)start_dlna_browse(
+                server,
+                "0",
+                server.friendly_name);
+            return {};
+        }
+        if (view == DlnaView::directory &&
+            current_selected >= 0 &&
+            current_selected < object_count &&
+            !dlna_path.empty()) {
+            const DlnaObject object =
+                dlna_path.back().objects[
+                    static_cast<std::size_t>(
+                        current_selected)];
+            if (object.container) {
+                (void)start_dlna_browse(
+                    active_dlna_server,
+                    object.id,
+                    object.title);
+                return {};
+            }
+            if (object.playable()) {
+                diagnostics_log(
+                    DiagnosticLevel::info,
+                    "dlna-play selected title=%s path=%s",
+                    object.title.c_str(),
+                    redact_uri_secrets(
+                        object.resource_url).c_str());
+                return object.resource_url;
+            }
+        }
+        return {};
     }
 
     bool persist_sources() {
@@ -1983,7 +2493,7 @@ struct LibraryUi::Impl {
     void update_ime_state() {
 #if defined(BFPLAYER_PS5)
         SDL_LockMutex(mutex);
-        const bool editing = search_editing;
+        const bool editing = search_editing || network_url_editing;
         SDL_UnlockMutex(mutex);
         if (!editing || !renderer) {
             return;
@@ -1992,7 +2502,7 @@ struct LibraryUi::Impl {
         const bool shown = window && SDL_IsScreenKeyboardShown(window) == SDL_TRUE;
         bool cancel_finished_input = false;
         SDL_LockMutex(mutex);
-        if (search_editing) {
+        if (search_editing || network_url_editing) {
             if (shown) {
                 ime_was_visible = true;
             } else if (ime_was_visible) {
@@ -2000,7 +2510,10 @@ struct LibraryUi::Impl {
                 // event for cancel. Reaching here while still editing is cancel.
                 search_edit.clear();
                 search_editing = false;
+                network_url_edit.clear();
+                network_url_editing = false;
                 ime_was_visible = false;
+                ++published_generation;
                 cancel_finished_input = true;
             }
         }
@@ -2658,9 +3171,196 @@ struct LibraryUi::Impl {
             footer_hints.push_back(std::move(hint));
         };
 
+        DlnaView active_dlna_view = DlnaView::none;
+        bool active_dlna_busy = false;
         SDL_LockMutex(mutex);
         const bool browsing = browser_mode;
+        active_dlna_view = dlna_view;
+        active_dlna_busy = dlna_busy;
         SDL_UnlockMutex(mutex);
+        if (active_dlna_view != DlnaView::none) {
+            clear_artwork();
+            std::vector<DlnaServer> visible_servers;
+            std::vector<DlnaObject> visible_objects;
+            std::string active_title;
+            std::string active_notice;
+            bool active_truncated = false;
+            int total = 0;
+            SDL_LockMutex(mutex);
+            if (!notice.empty() &&
+                SDL_GetTicks64() >= notice_until) {
+                notice.clear();
+                ++notice_generation;
+            }
+            if (active_dlna_view == DlnaView::servers) {
+                total = static_cast<int>(dlna_servers.size());
+                active_title = "DLNA / NAS Media Servers";
+            } else if (!dlna_path.empty()) {
+                total = static_cast<int>(
+                    dlna_path.back().objects.size());
+                active_title =
+                    active_dlna_server.friendly_name +
+                    "  /  " + dlna_path.back().title;
+                active_truncated =
+                    dlna_path.back().truncated;
+            }
+            selected = std::clamp(
+                selected, 0, std::max(0, total - 1));
+            if (selected < first_visible) {
+                first_visible = selected;
+            }
+            if (selected >= first_visible + kVisibleRows) {
+                first_visible =
+                    selected - kVisibleRows + 1;
+            }
+            first_visible = std::clamp(
+                first_visible,
+                0,
+                std::max(0, total - kVisibleRows));
+            const int end =
+                std::min(total, first_visible + kVisibleRows);
+            if (active_dlna_view == DlnaView::servers) {
+                for (int index = first_visible;
+                     index < end;
+                     ++index) {
+                    visible_servers.push_back(
+                        dlna_servers[
+                            static_cast<std::size_t>(index)]);
+                }
+            } else if (!dlna_path.empty()) {
+                for (int index = first_visible;
+                     index < end;
+                     ++index) {
+                    visible_objects.push_back(
+                        dlna_path.back().objects[
+                            static_cast<std::size_t>(index)]);
+                }
+            }
+            active_notice = notice;
+            rendered_generation = published_generation;
+            rendered_selected = selected;
+            rendered_first = first_visible;
+            rendered_overlay =
+                static_cast<int>(LibraryOverlay::none);
+            rendered_overlay_selected = 0;
+            rendered_notice_generation = notice_generation;
+            SDL_UnlockMutex(mutex);
+
+            title_label = make_label(
+                renderer,
+                title_font,
+                fit_text_to_width(
+                    title_font,
+                    std::move(active_title),
+                    kUiWidth - 220),
+                white);
+            std::string status;
+            if (active_dlna_busy) {
+                status =
+                    active_dlna_view == DlnaView::servers
+                        ? "DISCOVERING MEDIA SERVERS..."
+                        : "LOADING NETWORK FOLDER...";
+            } else {
+                status =
+                    std::to_string(total) +
+                    (active_dlna_view == DlnaView::servers
+                         ? " SERVERS"
+                         : " ITEMS");
+                if (active_truncated) {
+                    status +=
+                        "  |  RESULT LIMIT REACHED";
+                }
+            }
+            status_label = make_label(
+                renderer, row_font, status, muted);
+            if (!active_notice.empty()) {
+                notice_label = make_label(
+                    renderer,
+                    row_font,
+                    fit_text_to_width(
+                        row_font,
+                        std::move(active_notice),
+                        kUiWidth - 180),
+                    white);
+            }
+            for (const DlnaServer& server : visible_servers) {
+                std::string text =
+                    "SERVER   " + server.friendly_name;
+                if (!server.model.empty() &&
+                    server.model != server.friendly_name) {
+                    text += "  |  " + server.model;
+                }
+                row_labels.push_back(make_label(
+                    renderer,
+                    row_font,
+                    fit_text_to_width(
+                        row_font,
+                        std::move(text),
+                        kUiWidth - 180),
+                    white));
+            }
+            for (const DlnaObject& object : visible_objects) {
+                std::string prefix = "MEDIA";
+                if (object.container) {
+                    prefix = "FOLDER";
+                } else if (
+                    object.upnp_class.starts_with(
+                        "object.item.audioItem")) {
+                    prefix = "AUDIO";
+                } else if (
+                    object.upnp_class.starts_with(
+                        "object.item.videoItem")) {
+                    prefix = "VIDEO";
+                }
+                std::string text =
+                    prefix + "   " + object.title;
+                if (object.container &&
+                    object.child_count >= 0) {
+                    text += "  |  " +
+                        std::to_string(
+                            object.child_count) +
+                        " items";
+                }
+                if (!object.resolution.empty()) {
+                    text += "  |  " +
+                        object.resolution;
+                }
+                if (object.duration_us > 0) {
+                    const std::string duration =
+                        format_duration(
+                            object.duration_us / 1000);
+                    if (!duration.empty()) {
+                        text += "  |  " + duration;
+                    }
+                }
+                row_labels.push_back(make_label(
+                    renderer,
+                    row_font,
+                    fit_text_to_width(
+                        row_font,
+                        std::move(text),
+                        kUiWidth - 180),
+                    white));
+            }
+            if (active_dlna_busy) {
+                add_footer_hint(
+                    FooterGlyph::circle, "", "Cancel");
+            } else {
+                add_footer_hint(
+                    FooterGlyph::cross,
+                    "",
+                    active_dlna_view == DlnaView::servers
+                        ? "Browse"
+                        : "Open / Play");
+                add_footer_hint(
+                    FooterGlyph::square, "", "Refresh");
+                add_footer_hint(
+                    FooterGlyph::circle, "", "Back");
+            }
+            add_footer_hint(
+                FooterGlyph::options, "", "Close");
+            return;
+        }
         if (browsing) {
             clear_artwork();
             std::vector<BrowserEntry> visible_browser;
@@ -2712,6 +3412,8 @@ struct LibraryUi::Impl {
             rendered_search_query = search_query;
             rendered_search_edit = search_edit;
             rendered_search_editing = search_editing;
+            rendered_network_url_edit = network_url_edit;
+            rendered_network_url_editing = network_url_editing;
             rendered_notice_generation = notice_generation;
             rendered_overlay = static_cast<int>(LibraryOverlay::none);
             rendered_overlay_selected = 0;
@@ -2833,7 +3535,9 @@ struct LibraryUi::Impl {
                     title = "BFplayer";
                     subtitle = "Choose what you want to do";
                     rows = {
-                        "Add media",
+                        "Add local media",
+                        "Browse DLNA / NAS",
+                        "Open network URL",
                         active_search_query ? "Clear search" : "Search library",
                         "Controls & shortcuts",
                         "Playback settings",
@@ -2897,6 +3601,7 @@ struct LibraryUi::Impl {
                     rows = {
                         "Standalone native PS5 payload",
                         "FFmpeg 7.0.1 with SDL_kitchensink and SDL2",
+                        "Local files and direct LAN / network streams",
                         "Library and logs: /data/BFplayer",
                         "Dashboard title: PSMC00001 (Media)",
                         "Build: " BFPLAYER_VERSION,
@@ -2964,11 +3669,13 @@ struct LibraryUi::Impl {
         bool is_scanning = false;
         bool library_has_entries = false;
         bool is_search_editing = false;
+        bool is_network_url_editing = false;
         int total = 0;
         int active_filter = 0;
         LibrarySortMode active_sort_mode = LibrarySortMode::smart;
         std::string active_query;
         std::string active_search_edit;
+        std::string active_network_url_edit;
         std::string active_notice;
         std::string active_media_path;
         int active_generation = 0;
@@ -3023,10 +3730,12 @@ struct LibraryUi::Impl {
         is_scanning = scanning;
         library_has_entries = !entries.empty();
         is_search_editing = search_editing;
+        is_network_url_editing = network_url_editing;
         active_filter = filter;
         active_sort_mode = sort_mode;
         active_query = search_query;
         active_search_edit = search_edit;
+        active_network_url_edit = network_url_edit;
         active_notice = notice;
         if (total > 0) {
             active_media_path =
@@ -3039,6 +3748,8 @@ struct LibraryUi::Impl {
         rendered_search_query = search_query;
         rendered_search_edit = search_edit;
         rendered_search_editing = search_editing;
+        rendered_network_url_edit = network_url_edit;
+        rendered_network_url_editing = network_url_editing;
         rendered_notice_generation = notice_generation;
         rendered_overlay = static_cast<int>(LibraryOverlay::none);
         rendered_overlay_selected = 0;
@@ -3105,6 +3816,11 @@ struct LibraryUi::Impl {
         }
         if (is_search_editing) {
             status += "  |  ENTER SEARCH: " + active_search_edit;
+        }
+        if (is_network_url_editing) {
+            status =
+                "OPEN NETWORK MEDIA  |  ENTER URL: " +
+                active_network_url_edit;
         }
         if (is_scanning) {
             status += "  |  INDEXING SELECTED SOURCES...";
@@ -3349,7 +4065,21 @@ bool LibraryUi::open(
         }
     }
     SDL_LockMutex(impl_->mutex);
-    impl_->restore_selected_path_locked(impl_->preferred_selected_path);
+    if (impl_->dlna_view == DlnaView::servers) {
+        impl_->selected = impl_->dlna_server_selected;
+        impl_->first_visible =
+            impl_->dlna_server_first_visible;
+    } else if (
+        impl_->dlna_view == DlnaView::directory &&
+        !impl_->dlna_path.empty()) {
+        impl_->selected =
+            impl_->dlna_path.back().selected;
+        impl_->first_visible =
+            impl_->dlna_path.back().first_visible;
+    } else {
+        impl_->restore_selected_path_locked(
+            impl_->preferred_selected_path);
+    }
     SDL_UnlockMutex(impl_->mutex);
     if (sources_changed && !impl_->start_scan()) {
         return false;
@@ -3361,12 +4091,33 @@ void LibraryUi::close() {
     if (!impl_) {
         return;
     }
-    if (impl_->search_editing || SDL_IsTextInputActive() == SDL_TRUE) {
+    if (impl_->search_editing || impl_->network_url_editing ||
+        SDL_IsTextInputActive() == SDL_TRUE) {
         SDL_StopTextInput();
     }
     impl_->search_editing = false;
     impl_->search_edit.clear();
+    impl_->network_url_editing = false;
+    impl_->network_url_edit.clear();
     impl_->ime_was_visible = false;
+    const bool preserving_dlna =
+        impl_->dlna_view != DlnaView::none;
+    if (preserving_dlna && impl_->mutex) {
+        SDL_LockMutex(impl_->mutex);
+        if (impl_->dlna_view == DlnaView::servers) {
+            impl_->dlna_server_selected =
+                impl_->selected;
+            impl_->dlna_server_first_visible =
+                impl_->first_visible;
+        } else if (!impl_->dlna_path.empty()) {
+            impl_->dlna_path.back().selected =
+                impl_->selected;
+            impl_->dlna_path.back().first_visible =
+                impl_->first_visible;
+        }
+        SDL_UnlockMutex(impl_->mutex);
+    }
+    impl_->stop_dlna_job();
     impl_->stop_scan();
     impl_->stop_bulk_import();
     if (impl_->mutex) {
@@ -3380,9 +4131,13 @@ void LibraryUi::close() {
             }
         }
         SDL_LockMutex(impl_->mutex);
-        const std::string selected_path = impl_->selected_path_locked();
-        if (!selected_path.empty()) {
-            impl_->preferred_selected_path = selected_path;
+        if (!preserving_dlna) {
+            const std::string selected_path =
+                impl_->selected_path_locked();
+            if (!selected_path.empty()) {
+                impl_->preferred_selected_path =
+                    selected_path;
+            }
         }
         SDL_UnlockMutex(impl_->mutex);
     }
@@ -3422,13 +4177,19 @@ LibraryAction LibraryUi::handle_event(const SDL_Event& event, std::string& selec
 
     SDL_LockMutex(impl_->mutex);
     const bool editing_search = impl_->search_editing;
+    const bool editing_network_url = impl_->network_url_editing;
     const bool browsing = impl_->browser_mode;
+    const bool browsing_dlna =
+        impl_->dlna_view != DlnaView::none;
     const bool overlay_open = impl_->overlay != LibraryOverlay::none;
     SDL_UnlockMutex(impl_->mutex);
 
     if (event.type == SDL_QUIT) {
         if (editing_search) {
             impl_->finish_search(false);
+        }
+        if (editing_network_url) {
+            (void)impl_->finish_network_url(false);
         }
         return LibraryAction::exit;
     }
@@ -3494,10 +4255,60 @@ LibraryAction LibraryUi::handle_event(const SDL_Event& event, std::string& selec
                 ? LibraryAction::exit
                 : LibraryAction::none;
         }
+        if (browsing_dlna) {
+            selected_path =
+                impl_->handle_dlna_button(
+                    event.cbutton.button);
+            return selected_path.empty()
+                ? LibraryAction::none
+                : LibraryAction::play;
+        }
         if (browsing) {
             impl_->handle_browser_button(event.cbutton.button);
             return LibraryAction::none;
         }
+    }
+
+    if (browsing_dlna && event.type == SDL_KEYDOWN) {
+        int button = -1;
+        switch (event.key.keysym.sym) {
+            case SDLK_RETURN:
+            case SDLK_KP_ENTER:
+                button = SDL_CONTROLLER_BUTTON_A;
+                break;
+            case SDLK_BACKSPACE:
+                button = SDL_CONTROLLER_BUTTON_B;
+                break;
+            case SDLK_ESCAPE:
+                button = kControllerOptionsButton;
+                break;
+            case SDLK_UP:
+                button = SDL_CONTROLLER_BUTTON_DPAD_UP;
+                break;
+            case SDLK_DOWN:
+                button = SDL_CONTROLLER_BUTTON_DPAD_DOWN;
+                break;
+            case SDLK_PAGEUP:
+                button = SDL_CONTROLLER_BUTTON_LEFTSHOULDER;
+                break;
+            case SDLK_PAGEDOWN:
+                button = SDL_CONTROLLER_BUTTON_RIGHTSHOULDER;
+                break;
+            case SDLK_x:
+            case SDLK_F5:
+                button = SDL_CONTROLLER_BUTTON_X;
+                break;
+            default:
+                break;
+        }
+        if (button >= 0) {
+            selected_path = impl_->handle_dlna_button(
+                static_cast<Uint8>(button));
+            return selected_path.empty()
+                ? LibraryAction::none
+                : LibraryAction::play;
+        }
+        return LibraryAction::none;
     }
 
     if (browsing && event.type == SDL_KEYDOWN) {
@@ -3587,6 +4398,17 @@ LibraryAction LibraryUi::handle_event(const SDL_Event& event, std::string& selec
         return LibraryAction::none;
     }
 
+    if (editing_network_url && event.type == SDL_TEXTINPUT) {
+        SDL_LockMutex(impl_->mutex);
+        impl_->network_url_edit.append(event.text.text);
+        while (impl_->network_url_edit.size() > kMaxNetworkUrlBytes) {
+            erase_last_utf8_codepoint(impl_->network_url_edit);
+        }
+        ++impl_->published_generation;
+        SDL_UnlockMutex(impl_->mutex);
+        return LibraryAction::none;
+    }
+
     if (editing_search && event.type == SDL_KEYDOWN) {
         switch (event.key.keysym.sym) {
             case SDLK_RETURN:
@@ -3612,9 +4434,40 @@ LibraryAction LibraryUi::handle_event(const SDL_Event& event, std::string& selec
         return LibraryAction::none;
     }
 
+    if (editing_network_url && event.type == SDL_KEYDOWN) {
+        switch (event.key.keysym.sym) {
+            case SDLK_RETURN:
+            case SDLK_KP_ENTER:
+                selected_path = impl_->finish_network_url(true);
+                if (!selected_path.empty()) {
+                    return LibraryAction::play;
+                }
+                break;
+            case SDLK_ESCAPE:
+                (void)impl_->finish_network_url(false);
+                break;
+            case SDLK_BACKSPACE:
+                SDL_LockMutex(impl_->mutex);
+                erase_last_utf8_codepoint(impl_->network_url_edit);
+                ++impl_->published_generation;
+                SDL_UnlockMutex(impl_->mutex);
+                break;
+            case SDLK_DELETE:
+                SDL_LockMutex(impl_->mutex);
+                impl_->network_url_edit.clear();
+                ++impl_->published_generation;
+                SDL_UnlockMutex(impl_->mutex);
+                break;
+            default:
+                break;
+        }
+        return LibraryAction::none;
+    }
+
     // The PS5 IME owns controller input while shown. Consuming any controller
     // event that leaks through prevents an OK/cancel press from also playing.
-    if (editing_search && event.type == SDL_CONTROLLERBUTTONDOWN) {
+    if ((editing_search || editing_network_url) &&
+        event.type == SDL_CONTROLLERBUTTONDOWN) {
         return LibraryAction::none;
     }
 
@@ -3887,6 +4740,7 @@ void LibraryUi::show_notice(std::string message, std::uint64_t milliseconds) {
 
 void LibraryUi::render() {
     impl_->update_ime_state();
+    impl_->consume_dlna_job_result();
     impl_->consume_thumbnail_result();
     impl_->consume_bulk_import_result();
     SDL_RenderSetLogicalSize(impl_->renderer, kUiWidth, kUiHeight);
@@ -3903,6 +4757,8 @@ void LibraryUi::render() {
                        impl_->rendered_search_query != impl_->search_query ||
                        impl_->rendered_search_edit != impl_->search_edit ||
                        impl_->rendered_search_editing != impl_->search_editing ||
+                       impl_->rendered_network_url_edit != impl_->network_url_edit ||
+                       impl_->rendered_network_url_editing != impl_->network_url_editing ||
                        impl_->rendered_notice_generation != impl_->notice_generation ||
                        notice_expired;
     SDL_UnlockMutex(impl_->mutex);
@@ -3935,12 +4791,15 @@ void LibraryUi::render() {
     }
 
     const bool overlay_open = impl_->overlay != LibraryOverlay::none;
+    const bool dlna_open =
+        impl_->dlna_view != DlnaView::none;
     const bool selectable_overlay =
         impl_->overlay == LibraryOverlay::menu ||
         impl_->overlay == LibraryOverlay::settings;
     const bool empty_library_view =
         !overlay_open &&
         !impl_->browser_mode &&
+        !dlna_open &&
         impl_->row_labels.empty();
     const int active_selection =
         overlay_open
@@ -3948,7 +4807,7 @@ void LibraryUi::render() {
             : impl_->selected;
     const int active_first = overlay_open ? 0 : impl_->first_visible;
     const int content_width =
-        overlay_open || empty_library_view
+        overlay_open || dlna_open || empty_library_view
             ? kUiWidth - 84
             : kListWidth;
     SDL_SetRenderDrawColor(impl_->renderer, 9, 16, 30, 255);
@@ -4039,7 +4898,7 @@ void LibraryUi::render() {
         }
     }
 
-    if (!overlay_open && !empty_library_view) {
+    if (!overlay_open && !dlna_open && !empty_library_view) {
         SDL_SetRenderDrawColor(impl_->renderer, 11, 20, 37, 255);
         SDL_Rect artwork_panel{
             kArtworkPanelX,
@@ -4051,6 +4910,7 @@ void LibraryUi::render() {
         SDL_RenderDrawRect(impl_->renderer, &artwork_panel);
     }
     if (!overlay_open &&
+        !dlna_open &&
         !empty_library_view &&
         impl_->artwork_texture &&
         impl_->artwork_width > 0 &&
@@ -4072,6 +4932,7 @@ void LibraryUi::render() {
         SDL_RenderFillRect(impl_->renderer, &frame);
         SDL_RenderCopy(impl_->renderer, impl_->artwork_texture, nullptr, &target);
     } else if (!overlay_open &&
+               !dlna_open &&
                !empty_library_view &&
                !impl_->browser_mode) {
         SDL_SetRenderDrawColor(impl_->renderer, 15, 28, 51, 255);
@@ -4106,6 +4967,7 @@ void LibraryUi::render() {
         }
     }
     if (!overlay_open &&
+        !dlna_open &&
         !empty_library_view &&
         impl_->artwork_label.texture) {
         SDL_Rect target{

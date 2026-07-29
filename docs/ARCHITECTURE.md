@@ -42,11 +42,27 @@ restarting unrelated PS5 processes.
 | SDL_image | PacBrew v0.37 | Bounded JPEG/PNG local artwork decoding |
 | SDL_kitchensink | 2.0.0-a2 + PS5 PTS patch | Decode queues, sync, seeking, track switching |
 | libass | 0.17.3 | Styled text subtitles and embedded fonts |
+| TinyXML-2 | PacBrew v0.37 | UPnP device descriptions, SOAP, and DIDL-Lite |
 | SQLite | PacBrew v0.37 | Library index, resume position, preferences |
 | BigApp/ELF loader core | ps5-payload-websrv, GPL-3.0-or-later | Minimal in-memory BigApp transition |
 
 The project links these statically. SCE system libraries remain dynamic stubs,
 matching the official PacBrew FFplay binary.
+
+## UI-library decision
+
+RmlUi and John Törnblom's dlnaplay were reviewed for this release. RmlUi is a
+capable SDL-compatible UI layer, but replacing BFplayer's working SDL2/TTF
+interface would be a complete presentation rewrite. It would not remove
+FFmpeg decoder references, Kitchensink queues, converted video textures, or
+SDL audio buffers, and it would not by itself correct A/V synchronization.
+
+BFplayer therefore keeps its existing controller-tested SDL interface for this
+alpha. The useful playback and network design lessons were adopted directly:
+audible audio is the master clock, decoded video queues remain small, network
+packet queues are larger but bounded, and DLNA work runs outside the render
+thread. A later RmlUi migration remains possible if it provides a measured UI
+or maintainability benefit.
 
 ## Playback capabilities
 
@@ -55,6 +71,22 @@ subtitle streams. Switching preserves the common player clock and does not
 reopen the container. Audio output is requested as 48 kHz stereo signed 16-bit
 because the current PS5 SDL backend supports mono/stereo S16 output; multichannel
 sources are downmixed by FFmpeg.
+
+When audio is present, the shared player clock follows the timestamp currently
+reaching the SDL audio device. BFplayer derives that timestamp from the next
+decoded sample position minus `SDL_GetQueuedAudioSize()`. Video follows this
+audible clock, which avoids treating a wall-clock video timer as authoritative
+while audio is still buffered. Video remains the primary clock only for
+video-only media. Seeks and audio/subtitle changes clear stale SDL audio and
+refresh demuxed packets around the current playback position.
+
+Local playback uses 64 compressed video packets and 3 converted video frames.
+Network playback uses 128 compressed video packets and 4 converted video
+frames to absorb LAN jitter without creating a deep frame cache. Audio output
+keeps Kitchensink's bounded 64-frame queue; network audio packet capacity is
+raised from 64 to 128. These limits do not eliminate codec-internal reference
+frames, so the diagnostics also record peak resident memory, queue occupancy,
+and queued-audio milliseconds for hardware measurement.
 
 The video renderer separates decoded pixel dimensions from the stream display
 aspect ratio. Pure, host-tested layout math independently applies the complete
@@ -70,13 +102,24 @@ Language tags are stored alongside the indices so a remux can recover the same
 language even when stream numbering changes. External subtitle paths and timing
 offsets are restored as well; an explicit `--subtitle` argument always wins.
 
-Network sources pass through FFmpeg unchanged. The launcher uses an explicit
-scheme allowlist and rejects username/password authority fields. The runtime
-redacts URL credentials, query strings, and fragments from logs. It also skips
-per-title resume and track-preference persistence for such sensitive URLs so a
-signed stream token cannot be written to SQLite; global volume persistence is
-still retained. Network open and read operations have interrupt deadlines,
-probe/analysis caps, and an explicit nested-protocol whitelist.
+Network sources pass through FFmpeg unchanged. The main menu accepts a direct
+URL or opens a DLNA/UPnP MediaServer browser. DLNA discovery uses bounded SSDP
+M-SEARCH on active multicast IPv4 interfaces, then loads a limited number of
+device descriptions and pages through ContentDirectory results. Discovery and
+browsing use a cancellable SDL worker, 6-second HTTP operation limits, a
+10-second aggregate description budget, 2 MiB response limits, 64 KiB header
+limits, and capped server/result counts. Only audio/video items with supported
+stream URLs enter the visible listing.
+
+The direct-URL path uses an explicit scheme allowlist and rejects
+username/password authority fields. The runtime redacts URL credentials, query
+strings, and fragments from logs. It also skips per-title resume and
+track-preference persistence for such sensitive URLs so a signed stream token
+cannot be written to SQLite; global volume persistence is still retained.
+Network open and read operations have interrupt deadlines, probe/analysis
+caps, reconnect handling, and an explicit nested-protocol whitelist. Direct
+SMB is not linked; a NAS must expose DLNA/UPnP, HTTP(S), FTP, or another
+supported FFmpeg stream protocol.
 
 Primary local media, metadata probes, playlists, artwork, and standalone
 subtitle inputs use no-follow regular-file validation and descriptor-backed

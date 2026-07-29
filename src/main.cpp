@@ -44,6 +44,7 @@ extern "C" {
 #include <optional>
 #include <string>
 #include <sys/file.h>
+#include <sys/resource.h>
 #include <sys/stat.h>
 #include <unistd.h>
 #include <utility>
@@ -72,6 +73,46 @@ constexpr int kSubtitleFragments = 1024;
 constexpr int kVideoDecoderThreads = 16;
 constexpr int kVideoPacketBufferCount = 64;
 constexpr int kVideoFrameBufferCount = 3;
+constexpr int kNetworkVideoPacketBufferCount = 128;
+constexpr int kNetworkVideoFrameBufferCount = 4;
+constexpr int kAudioPacketBufferCount = 64;
+constexpr int kNetworkAudioPacketBufferCount = 128;
+constexpr int kAudioFrameBufferCount = 64;
+constexpr std::uint64_t kAudioBytesPerSecond = 48000ULL * 2ULL * 2ULL;
+
+struct PlaybackBufferPolicy {
+    int video_packets = kVideoPacketBufferCount;
+    int video_frames = kVideoFrameBufferCount;
+    int audio_packets = kAudioPacketBufferCount;
+    int audio_frames = kAudioFrameBufferCount;
+};
+
+PlaybackBufferPolicy playback_buffer_policy(bool network) {
+    if (!network) {
+        return {};
+    }
+    return {
+        kNetworkVideoPacketBufferCount,
+        kNetworkVideoFrameBufferCount,
+        kNetworkAudioPacketBufferCount,
+        kAudioFrameBufferCount,
+    };
+}
+
+void apply_playback_buffer_policy(const PlaybackBufferPolicy& policy) {
+    Kit_SetHint(KIT_HINT_VIDEO_BUFFER_PACKETS, policy.video_packets);
+    Kit_SetHint(KIT_HINT_VIDEO_BUFFER_FRAMES, policy.video_frames);
+    Kit_SetHint(KIT_HINT_AUDIO_BUFFER_PACKETS, policy.audio_packets);
+    Kit_SetHint(KIT_HINT_AUDIO_BUFFER_FRAMES, policy.audio_frames);
+}
+
+std::uint64_t process_peak_rss_kib() noexcept {
+    struct rusage usage {};
+    if (getrusage(RUSAGE_SELF, &usage) != 0 || usage.ru_maxrss < 0) {
+        return 0;
+    }
+    return static_cast<std::uint64_t>(usage.ru_maxrss);
+}
 
 enum class PlaybackOverlay {
     none,
@@ -776,6 +817,10 @@ Kit_Source* create_bounded_source(
     av_dict_set(&options, "max_probe_packets", "10000", 0);
     if (network) {
         av_dict_set(&options, "rw_timeout", "15000000", 0);
+        av_dict_set(&options, "reconnect", "1", 0);
+        av_dict_set(&options, "reconnect_streamed", "1", 0);
+        av_dict_set(&options, "reconnect_on_network_error", "1", 0);
+        av_dict_set(&options, "reconnect_delay_max", "5", 0);
         av_dict_set(
             &options,
             "protocol_whitelist",
@@ -3073,6 +3118,20 @@ PlaybackOutcome run_player(
         Kit_GetBestSourceStream(app.source, KIT_STREAMTYPE_VIDEO);
     const int initial_audio =
         Kit_GetBestSourceStream(app.source, KIT_STREAMTYPE_AUDIO);
+    const bool network_source = bfplayer::is_network_uri(path);
+    const PlaybackBufferPolicy buffer_policy =
+        playback_buffer_policy(network_source);
+    apply_playback_buffer_policy(buffer_policy);
+    bfplayer::diagnostics_log(
+        bfplayer::DiagnosticLevel::info,
+        "playback-buffer-policy kind=%s decoder_threads=%d video_packets=%d video_frames=%d audio_packets=%d audio_frames=%d peak_rss_kib=%llu",
+        network_source ? "network" : "local",
+        Kit_GetHint(KIT_HINT_THREAD_COUNT),
+        buffer_policy.video_packets,
+        buffer_policy.video_frames,
+        buffer_policy.audio_packets,
+        buffer_policy.audio_frames,
+        static_cast<unsigned long long>(process_peak_rss_kib()));
     const VideoSourceInfo source_video = inspect_video_source(
         static_cast<const AVFormatContext*>(app.source->format_ctx),
         initial_video);
@@ -3425,9 +3484,14 @@ PlaybackOutcome run_player(
             const double video_update_rate = diagnostics_seconds > 0.0
                 ? static_cast<double>(video_updates) / diagnostics_seconds
                 : 0.0;
+            const Uint32 audio_queued =
+                app.audio != 0 ? SDL_GetQueuedAudioSize(app.audio) : 0U;
+            const std::uint64_t audio_queue_ms =
+                static_cast<std::uint64_t>(audio_queued) * 1000ULL /
+                kAudioBytesPerSecond;
             bfplayer::diagnostics_log(
                 bfplayer::DiagnosticLevel::info,
-                "playback-heartbeat path=%s position_s=%.3f duration_s=%.3f paused=%d state=%d video_updates=%llu video_update_fps=%.2f video_empty_polls=%llu video_frames=%u/%u video_packets=%u/%u audio_frames=%u/%u audio_packets=%u/%u audio_queued=%u external_subtitle=%d delay_ms=%lld scale=%s aspect=%s crop=%s",
+                "playback-heartbeat path=%s position_s=%.3f duration_s=%.3f paused=%d state=%d video_updates=%llu video_update_fps=%.2f video_empty_polls=%llu video_frames=%u/%u video_packets=%u/%u audio_frames=%u/%u audio_packets=%u/%u audio_queued=%u audio_queue_ms=%llu peak_rss_kib=%llu external_subtitle=%d delay_ms=%lld scale=%s aspect=%s crop=%s",
                 app.current_media_path.c_str(),
                 Kit_GetPlayerPosition(app.player),
                 Kit_GetPlayerDuration(app.player),
@@ -3444,7 +3508,9 @@ PlaybackOutcome run_player(
                 audio_frames_capacity,
                 audio_packets_length,
                 audio_packets_capacity,
-                app.audio != 0 ? SDL_GetQueuedAudioSize(app.audio) : 0U,
+                audio_queued,
+                static_cast<unsigned long long>(audio_queue_ms),
+                static_cast<unsigned long long>(process_peak_rss_kib()),
                 app.external_subtitle_index,
                 static_cast<long long>(app.subtitle_delay_ms),
                 bfplayer::video_scale_mode_name(app.video_scale_mode),
@@ -3818,8 +3884,7 @@ int main(int argc, char** argv) {
     }
     boot_stage("sdl-init-complete");
     Kit_SetHint(KIT_HINT_THREAD_COUNT, kVideoDecoderThreads);
-    Kit_SetHint(KIT_HINT_VIDEO_BUFFER_PACKETS, kVideoPacketBufferCount);
-    Kit_SetHint(KIT_HINT_VIDEO_BUFFER_FRAMES, kVideoFrameBufferCount);
+    apply_playback_buffer_policy(playback_buffer_policy(false));
     boot_stage("kitchensink-init-begin");
     if (Kit_Init(KIT_INIT_NETWORK | KIT_INIT_ASS) != 0) {
         bfplayer::diagnostics_log(

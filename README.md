@@ -14,6 +14,8 @@ want BFplayer's standalone launcher running in the background.
 
 - Movies, TV shows, seasons, music, and playlists
 - Manual media sources with an optional whole-library import
+- DLNA/UPnP browsing for compatible NAS and LAN media servers
+- Direct HTTP(S), FTP, RTSP, RTMP, RTP, TCP, and UDP media URLs
 - Resume playback, favorites, search, sorting, and playback queues
 - Embedded and external subtitles with timing adjustment
 - In-player subtitle browser and optional SubDL search/download
@@ -83,6 +85,19 @@ The Add Media browser starts at `/`. Cross opens a folder or adds a movie,
 Triangle adds a folder as one TV show, and Square imports a folder as a mixed
 library. Mixed import treats loose video files as movies and child folders as
 TV shows.
+
+## Network and NAS media
+
+Open **Options > Browse DLNA / NAS** to discover UPnP MediaServer devices on
+the same local network. BFplayer browses their ContentDirectory folders and
+plays compatible audio or video resources through FFmpeg. Discovery and
+browsing run on a cancellable worker with bounded response and listing sizes.
+
+For a server that exposes a direct stream, use **Options > Open network URL**.
+Direct SMB is not linked. A NAS can instead expose its library through DLNA,
+HTTP(S), FTP, or another supported streaming protocol. URLs containing
+username/password authority fields are rejected, and signed query values are
+redacted from logs and excluded from playback-history persistence.
 
 ## Playback controls
 
@@ -156,6 +171,9 @@ Release artifacts are written to `dist/`.
 - The dashboard title ID is `PSMC00001`.
 - The launcher listens only on `127.0.0.1:9040`.
 - Network services are intended for a trusted local network.
+- Network playback uses larger but bounded compressed-packet queues, reconnect
+  handling, and audible-audio clocking. It does not allocate an unbounded
+  frame cache.
 - Hardware and format behavior can vary by firmware, HEN, storage device, and
   media encoding.
 
@@ -173,9 +191,10 @@ licenses.
 
 ## Acknowledgements
 
--
-  [ps5-payload-websrv](https://github.com/ps5-payload-dev/websrv) for the
+- [ps5-payload-websrv](https://github.com/ps5-payload-dev/websrv) for the
   BigApp and ELF loading foundation and the websrv homebrew format
+- [dlnaplay](https://github.com/ps5-payload-dev/dlnaplay) for the DLNA,
+  audio-clock, and bounded-buffer design reference
 - [FFmpeg and ffplay](https://ffmpeg.org/) for the media and playback
   foundation
 - [PacBrew](https://github.com/ps5-payload-dev/pacbrew), SDL2, and

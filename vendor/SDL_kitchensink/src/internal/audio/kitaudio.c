@@ -1,5 +1,6 @@
 #include <assert.h>
 #include <inttypes.h>
+#include <math.h>
 
 #include <SDL.h>
 #include <libavformat/avformat.h>
@@ -12,6 +13,7 @@
 #include "kitchensink2/internal/utils/kithelpers.h"
 #include "kitchensink2/internal/utils/kitlog.h"
 #include "kitchensink2/kiterror.h"
+#include "bfplayer/kitchensink_audio_clock.h"
 
 #define KIT_AUDIO_EARLY_FAIL 5.0
 
@@ -317,6 +319,8 @@ exit_none:
 
 static double Kit_GetCurrentPTS(const Kit_Decoder *decoder) {
     Kit_AudioDecoder *audio_decoder = decoder->userdata;
+    if(audio_decoder->current->best_effort_timestamp == AV_NOPTS_VALUE)
+        return NAN;
     return audio_decoder->current->best_effort_timestamp * av_q2d(decoder->stream->time_base);
 }
 
@@ -342,19 +346,31 @@ int Kit_GetAudioDecoderData(Kit_Decoder *decoder, size_t backend_buffer_size, un
         return 0;
     }
 
+    size = &audio_decoder->current->crop_top;
+    left = &audio_decoder->current->crop_bottom;
+    const size_t consumed_bytes = *size >= *left ? *size - *left : 0;
+    const double bytes_per_second =
+        (double)audio_decoder->output.sample_rate *
+        (double)SAMPLE_BYTES(audio_decoder);
     double pts = Kit_GetCurrentPTS(decoder);
+    if(bytes_per_second > 0.0)
+        pts += (double)consumed_bytes / bytes_per_second;
     double sync_ts = Kit_GetTimerElapsed(decoder->sync_timer);
     const double early_threshold = Kit_GetLibraryState()->audio_early_threshold / 1000.0;
     const double late_threshold = Kit_GetLibraryState()->audio_late_threshold / 1000.0;
 
     // If packet is far too early, the stream jumped or was seeked.
     if(Kit_IsTimerPrimary(decoder->sync_timer)) {
-        // If this stream is the sync source, then reset this as the new sync timestamp.
-        if(pts > sync_ts + KIT_AUDIO_EARLY_FAIL) {
-            // LOG("[AUDIO] NO SYNC pts = %lf > %lf + %lf\n", pts, sync_ts, KIT_AUDIO_EARLY_FAIL);
-            // LOG("[AUDIO] Adjusting by = %lf\n", -(pts - sync_ts));
-            Kit_AddTimerBase(decoder->sync_timer, -(pts - sync_ts));
-            sync_ts = Kit_GetTimerElapsed(decoder->sync_timer);
+        // Anchor the shared clock to the samples currently reaching the
+        // speakers, not to the newest decoded frame or wall time.
+        const double audible_pts = bfplayer_audio_audible_position(
+            pts,
+            backend_buffer_size,
+            audio_decoder->output.sample_rate,
+            audio_decoder->output.channels,
+            audio_decoder->output.bytes);
+        if(audible_pts == audible_pts) {
+            Kit_AdjustTimerBase(decoder->sync_timer, audible_pts);
         }
     } else {
         // If this stream is NOT the sync source, try to skip packets until we see something reasonable.
@@ -366,29 +382,23 @@ int Kit_GetAudioDecoderData(Kit_Decoder *decoder, size_t backend_buffer_size, un
                 goto no_data;
             pts = Kit_GetCurrentPTS(decoder);
         }
-    }
 
-    // Packet is too early, wait.
-    if(pts > sync_ts + early_threshold) {
-        // LOG("[AUDIO] EARLY pts = %lf > %lf + %lf\n", pts, sync_ts, early_threshold);
-        av_frame_unref(audio_decoder->current);
-        Kit_CancelPacketBufferRead(audio_decoder->buffer);
-        goto no_data;
-    }
-
-    // Packet is too late, skip packets until we see something reasonable.
-    while(pts < sync_ts - late_threshold) {
-        // LOG("[AUDIO] LATE: pts = %lf < %lf - %lf\n", pts, sync_ts, late_threshold);
-        av_frame_unref(audio_decoder->current);
-        Kit_FinishPacketBufferRead(audio_decoder->buffer);
-        if(!Kit_BeginPacketBufferRead(audio_decoder->buffer, audio_decoder->current, 0))
+        // Secondary audio follows another stream's clock. Primary audio must
+        // always feed its backend queue because that queue is the clock.
+        if(pts > sync_ts + early_threshold) {
+            av_frame_unref(audio_decoder->current);
+            Kit_CancelPacketBufferRead(audio_decoder->buffer);
             goto no_data;
-        pts = Kit_GetCurrentPTS(decoder);
+        }
+        while(pts < sync_ts - late_threshold) {
+            av_frame_unref(audio_decoder->current);
+            Kit_FinishPacketBufferRead(audio_decoder->buffer);
+            if(!Kit_BeginPacketBufferRead(audio_decoder->buffer, audio_decoder->current, 0))
+                goto no_data;
+            pts = Kit_GetCurrentPTS(decoder);
+        }
     }
-    // LOG("[AUDIO] >>> SYNC!: pts = %lf, sync = %lf\n", pts, sync_ts);
 
-    size = &audio_decoder->current->crop_top;
-    left = &audio_decoder->current->crop_bottom;
     len = floor(len / SAMPLE_BYTES(audio_decoder)) * SAMPLE_BYTES(audio_decoder);
     if(*left) {
         ret = (len > *left) ? *left : len;

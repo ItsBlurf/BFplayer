@@ -24,6 +24,7 @@ license texts and source.
 | GNU libiconv/libcharset | LGPL-2.1-or-later | <https://www.gnu.org/software/libiconv/> |
 | libsamplerate | BSD-2-Clause | <https://libsndfile.github.io/libsamplerate/> |
 | Expat | MIT | <https://libexpat.github.io/> |
+| TinyXML-2 | Zlib | <https://github.com/leethomason/tinyxml2> |
 | SQLite | Public domain | <https://sqlite.org/> |
 | libc++, libc++abi, libunwind | Apache-2.0 WITH LLVM-exception | <https://libcxx.llvm.org/> |
 | Noto Sans | SIL Open Font License 1.1 | `assets/fonts/OFL.txt` in this package |
@@ -41,6 +42,13 @@ BFplayer can search and download subtitle files from the official SubDL API
 when a user supplies their own API key. No SubDL credential is bundled.
 Use of that optional service is governed by
 <https://subdl.com/terms> and its published API limits.
+
+## DLNA design reference
+
+BFplayer's DLNA client and playback-buffer review used John Törnblom's
+[dlnaplay](https://github.com/ps5-payload-dev/dlnaplay) as a design reference.
+dlnaplay is GPL-3.0 licensed. BFplayer is also distributed under GPL-3.0, with
+the complete license in `LICENSE`.
 
 ## Standalone BigApp loader
 
