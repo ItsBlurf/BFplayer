@@ -12,8 +12,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+      - name: Install DLNA test dependency
+        run: sudo apt-get update && sudo apt-get install -y libtinyxml2-dev
       - name: Configure
-        run: cmake -S . -B build/ci -G Ninja -DBUILD_TESTING=ON
+        run: >-
+          cmake -S . -B build/ci -G Ninja
+          -DBUILD_TESTING=ON
+          -DBFPLAYER_BUILD_DLNA_INTEGRATION_TESTS=ON
       - name: Build
         run: cmake --build build/ci
       - name: Test

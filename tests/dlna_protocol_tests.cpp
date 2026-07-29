@@ -56,6 +56,12 @@ int main() {
             "HtTp://media.example.test/video") ==
             "HtTp://media.example.test/video",
         "absolute references are recognized case insensitively");
+    check(
+        bfplayer::resolve_dlna_url(
+            "http://nas:8200/a/device.xml",
+            "smb://nas/share/video.mkv") ==
+            "smb://nas/share/video.mkv",
+        "unsupported absolute schemes are not disguised as HTTP paths");
 
     const std::string response =
         "HTTP/1.1 200 OK\r\n"

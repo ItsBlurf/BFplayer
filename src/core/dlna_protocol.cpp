@@ -26,12 +26,27 @@ bool ascii_equal_case_insensitive(
     return true;
 }
 
-bool ascii_starts_with_case_insensitive(
-    std::string_view value,
-    std::string_view prefix) noexcept {
-    return value.size() >= prefix.size() &&
-        ascii_equal_case_insensitive(
-            value.substr(0, prefix.size()), prefix);
+bool has_uri_scheme(std::string_view value) noexcept {
+    if (value.empty() ||
+        std::isalpha(
+            static_cast<unsigned char>(value.front())) == 0) {
+        return false;
+    }
+    for (std::size_t index = 1; index < value.size(); ++index) {
+        const unsigned char character =
+            static_cast<unsigned char>(value[index]);
+        if (character == ':') {
+            return true;
+        }
+        if (character == '/' || character == '?' ||
+            character == '#' ||
+            (std::isalnum(character) == 0 &&
+             character != '+' && character != '-' &&
+             character != '.')) {
+            return false;
+        }
+    }
+    return false;
 }
 
 bool parse_decimal_port(
@@ -133,10 +148,7 @@ std::string resolve_dlna_url(
     if (reference.empty()) {
         return std::string(base);
     }
-    if (ascii_starts_with_case_insensitive(
-            reference, "http://") ||
-        ascii_starts_with_case_insensitive(
-            reference, "https://")) {
+    if (has_uri_scheme(reference)) {
         return std::string(reference);
     }
 

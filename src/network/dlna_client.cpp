@@ -906,7 +906,7 @@ bool browse_page(
                 "object.item.videoItem") ||
             object.upnp_class.starts_with(
                 "object.item.audioItem");
-        if (object.container ||
+        if ((object.container && !object.id.empty()) ||
             (media_item && object.playable())) {
             if (object.title.empty()) {
                 object.title =

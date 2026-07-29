@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.1.0-alpha.37 - hardened DLNA interoperability
+
+- Preserve absolute DLNA resource schemes so unsupported SMB links are
+  rejected instead of being mistaken for relative HTTP paths.
+- Ignore malformed server folders that do not provide an object ID.
+- Added end-to-end Linux CI coverage for real sockets, HTTP framing, chunked
+  SOAP responses, DIDL metadata, paging, filtering, result limits, partial
+  failures, and cancellation.
+
 ## 0.1.0-alpha.36 - DLNA/NAS playback and tighter A/V sync
 
 - Added an in-app DLNA/UPnP browser for NAS and LAN media servers.

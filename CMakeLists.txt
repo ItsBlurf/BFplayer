@@ -31,6 +31,13 @@ else()
 endif()
 
 include(CTest)
+
+option(
+    BFPLAYER_BUILD_DLNA_INTEGRATION_TESTS
+    "Build POSIX DLNA socket/HTTP integration tests"
+    OFF
+)
+
 if(BUILD_TESTING)
     add_executable(library_scanner_tests tests/library_scanner_tests.cpp)
     target_link_libraries(library_scanner_tests PRIVATE bfplayer_core)
@@ -98,6 +105,41 @@ if(BUILD_TESTING)
         NAME kitchensink_audio_clock_tests
         COMMAND kitchensink_audio_clock_tests
     )
+
+    if(BFPLAYER_BUILD_DLNA_INTEGRATION_TESTS)
+        if(NOT UNIX)
+            message(
+                FATAL_ERROR
+                "DLNA integration tests require POSIX sockets"
+            )
+        endif()
+        find_package(Threads REQUIRED)
+        find_package(tinyxml2 CONFIG REQUIRED)
+        add_executable(
+            dlna_client_integration_tests
+            tests/dlna_client_integration_tests.cpp
+            src/network/dlna_client.cpp
+        )
+        target_include_directories(
+            dlna_client_integration_tests
+            PRIVATE include
+        )
+        target_link_libraries(
+            dlna_client_integration_tests
+            PRIVATE
+                bfplayer_core
+                tinyxml2::tinyxml2
+                Threads::Threads
+        )
+        add_test(
+            NAME dlna_client_integration_tests
+            COMMAND dlna_client_integration_tests
+        )
+        set_tests_properties(
+            dlna_client_integration_tests
+            PROPERTIES TIMEOUT 15
+        )
+    endif()
 
     add_executable(
         standalone_route_tests
