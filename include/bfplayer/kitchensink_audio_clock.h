@@ -20,6 +20,14 @@ double bfplayer_audio_audible_position(
     int channels,
     int bytes_per_sample);
 
+/*
+ * Keeps the audible clock monotonic between explicit flush/seek boundaries.
+ * Some demuxers can expose a final timestamp near zero while draining EOF.
+ */
+double bfplayer_audio_monotonic_position(
+    double candidate,
+    double previous);
+
 #ifdef __cplusplus
 }
 #endif

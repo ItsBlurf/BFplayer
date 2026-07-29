@@ -22,6 +22,7 @@ extern "C" {
 #include "bfplayer/playlist.hpp"
 #include "bfplayer/playback_osd.hpp"
 #include "bfplayer/player_settings.hpp"
+#include "bfplayer/remote_control.hpp"
 #include "bfplayer/safe_read_file.hpp"
 #include "bfplayer/source_uri.hpp"
 #include "bfplayer/subtitle_browser.hpp"
@@ -67,6 +68,10 @@ extern "C" int sceSystemServiceKillApp(
 
 constexpr int kWindowWidth = 1920;
 constexpr int kWindowHeight = 1080;
+constexpr int kPreferredOutputWidth = 3840;
+constexpr int kPreferredOutputHeight = 2160;
+constexpr int kPreferredOutputRefresh = 60;
+constexpr std::uint16_t kRemoteControlPort = 9042;
 constexpr int kAudioBufferBytes = 64 * 1024;
 constexpr int kSubtitleAtlasSize = 4096;
 constexpr int kSubtitleFragments = 1024;
@@ -113,6 +118,74 @@ std::uint64_t process_peak_rss_kib() noexcept {
     }
     return static_cast<std::uint64_t>(usage.ru_maxrss);
 }
+
+double timeval_seconds(const timeval& value) noexcept {
+    return static_cast<double>(value.tv_sec) +
+        static_cast<double>(value.tv_usec) / 1'000'000.0;
+}
+
+double process_cpu_seconds(const rusage& usage) noexcept {
+    return timeval_seconds(usage.ru_utime) + timeval_seconds(usage.ru_stime);
+}
+
+double elapsed_performance_ms(
+    Uint64 start,
+    Uint64 end,
+    Uint64 frequency) noexcept {
+    if (end < start || frequency == 0) {
+        return 0.0;
+    }
+    return static_cast<double>(end - start) * 1000.0 /
+        static_cast<double>(frequency);
+}
+
+struct TimingWindow {
+    double total_ms = 0.0;
+    double maximum_ms = 0.0;
+    std::uint64_t count = 0;
+    std::array<std::uint32_t, 256> histogram{};
+
+    void add(double milliseconds) noexcept {
+        if (!std::isfinite(milliseconds) || milliseconds < 0.0) {
+            return;
+        }
+        total_ms += milliseconds;
+        maximum_ms = std::max(maximum_ms, milliseconds);
+        ++count;
+        const std::size_t bucket = static_cast<std::size_t>(
+            std::clamp(milliseconds, 0.0, 255.0));
+        ++histogram[bucket];
+    }
+
+    [[nodiscard]] double average() const noexcept {
+        return count > 0 ? total_ms / static_cast<double>(count) : 0.0;
+    }
+
+    [[nodiscard]] double percentile(double fraction) const noexcept {
+        if (count == 0) {
+            return 0.0;
+        }
+        const std::uint64_t wanted = std::max<std::uint64_t>(
+            1,
+            static_cast<std::uint64_t>(
+                std::ceil(static_cast<double>(count) * fraction)));
+        std::uint64_t accumulated = 0;
+        for (std::size_t index = 0; index < histogram.size(); ++index) {
+            accumulated += histogram[index];
+            if (accumulated >= wanted) {
+                return static_cast<double>(index);
+            }
+        }
+        return 255.0;
+    }
+
+    void reset() noexcept {
+        total_ms = 0.0;
+        maximum_ms = 0.0;
+        count = 0;
+        histogram.fill(0);
+    }
+};
 
 enum class PlaybackOverlay {
     none,
@@ -180,15 +253,25 @@ struct App {
     bfplayer::ExternalSubtitles external_subtitles;
     bfplayer::SafeReadFile local_media;
     bfplayer::PlaybackOsd osd;
+    bfplayer::RemoteControlServer remote_control;
     std::vector<std::string> subtitle_sidecars;
     std::string current_media_path;
     std::string fallback_font;
     std::string ui_logo;
+    std::string pending_remote_media_path;
+    double source_frame_rate = 0.0;
+    int source_width = 0;
+    int source_height = 0;
+    bool source_hdr = false;
+    std::string source_hdr_transfer;
     int external_subtitle_index = -1;
     int volume_percent = 100;
     int previous_volume_percent = 100;
     std::int64_t subtitle_delay_ms = 0;
     double source_display_aspect = 0.0;
+    int output_width = kWindowWidth;
+    int output_height = kWindowHeight;
+    bool true_4k_output = false;
     bfplayer::PlayerSettings settings;
     PlaybackOverlay playback_overlay = PlaybackOverlay::none;
     int playback_overlay_selected = 0;
@@ -211,9 +294,58 @@ struct App {
     bool running = true;
     bool playback_running = false;
     bool paused = false;
+    bool redraw_requested = true;
     std::atomic<bool> io_cancel{false};
     std::atomic<std::int64_t> source_open_deadline_ms{0};
 };
+
+void update_decoder_buffer_status(
+    const App& app,
+    bfplayer::RemotePlaybackStatus& status) {
+    if (!app.player) {
+        return;
+    }
+    if (Kit_GetPlayerVideoStream(app.player) >= 0) {
+        Kit_GetPlayerVideoBufferState(
+            app.player,
+            &status.video_frames_length,
+            &status.video_frames_capacity,
+            &status.video_packets_length,
+            &status.video_packets_capacity);
+    }
+    if (Kit_GetPlayerAudioStream(app.player) >= 0) {
+        Kit_GetPlayerAudioBufferState(
+            app.player,
+            &status.audio_frames_length,
+            &status.audio_frames_capacity,
+            &status.audio_packets_length,
+            &status.audio_packets_capacity);
+    }
+}
+
+Kit_VideoToneMapInfo update_tone_map_status(
+    const App& app,
+    bfplayer::RemotePlaybackStatus& status) {
+    Kit_VideoToneMapInfo info{};
+    if (app.player) {
+        Kit_GetPlayerVideoToneMapInfo(app.player, &info);
+    }
+    status.hdr_tone_map_active = info.active != 0;
+    status.hdr_input_full_range = info.input_full_range != 0;
+    status.hdr_input_bt2020 = info.input_bt2020 != 0;
+    status.hdr_source_peak_nits = info.source_peak_nits;
+    status.hdr_target_peak_nits = info.target_peak_nits;
+    status.hdr_tone_map_frames = info.frames;
+    status.hdr_tone_map_time_us = info.processing_us;
+    status.hdr_tone_map_workers = info.workers;
+    status.hdr_tone_map_average_ms =
+        info.frames > 0
+        ? static_cast<double>(info.processing_us) /
+              static_cast<double>(info.frames) /
+              1000.0
+        : 0.0;
+    return info;
+}
 
 enum class PlaybackOutcome {
     finished,
@@ -311,6 +443,13 @@ struct VideoSourceInfo {
     double display_aspect = 0.0;
     double frame_rate = 0.0;
     std::int64_t bit_rate = 0;
+    const char* color_range = "unknown";
+    const char* color_space = "unknown";
+    const char* color_transfer = "unknown";
+    const char* color_primaries = "unknown";
+    AVColorRange color_range_value = AVCOL_RANGE_UNSPECIFIED;
+    AVColorSpace color_space_value = AVCOL_SPC_UNSPECIFIED;
+    bool hdr_source = false;
     bool demanding_software_decode = false;
 };
 
@@ -357,6 +496,25 @@ VideoSourceInfo inspect_video_source(
     info.bit_rate = parameters->bit_rate > 0
         ? parameters->bit_rate
         : format->bit_rate;
+    if (const char* name = av_color_range_name(parameters->color_range)) {
+        info.color_range = name;
+    }
+    info.color_range_value = parameters->color_range;
+    if (const char* name = av_color_space_name(parameters->color_space)) {
+        info.color_space = name;
+    }
+    info.color_space_value = parameters->color_space;
+    if (const char* name =
+            av_color_transfer_name(parameters->color_trc)) {
+        info.color_transfer = name;
+    }
+    if (const char* name =
+            av_color_primaries_name(parameters->color_primaries)) {
+        info.color_primaries = name;
+    }
+    info.hdr_source =
+        parameters->color_trc == AVCOL_TRC_SMPTE2084 ||
+        parameters->color_trc == AVCOL_TRC_ARIB_STD_B67;
     const auto pixel_format =
         static_cast<AVPixelFormat>(parameters->format);
     if (const char* name = av_get_pix_fmt_name(pixel_format)) {
@@ -386,22 +544,34 @@ VideoSourceInfo inspect_video_source(
 }
 
 Kit_VideoFormatRequest make_video_format_request(
-    const VideoSourceInfo& source) {
+    const VideoSourceInfo& source,
+    int output_width,
+    int output_height) {
     Kit_VideoFormatRequest request{};
     Kit_ResetVideoFormatRequest(&request);
+    if (output_width < 2 || output_height < 2) {
+        output_width = kWindowWidth;
+        output_height = kWindowHeight;
+    }
     if (source.width < 1 || source.height < 1 ||
-        (source.width <= kWindowWidth && source.height <= kWindowHeight)) {
+        (source.width <= output_width && source.height <= output_height)) {
+        if (source.hdr_source) {
+            request.format = SDL_PIXELFORMAT_IYUV;
+        }
         return request;
     }
     const double scale = std::min(
-        static_cast<double>(kWindowWidth) / source.width,
-        static_cast<double>(kWindowHeight) / source.height);
+        static_cast<double>(output_width) / source.width,
+        static_cast<double>(output_height) / source.height);
     request.width = std::max(
         2,
         static_cast<int>(std::floor(source.width * scale)) & ~1);
     request.height = std::max(
         2,
         static_cast<int>(std::floor(source.height * scale)) & ~1);
+    if (source.hdr_source) {
+        request.format = SDL_PIXELFORMAT_IYUV;
+    }
     return request;
 }
 
@@ -977,6 +1147,159 @@ SDL_Renderer* create_renderer(SDL_Window* window) {
     return renderer;
 }
 
+bool find_exact_display_mode(
+    int width,
+    int height,
+    SDL_DisplayMode& selected) {
+    const int count = SDL_GetNumDisplayModes(0);
+    bool found = false;
+    for (int index = 0; index < count; ++index) {
+        SDL_DisplayMode candidate{};
+        if (SDL_GetDisplayMode(0, index, &candidate) != 0 ||
+            candidate.w != width ||
+            candidate.h != height) {
+            continue;
+        }
+        if (!found || candidate.refresh_rate > selected.refresh_rate) {
+            selected = candidate;
+            found = true;
+        }
+    }
+    return found;
+}
+
+bool configure_fullscreen_output(App& app) {
+    SDL_DisplayMode fallback{};
+    if (!find_exact_display_mode(
+            kWindowWidth,
+            kWindowHeight,
+            fallback)) {
+        fallback.format = SDL_PIXELFORMAT_ABGR8888;
+        fallback.w = kWindowWidth;
+        fallback.h = kWindowHeight;
+        fallback.refresh_rate = kPreferredOutputRefresh;
+    }
+    SDL_SetWindowSize(app.window, kWindowWidth, kWindowHeight);
+    if (SDL_SetWindowDisplayMode(app.window, &fallback) != 0) {
+        log_sdl("SDL_SetWindowDisplayMode(1080p)");
+        return false;
+    }
+    if (SDL_SetWindowFullscreen(
+            app.window,
+            SDL_WINDOW_FULLSCREEN) != 0) {
+        log_sdl("SDL_SetWindowFullscreen(1080p)");
+        return false;
+    }
+    return true;
+}
+
+void log_display_output(App& app) {
+    int window_width = 0;
+    int window_height = 0;
+    int renderer_width = 0;
+    int renderer_height = 0;
+    SDL_GetWindowSize(app.window, &window_width, &window_height);
+    if (SDL_GetRendererOutputSize(
+            app.renderer,
+            &renderer_width,
+            &renderer_height) != 0) {
+        log_sdl("SDL_GetRendererOutputSize");
+        renderer_width = window_width;
+        renderer_height = window_height;
+    }
+    SDL_DisplayMode current{};
+    if (SDL_GetCurrentDisplayMode(0, &current) != 0) {
+        log_sdl("SDL_GetCurrentDisplayMode");
+    }
+    SDL_RendererInfo renderer_info{};
+    if (SDL_GetRendererInfo(app.renderer, &renderer_info) != 0) {
+        log_sdl("SDL_GetRendererInfo");
+    }
+    app.output_width = renderer_width > 0
+        ? renderer_width
+        : kWindowWidth;
+    app.output_height = renderer_height > 0
+        ? renderer_height
+        : kWindowHeight;
+    app.true_4k_output =
+        app.output_width == kPreferredOutputWidth &&
+        app.output_height == kPreferredOutputHeight &&
+        current.w == kPreferredOutputWidth &&
+        current.h == kPreferredOutputHeight;
+    bfplayer::diagnostics_log(
+        bfplayer::DiagnosticLevel::info,
+        "display-output current=%dx%d@%d window=%dx%d renderer=%dx%d logical=%dx%d true_4k=%d renderer_name=%s flags=0x%x",
+        current.w,
+        current.h,
+        current.refresh_rate,
+        window_width,
+        window_height,
+        renderer_width,
+        renderer_height,
+        kWindowWidth,
+        kWindowHeight,
+        app.true_4k_output ? 1 : 0,
+        renderer_info.name ? renderer_info.name : "unknown",
+        renderer_info.flags);
+}
+
+bool switch_fullscreen_output(
+    App& app,
+    int width,
+    int height,
+    const char* reason) {
+    if (!app.window || !app.renderer || width <= 0 || height <= 0) {
+        return false;
+    }
+    if (app.output_width == width && app.output_height == height) {
+        return true;
+    }
+
+    SDL_DisplayMode mode{};
+    if (!find_exact_display_mode(width, height, mode)) {
+        bfplayer::diagnostics_log(
+            bfplayer::DiagnosticLevel::warning,
+            "display-switch unavailable requested=%dx%d reason=%s",
+            width,
+            height,
+            reason ? reason : "<none>");
+        return false;
+    }
+    if (SDL_SetWindowDisplayMode(app.window, &mode) != 0) {
+        bfplayer::diagnostics_log(
+            bfplayer::DiagnosticLevel::error,
+            "display-switch failed requested=%dx%d reason=%s error=%s",
+            width,
+            height,
+            reason ? reason : "<none>",
+            SDL_GetError());
+        return false;
+    }
+    SDL_PumpEvents();
+    if (SDL_RenderSetLogicalSize(
+            app.renderer,
+            kWindowWidth,
+            kWindowHeight) != 0) {
+        log_sdl("SDL_RenderSetLogicalSize(display switch)");
+        return false;
+    }
+    log_display_output(app);
+    const bool matched =
+        app.output_width == width && app.output_height == height;
+    bfplayer::diagnostics_log(
+        matched
+            ? bfplayer::DiagnosticLevel::info
+            : bfplayer::DiagnosticLevel::warning,
+        "display-switch requested=%dx%d actual=%dx%d reason=%s matched=%d",
+        width,
+        height,
+        app.output_width,
+        app.output_height,
+        reason ? reason : "<none>",
+        matched ? 1 : 0);
+    return matched;
+}
+
 void close_audio(App& app) {
     if (app.audio != 0) {
         SDL_ClearQueuedAudio(app.audio);
@@ -1492,7 +1815,8 @@ void adjust_subtitle_delay(App& app, std::int64_t delta_ms) {
 }
 
 void toggle_pause(App& app) {
-    app.paused = !app.paused;
+    const bool pause = !app.paused;
+    app.paused = pause;
     bfplayer::diagnostics_log(
         bfplayer::DiagnosticLevel::info,
         "pause state=%s position=%.3f",
@@ -1510,6 +1834,106 @@ void toggle_pause(App& app) {
         }
     }
     app.osd.show(app.paused ? "Paused" : "Playing");
+    app.redraw_requested = true;
+}
+
+void set_pause_state(App& app, bool pause) {
+    if (!app.player || app.paused == pause) {
+        return;
+    }
+    toggle_pause(app);
+}
+
+void seek_absolute(App& app, double target) {
+    if (!app.player) {
+        return;
+    }
+    const double duration = Kit_GetPlayerDuration(app.player);
+    const double position = Kit_GetPlayerPosition(app.player);
+    if (!std::isfinite(duration) || duration <= 0.0 ||
+        !std::isfinite(position) || !std::isfinite(target)) {
+        bfplayer::diagnostics_log(
+            bfplayer::DiagnosticLevel::warning,
+            "remote-seek rejected position=%.3f duration=%.3f target=%.3f",
+            position,
+            duration,
+            target);
+        return;
+    }
+    target = std::clamp(target, 0.0, duration);
+    if (Kit_PlayerSeek(app.player, target) != 0) {
+        bfplayer::diagnostics_log(
+            bfplayer::DiagnosticLevel::error,
+            "remote-seek failed from=%.3f target=%.3f error=%s",
+            position,
+            target,
+            Kit_GetError());
+        return;
+    }
+    if (app.audio != 0) {
+        SDL_ClearQueuedAudio(app.audio);
+    }
+    app.redraw_requested = true;
+    bfplayer::diagnostics_log(
+        bfplayer::DiagnosticLevel::info,
+        "remote-seek success from=%.3f target=%.3f",
+        position,
+        target);
+}
+
+void consume_remote_commands(App& app, bool in_playback) {
+    bfplayer::RemoteCommand command;
+    while (app.remote_control.poll(command)) {
+        bfplayer::diagnostics_log(
+            bfplayer::DiagnosticLevel::info,
+            "remote-command apply sequence=%llu command=%d in_playback=%d",
+            static_cast<unsigned long long>(command.sequence),
+            static_cast<int>(command.type),
+            in_playback ? 1 : 0);
+        switch (command.type) {
+            case bfplayer::RemoteCommandType::open:
+                app.pending_remote_media_path = std::move(command.path);
+                if (in_playback) {
+                    app.playback_running = false;
+                }
+                break;
+            case bfplayer::RemoteCommandType::play:
+                if (in_playback) {
+                    set_pause_state(app, false);
+                }
+                break;
+            case bfplayer::RemoteCommandType::pause:
+                if (in_playback) {
+                    set_pause_state(app, true);
+                }
+                break;
+            case bfplayer::RemoteCommandType::toggle_pause:
+                if (in_playback) {
+                    toggle_pause(app);
+                }
+                break;
+            case bfplayer::RemoteCommandType::seek_relative:
+                if (in_playback) {
+                    seek_relative(app, command.value);
+                    app.redraw_requested = true;
+                }
+                break;
+            case bfplayer::RemoteCommandType::seek_absolute:
+                if (in_playback) {
+                    seek_absolute(app, command.value);
+                }
+                break;
+            case bfplayer::RemoteCommandType::stop:
+                if (in_playback) {
+                    app.playback_running = false;
+                }
+                break;
+            case bfplayer::RemoteCommandType::exit:
+                app.playback_running = false;
+                app.running = false;
+                break;
+        }
+    }
 }
 
 void cycle_video_scale(App& app) {
@@ -2830,6 +3254,7 @@ void on_controller_button(App& app, SDL_GameControllerButton button) {
 void pump_events(App& app) {
     SDL_Event event{};
     while (SDL_PollEvent(&event)) {
+        app.redraw_requested = true;
         if (event.type == SDL_QUIT) {
             app.running = false;
             app.playback_running = false;
@@ -3135,12 +3560,55 @@ PlaybackOutcome run_player(
     const VideoSourceInfo source_video = inspect_video_source(
         static_cast<const AVFormatContext*>(app.source->format_ctx),
         initial_video);
+    app.source_frame_rate = source_video.frame_rate;
+    app.source_width = source_video.width;
+    app.source_height = source_video.height;
+    app.source_hdr = source_video.hdr_source;
+    app.source_hdr_transfer = source_video.color_transfer;
     app.source_display_aspect = source_video.display_aspect;
-    const Kit_VideoFormatRequest video_request =
-        make_video_format_request(source_video);
+    SDL_YUV_CONVERSION_MODE yuv_conversion_mode =
+        SDL_YUV_CONVERSION_AUTOMATIC;
+    if (source_video.hdr_source) {
+        // The decoder tone-maps HDR to limited-range BT.709 SDR in place.
+        yuv_conversion_mode = SDL_YUV_CONVERSION_BT709;
+    } else if (source_video.color_range_value == AVCOL_RANGE_JPEG) {
+        yuv_conversion_mode = SDL_YUV_CONVERSION_JPEG;
+    } else if (source_video.color_space_value == AVCOL_SPC_BT709) {
+        yuv_conversion_mode = SDL_YUV_CONVERSION_BT709;
+    }
+    SDL_SetYUVConversionMode(yuv_conversion_mode);
     bfplayer::diagnostics_log(
         bfplayer::DiagnosticLevel::info,
-        "video-source codec=%s profile=%d pix_fmt=%s bit_depth=%d size=%dx%d sar=%d:%d dar=%.6f fps=%.3f bitrate=%lld demanding_software_decode=%d",
+        "video-color-output source_hdr=%d sdl_yuv_mode=%d hdr_policy=%s",
+        source_video.hdr_source ? 1 : 0,
+        static_cast<int>(yuv_conversion_mode),
+        source_video.hdr_source
+            ? "software-tone-map-bt709-limited"
+            : "passthrough");
+    const bool wants_true_4k =
+        source_video.width > kWindowWidth ||
+        source_video.height > kWindowHeight;
+    if (wants_true_4k) {
+        (void)switch_fullscreen_output(
+            app,
+            kPreferredOutputWidth,
+            kPreferredOutputHeight,
+            "source-above-1080p");
+    } else {
+        (void)switch_fullscreen_output(
+            app,
+            kWindowWidth,
+            kWindowHeight,
+            "source-at-or-below-1080p");
+    }
+    const Kit_VideoFormatRequest video_request =
+        make_video_format_request(
+            source_video,
+            app.output_width,
+            app.output_height);
+    bfplayer::diagnostics_log(
+        bfplayer::DiagnosticLevel::info,
+        "video-source codec=%s profile=%d pix_fmt=%s bit_depth=%d size=%dx%d sar=%d:%d dar=%.6f fps=%.3f bitrate=%lld range=%s colorspace=%s transfer=%s primaries=%s hdr=%d demanding_software_decode=%d",
         source_video.codec,
         source_video.profile,
         source_video.pixel_format,
@@ -3152,15 +3620,23 @@ PlaybackOutcome run_player(
         source_video.display_aspect,
         source_video.frame_rate,
         static_cast<long long>(source_video.bit_rate),
+        source_video.color_range,
+        source_video.color_space,
+        source_video.color_transfer,
+        source_video.color_primaries,
+        source_video.hdr_source ? 1 : 0,
         source_video.demanding_software_decode ? 1 : 0);
     bfplayer::diagnostics_log(
         bfplayer::DiagnosticLevel::info,
-        "video-output-request source=%dx%d output=%dx%d downscale=%d",
+        "video-output-request source=%dx%d output=%dx%d display=%dx%d downscale=%d true_4k=%d",
         source_video.width,
         source_video.height,
         video_request.width,
         video_request.height,
-        video_request.width > 0 && video_request.height > 0 ? 1 : 0);
+        app.output_width,
+        app.output_height,
+        video_request.width > 0 && video_request.height > 0 ? 1 : 0,
+        app.true_4k_output ? 1 : 0);
     // Kitchensink requires a video decoder for subtitle layout. Audio-only
     // files with timed lyrics must still open instead of failing creation.
     const int initial_subtitle =
@@ -3328,6 +3804,28 @@ PlaybackOutcome run_player(
     }
     Uint64 last_resume_save = SDL_GetTicks64();
     Uint64 last_diagnostics = last_resume_save;
+    Uint64 last_remote_status = last_resume_save;
+    Uint64 last_visual_render = 0;
+    const Uint64 performance_frequency = SDL_GetPerformanceFrequency();
+    TimingWindow loop_timing;
+    TimingWindow audio_pull_timing;
+    TimingWindow video_pull_timing;
+    TimingWindow render_timing;
+    TimingWindow present_timing;
+    double active_playback_ms = 0.0;
+    struct rusage diagnostics_usage {};
+    (void)getrusage(RUSAGE_SELF, &diagnostics_usage);
+    bfplayer::RemotePlaybackStatus remote_status;
+    remote_status.phase = "playback";
+    remote_status.media_path = app.current_media_path;
+    remote_status.playing = true;
+    remote_status.source_fps = source_video.frame_rate;
+    remote_status.source_width = source_video.width;
+    remote_status.source_height = source_video.height;
+    remote_status.output_width = info.video_format.width;
+    remote_status.output_height = info.video_format.height;
+    remote_status.hdr_source = source_video.hdr_source;
+    remote_status.hdr_transfer = source_video.color_transfer;
     std::uint64_t video_updates = 0;
     std::uint64_t video_empty_polls = 0;
     static_assert(kAudioBufferBytes % sizeof(std::int16_t) == 0);
@@ -3337,7 +3835,9 @@ PlaybackOutcome run_player(
 
     while (app.running && app.playback_running &&
            Kit_GetPlayerState(app.player) != KIT_STOPPED) {
+        const Uint64 loop_started = SDL_GetPerformanceCounter();
         pump_events(app);
+        consume_remote_commands(app, true);
         update_text_input_state(app);
         consume_subtitle_job(app);
 
@@ -3346,11 +3846,16 @@ PlaybackOutcome run_player(
             if (queued < kAudioBufferBytes) {
                 const std::size_t available =
                     static_cast<std::size_t>(kAudioBufferBytes - queued);
+                const Uint64 audio_pull_started = SDL_GetPerformanceCounter();
                 const int got = Kit_GetPlayerAudioData(
                     app.player,
                     queued,
                     reinterpret_cast<unsigned char*>(audio_buffer.data()),
                     available);
+                audio_pull_timing.add(elapsed_performance_ms(
+                    audio_pull_started,
+                    SDL_GetPerformanceCounter(),
+                    performance_frequency));
                 if (got > 0) {
                     if (static_cast<std::size_t>(got) > available ||
                         got % static_cast<int>(sizeof(std::int16_t)) != 0) {
@@ -3383,142 +3888,311 @@ PlaybackOutcome run_player(
             }
         }
 
-        SDL_SetRenderDrawColor(app.renderer, 0, 0, 0, 255);
-        SDL_RenderClear(app.renderer);
-        if (app.video) {
-            if (Kit_GetPlayerVideoSDLTexture(
-                    app.player, app.video, nullptr) == 0) {
+        bool video_frame_updated = false;
+        if (app.video && !app.paused) {
+            const Uint64 video_pull_started = SDL_GetPerformanceCounter();
+            const int video_result = Kit_GetPlayerVideoSDLTexture(
+                app.player, app.video, nullptr);
+            video_pull_timing.add(elapsed_performance_ms(
+                video_pull_started,
+                SDL_GetPerformanceCounter(),
+                performance_frequency));
+            if (video_result == 0) {
+                video_frame_updated = true;
                 ++video_updates;
             } else {
                 ++video_empty_polls;
             }
-            const bfplayer::VideoLayout layout = player_video_layout(app);
-            const SDL_Rect source{
-                layout.source.x,
-                layout.source.y,
-                layout.source.width,
-                layout.source.height};
-            const SDL_Rect destination{
-                layout.destination.x,
-                layout.destination.y,
-                layout.destination.width,
-                layout.destination.height};
-            SDL_RenderCopy(
-                app.renderer,
-                app.video,
-                layout.crop_source ? &source : nullptr,
-                &destination);
         }
-        if (app.subtitles) {
-            const double subtitle_clock =
-                Kit_GetPlayerPosition(app.player) -
-                static_cast<double>(app.subtitle_delay_ms) / 1000.0;
-            const int fragments = bfplayer_get_player_subtitle_texture_at(
-                app.player,
-                app.subtitles,
-                subtitle_sources.data(),
-                subtitle_targets.data(),
-                static_cast<int>(subtitle_sources.size()),
-                subtitle_clock);
-            const int safe_fragments = std::clamp(
-                fragments,
-                0,
-                static_cast<int>(subtitle_sources.size()));
-            for (int i = 0; i < safe_fragments; ++i) {
+        Uint64 now = SDL_GetTicks64();
+        const bool audio_only_refresh =
+            !app.video && now - last_visual_render >= 33;
+        const bool should_render =
+            app.redraw_requested || video_frame_updated ||
+            audio_only_refresh;
+        if (should_render) {
+            const Uint64 render_started = SDL_GetPerformanceCounter();
+            SDL_SetRenderDrawColor(app.renderer, 0, 0, 0, 255);
+            SDL_RenderClear(app.renderer);
+            if (app.video) {
+                const bfplayer::VideoLayout layout = player_video_layout(app);
+                const SDL_Rect source{
+                    layout.source.x,
+                    layout.source.y,
+                    layout.source.width,
+                    layout.source.height};
+                const SDL_Rect destination{
+                    layout.destination.x,
+                    layout.destination.y,
+                    layout.destination.width,
+                    layout.destination.height};
                 SDL_RenderCopy(
                     app.renderer,
+                    app.video,
+                    layout.crop_source ? &source : nullptr,
+                    &destination);
+            }
+            if (app.subtitles) {
+                const double subtitle_clock =
+                    Kit_GetPlayerPosition(app.player) -
+                    static_cast<double>(app.subtitle_delay_ms) / 1000.0;
+                const int fragments = bfplayer_get_player_subtitle_texture_at(
+                    app.player,
                     app.subtitles,
-                    &subtitle_sources[static_cast<std::size_t>(i)],
-                    &subtitle_targets[static_cast<std::size_t>(i)]);
+                    subtitle_sources.data(),
+                    subtitle_targets.data(),
+                    static_cast<int>(subtitle_sources.size()),
+                    subtitle_clock);
+                const int safe_fragments = std::clamp(
+                    fragments,
+                    0,
+                    static_cast<int>(subtitle_sources.size()));
+                for (int i = 0; i < safe_fragments; ++i) {
+                    SDL_RenderCopy(
+                        app.renderer,
+                        app.subtitles,
+                        &subtitle_sources[static_cast<std::size_t>(i)],
+                        &subtitle_targets[static_cast<std::size_t>(i)]);
+                }
             }
-        }
-        if (app.external_subtitles.is_open()) {
-            const auto position_ms = seconds_to_milliseconds(
-                Kit_GetPlayerPosition(app.player));
-            if (!app.external_subtitles.render(position_ms, app.subtitle_delay_ms)) {
-                std::fprintf(
-                    stderr, "External subtitle render: %s\n",
-                    app.external_subtitles.error().c_str());
-                bfplayer::diagnostics_log(
-                    bfplayer::DiagnosticLevel::error,
-                    "subtitle-render failed error=%s",
-                    app.external_subtitles.error().c_str());
-                app.external_subtitles.close();
-                app.external_subtitle_index = -1;
+            if (app.external_subtitles.is_open()) {
+                const auto position_ms = seconds_to_milliseconds(
+                    Kit_GetPlayerPosition(app.player));
+                if (!app.external_subtitles.render(
+                        position_ms, app.subtitle_delay_ms)) {
+                    std::fprintf(
+                        stderr, "External subtitle render: %s\n",
+                        app.external_subtitles.error().c_str());
+                    bfplayer::diagnostics_log(
+                        bfplayer::DiagnosticLevel::error,
+                        "subtitle-render failed error=%s",
+                        app.external_subtitles.error().c_str());
+                    app.external_subtitles.close();
+                    app.external_subtitle_index = -1;
+                }
             }
+            app.osd.render(
+                Kit_GetPlayerPosition(app.player),
+                Kit_GetPlayerDuration(app.player),
+                app.paused);
+            render_timing.add(elapsed_performance_ms(
+                render_started,
+                SDL_GetPerformanceCounter(),
+                performance_frequency));
+            const Uint64 present_started = SDL_GetPerformanceCounter();
+            SDL_RenderPresent(app.renderer);
+            present_timing.add(elapsed_performance_ms(
+                present_started,
+                SDL_GetPerformanceCounter(),
+                performance_frequency));
+            app.redraw_requested = false;
+            last_visual_render = now;
+        } else {
+            SDL_Delay(app.paused ? 8 : 1);
         }
-        app.osd.render(
-            Kit_GetPlayerPosition(app.player),
-            Kit_GetPlayerDuration(app.player),
-            app.paused);
-        SDL_RenderPresent(app.renderer);
-
-        const Uint64 now = SDL_GetTicks64();
+        now = SDL_GetTicks64();
+        const double current_loop_ms = elapsed_performance_ms(
+            loop_started,
+            SDL_GetPerformanceCounter(),
+            performance_frequency);
+        loop_timing.add(current_loop_ms);
+        if (!app.paused) {
+            active_playback_ms += current_loop_ms;
+        }
         if (now - last_diagnostics >= 5000) {
-            unsigned int video_frames_length = 0;
-            unsigned int video_frames_capacity = 0;
-            unsigned int video_packets_length = 0;
-            unsigned int video_packets_capacity = 0;
-            unsigned int audio_frames_length = 0;
-            unsigned int audio_frames_capacity = 0;
-            unsigned int audio_packets_length = 0;
-            unsigned int audio_packets_capacity = 0;
-            if (Kit_GetPlayerVideoStream(app.player) >= 0) {
-                Kit_GetPlayerVideoBufferState(
-                    app.player,
-                    &video_frames_length,
-                    &video_frames_capacity,
-                    &video_packets_length,
-                    &video_packets_capacity);
-            }
-            if (Kit_GetPlayerAudioStream(app.player) >= 0) {
-                Kit_GetPlayerAudioBufferState(
-                    app.player,
-                    &audio_frames_length,
-                    &audio_frames_capacity,
-                    &audio_packets_length,
-                    &audio_packets_capacity);
-            }
             const double diagnostics_seconds =
                 static_cast<double>(now - last_diagnostics) / 1000.0;
             const double video_update_rate = diagnostics_seconds > 0.0
                 ? static_cast<double>(video_updates) / diagnostics_seconds
                 : 0.0;
+            const double expected_frames =
+                source_video.frame_rate > 0.0
+                ? source_video.frame_rate * active_playback_ms / 1000.0
+                : 0.0;
+            const std::uint64_t missed_frames =
+                expected_frames > static_cast<double>(video_updates)
+                ? static_cast<std::uint64_t>(std::ceil(
+                      expected_frames - static_cast<double>(video_updates)))
+                : 0;
             const Uint32 audio_queued =
                 app.audio != 0 ? SDL_GetQueuedAudioSize(app.audio) : 0U;
             const std::uint64_t audio_queue_ms =
                 static_cast<std::uint64_t>(audio_queued) * 1000ULL /
                 kAudioBytesPerSecond;
+            struct rusage current_usage {};
+            (void)getrusage(RUSAGE_SELF, &current_usage);
+            const double cpu_seconds =
+                process_cpu_seconds(current_usage) -
+                process_cpu_seconds(diagnostics_usage);
+            const double user_cpu_ms =
+                (timeval_seconds(current_usage.ru_utime) -
+                 timeval_seconds(diagnostics_usage.ru_utime)) * 1000.0;
+            const double system_cpu_ms =
+                (timeval_seconds(current_usage.ru_stime) -
+                 timeval_seconds(diagnostics_usage.ru_stime)) * 1000.0;
+            const double cpu_core_equivalents =
+                diagnostics_seconds > 0.0
+                ? std::max(0.0, cpu_seconds) / diagnostics_seconds
+                : 0.0;
+            const std::uint64_t voluntary_switches =
+                current_usage.ru_nvcsw >= diagnostics_usage.ru_nvcsw
+                ? static_cast<std::uint64_t>(
+                      current_usage.ru_nvcsw - diagnostics_usage.ru_nvcsw)
+                : 0;
+            const std::uint64_t involuntary_switches =
+                current_usage.ru_nivcsw >= diagnostics_usage.ru_nivcsw
+                ? static_cast<std::uint64_t>(
+                      current_usage.ru_nivcsw - diagnostics_usage.ru_nivcsw)
+                : 0;
+            const bfplayer::SafeReadFileStats file_stats =
+                app.local_media.stats();
+            remote_status.delivered_fps = video_update_rate;
+            remote_status.loop_average_ms = loop_timing.average();
+            remote_status.loop_max_ms = loop_timing.maximum_ms;
+            remote_status.video_pull_average_ms =
+                video_pull_timing.average();
+            remote_status.video_pull_max_ms =
+                video_pull_timing.maximum_ms;
+            remote_status.render_average_ms = render_timing.average();
+            remote_status.render_max_ms = render_timing.maximum_ms;
+            remote_status.present_average_ms = present_timing.average();
+            remote_status.present_max_ms = present_timing.maximum_ms;
+            remote_status.present_p95_ms = present_timing.percentile(0.95);
+            remote_status.present_p99_ms = present_timing.percentile(0.99);
+            remote_status.audio_pull_average_ms =
+                audio_pull_timing.average();
+            remote_status.audio_pull_max_ms =
+                audio_pull_timing.maximum_ms;
+            remote_status.cpu_core_equivalents = cpu_core_equivalents;
+            remote_status.user_cpu_ms = std::max(0.0, user_cpu_ms);
+            remote_status.system_cpu_ms = std::max(0.0, system_cpu_ms);
+            remote_status.voluntary_context_switches = voluntary_switches;
+            remote_status.involuntary_context_switches =
+                involuntary_switches;
+            remote_status.video_updates = video_updates;
+            remote_status.video_empty_polls = video_empty_polls;
+            remote_status.estimated_missed_frames = missed_frames;
+            remote_status.peak_rss_kib = process_peak_rss_kib();
+            remote_status.media_bytes_read = file_stats.bytes_read;
+            remote_status.media_read_calls = file_stats.read_calls;
+            remote_status.media_read_time_us = file_stats.read_time_us;
+            remote_status.media_seek_calls = file_stats.seek_calls;
+            remote_status.media_seek_time_us = file_stats.seek_time_us;
+            remote_status.audio_queued_bytes = audio_queued;
+            update_decoder_buffer_status(app, remote_status);
+            const Kit_VideoToneMapInfo tone_map_info =
+                update_tone_map_status(app, remote_status);
             bfplayer::diagnostics_log(
                 bfplayer::DiagnosticLevel::info,
-                "playback-heartbeat path=%s position_s=%.3f duration_s=%.3f paused=%d state=%d video_updates=%llu video_update_fps=%.2f video_empty_polls=%llu video_frames=%u/%u video_packets=%u/%u audio_frames=%u/%u audio_packets=%u/%u audio_queued=%u audio_queue_ms=%llu peak_rss_kib=%llu external_subtitle=%d delay_ms=%lld scale=%s aspect=%s crop=%s",
+                "playback-heartbeat path=%s position_s=%.3f duration_s=%.3f paused=%d state=%d active_ms=%.3f source_fps=%.3f video_updates=%llu video_update_fps=%.3f expected_frames=%.3f estimated_missed=%llu video_empty_polls=%llu video_frames=%u/%u video_packets=%u/%u audio_frames=%u/%u audio_packets=%u/%u audio_queued=%u audio_queue_ms=%llu peak_rss_kib=%llu cpu_cores=%.3f user_cpu_ms=%.3f system_cpu_ms=%.3f voluntary_ctx=%llu involuntary_ctx=%llu loop_avg_ms=%.3f loop_max_ms=%.3f audio_pull_avg_ms=%.3f audio_pull_max_ms=%.3f video_pull_avg_ms=%.3f video_pull_max_ms=%.3f render_avg_ms=%.3f render_max_ms=%.3f present_avg_ms=%.3f present_max_ms=%.3f present_p95_ms=%.3f present_p99_ms=%.3f present_count=%llu media_bytes=%llu media_reads=%llu media_read_ms=%.3f media_seeks=%llu media_seek_ms=%.3f external_subtitle=%d delay_ms=%lld scale=%s aspect=%s crop=%s",
                 app.current_media_path.c_str(),
                 Kit_GetPlayerPosition(app.player),
                 Kit_GetPlayerDuration(app.player),
                 app.paused ? 1 : 0,
                 Kit_GetPlayerState(app.player),
+                active_playback_ms,
+                source_video.frame_rate,
                 static_cast<unsigned long long>(video_updates),
                 video_update_rate,
+                expected_frames,
+                static_cast<unsigned long long>(missed_frames),
                 static_cast<unsigned long long>(video_empty_polls),
-                video_frames_length,
-                video_frames_capacity,
-                video_packets_length,
-                video_packets_capacity,
-                audio_frames_length,
-                audio_frames_capacity,
-                audio_packets_length,
-                audio_packets_capacity,
+                remote_status.video_frames_length,
+                remote_status.video_frames_capacity,
+                remote_status.video_packets_length,
+                remote_status.video_packets_capacity,
+                remote_status.audio_frames_length,
+                remote_status.audio_frames_capacity,
+                remote_status.audio_packets_length,
+                remote_status.audio_packets_capacity,
                 audio_queued,
                 static_cast<unsigned long long>(audio_queue_ms),
-                static_cast<unsigned long long>(process_peak_rss_kib()),
+                static_cast<unsigned long long>(remote_status.peak_rss_kib),
+                cpu_core_equivalents,
+                std::max(0.0, user_cpu_ms),
+                std::max(0.0, system_cpu_ms),
+                static_cast<unsigned long long>(voluntary_switches),
+                static_cast<unsigned long long>(involuntary_switches),
+                loop_timing.average(),
+                loop_timing.maximum_ms,
+                audio_pull_timing.average(),
+                audio_pull_timing.maximum_ms,
+                video_pull_timing.average(),
+                video_pull_timing.maximum_ms,
+                render_timing.average(),
+                render_timing.maximum_ms,
+                present_timing.average(),
+                present_timing.maximum_ms,
+                present_timing.percentile(0.95),
+                present_timing.percentile(0.99),
+                static_cast<unsigned long long>(present_timing.count),
+                static_cast<unsigned long long>(file_stats.bytes_read),
+                static_cast<unsigned long long>(file_stats.read_calls),
+                static_cast<double>(file_stats.read_time_us) / 1000.0,
+                static_cast<unsigned long long>(file_stats.seek_calls),
+                static_cast<double>(file_stats.seek_time_us) / 1000.0,
                 app.external_subtitle_index,
                 static_cast<long long>(app.subtitle_delay_ms),
                 bfplayer::video_scale_mode_name(app.video_scale_mode),
                 bfplayer::video_aspect_mode_name(app.video_aspect_mode),
                 bfplayer::video_crop_mode_name(app.video_crop_mode));
+            if (source_video.hdr_source) {
+                bfplayer::diagnostics_log(
+                    tone_map_info.active
+                        ? bfplayer::DiagnosticLevel::info
+                        : bfplayer::DiagnosticLevel::warning,
+                    "hdr-tone-map active=%d transfer=%s input_range=%s input_primaries=%s source_peak_nits=%.3f target_peak_nits=%.3f output=bt709-limited workers=%u frames=%llu processing_ms=%.3f average_ms=%.6f",
+                    tone_map_info.active,
+                    source_video.color_transfer,
+                    tone_map_info.input_full_range ? "full" : "limited",
+                    tone_map_info.input_bt2020 ? "bt2020" : "bt709",
+                    tone_map_info.source_peak_nits,
+                    tone_map_info.target_peak_nits,
+                    tone_map_info.workers,
+                    tone_map_info.frames,
+                    static_cast<double>(tone_map_info.processing_us) /
+                        1000.0,
+                    tone_map_info.frames > 0
+                        ? static_cast<double>(
+                              tone_map_info.processing_us) /
+                              static_cast<double>(tone_map_info.frames) /
+                              1000.0
+                        : 0.0);
+            }
+            diagnostics_usage = current_usage;
             video_updates = 0;
             video_empty_polls = 0;
+            active_playback_ms = 0.0;
+            loop_timing.reset();
+            audio_pull_timing.reset();
+            video_pull_timing.reset();
+            render_timing.reset();
+            present_timing.reset();
             last_diagnostics = now;
+        }
+        if (now - last_remote_status >= 500) {
+            remote_status.running = app.running;
+            remote_status.playing = app.playback_running;
+            remote_status.paused = app.paused;
+            remote_status.player_state = Kit_GetPlayerState(app.player);
+            remote_status.position_seconds =
+                Kit_GetPlayerPosition(app.player);
+            remote_status.duration_seconds =
+                Kit_GetPlayerDuration(app.player);
+            remote_status.audio_queued_bytes =
+                app.audio != 0 ? SDL_GetQueuedAudioSize(app.audio) : 0U;
+            remote_status.peak_rss_kib = process_peak_rss_kib();
+            const bfplayer::SafeReadFileStats file_stats =
+                app.local_media.stats();
+            remote_status.media_bytes_read = file_stats.bytes_read;
+            remote_status.media_read_calls = file_stats.read_calls;
+            remote_status.media_read_time_us = file_stats.read_time_us;
+            remote_status.media_seek_calls = file_stats.seek_calls;
+            remote_status.media_seek_time_us = file_stats.seek_time_us;
+            update_decoder_buffer_status(app, remote_status);
+            update_tone_map_status(app, remote_status);
+            app.remote_control.update_status(remote_status);
+            last_remote_status = now;
         }
         if (database_available && source_persistence_allowed &&
             now - last_resume_save >= 10000) {
@@ -3644,6 +4318,7 @@ void close_media(App& app) {
     app.text_edit_buffer.clear();
     app.ime_was_visible = false;
     app.navigation_repeat.reset();
+    SDL_SetYUVConversionMode(SDL_YUV_CONVERSION_AUTOMATIC);
 }
 
 int run_library(
@@ -3662,13 +4337,31 @@ int run_library(
             library.error().c_str());
         return 1;
     }
+    Uint64 last_remote_status = 0;
 
     while (app.running) {
         SDL_Event event{};
         bool play_selected = false;
         bool play_queue = false;
         std::string selected_path;
-        while (SDL_PollEvent(&event)) {
+        consume_remote_commands(app, false);
+        if (!app.pending_remote_media_path.empty()) {
+            selected_path = std::move(app.pending_remote_media_path);
+            app.pending_remote_media_path.clear();
+            play_selected = true;
+        }
+        const Uint64 library_now = SDL_GetTicks64();
+        if (library_now - last_remote_status >= 1000) {
+            bfplayer::RemotePlaybackStatus status;
+            status.phase = "library";
+            status.running = app.running;
+            status.output_width = app.output_width;
+            status.output_height = app.output_height;
+            status.peak_rss_kib = process_peak_rss_kib();
+            app.remote_control.update_status(status);
+            last_remote_status = library_now;
+        }
+        while (!play_selected && SDL_PollEvent(&event)) {
             if (event.type == SDL_CONTROLLERDEVICEADDED &&
                 !app.controller &&
                 SDL_IsGameController(event.cdevice.which)) {
@@ -3758,6 +4451,13 @@ int run_library(
                     break;
                 }
             }
+            if (app.running) {
+                (void)switch_fullscreen_output(
+                    app,
+                    kWindowWidth,
+                    kWindowHeight,
+                    "library");
+            }
             if (app.running && !library.open(
                     app.renderer,
                     app.fallback_font,
@@ -3781,6 +4481,7 @@ int run_library(
 }
 
 void cleanup(App& app) {
+    app.remote_control.stop();
     close_media(app);
     if (app.controller) {
         SDL_GameControllerClose(app.controller);
@@ -3921,9 +4622,14 @@ int main(int argc, char** argv) {
         SDL_WINDOWPOS_UNDEFINED,
         kWindowWidth,
         kWindowHeight,
-        SDL_WINDOW_FULLSCREEN_DESKTOP);
+        0);
     if (!app.window) {
         log_sdl("SDL_CreateWindow");
+        cleanup(app);
+        bfplayer::diagnostics_shutdown();
+        return 1;
+    }
+    if (!configure_fullscreen_output(app)) {
         cleanup(app);
         bfplayer::diagnostics_shutdown();
         return 1;
@@ -3937,6 +4643,16 @@ int main(int argc, char** argv) {
         bfplayer::diagnostics_shutdown();
         return 1;
     }
+    if (SDL_RenderSetLogicalSize(
+            app.renderer,
+            kWindowWidth,
+            kWindowHeight) != 0) {
+        log_sdl("SDL_RenderSetLogicalSize");
+        cleanup(app);
+        bfplayer::diagnostics_shutdown();
+        return 1;
+    }
+    log_display_output(app);
     boot_stage("renderer-create-complete");
     for (int i = 0; i < SDL_NumJoysticks(); ++i) {
         if (SDL_IsGameController(i)) {
@@ -3945,6 +4661,17 @@ int main(int argc, char** argv) {
         }
     }
     boot_stage("controller-open-complete");
+    std::string remote_error;
+    if (!app.remote_control.start(
+            kRemoteControlPort,
+            BFPLAYER_VERSION,
+            remote_error)) {
+        bfplayer::diagnostics_log(
+            bfplayer::DiagnosticLevel::error,
+            "remote-control start failed port=%u error=%s",
+            static_cast<unsigned int>(kRemoteControlPort),
+            remote_error.c_str());
+    }
 
     int result = 0;
     const char* media_path = nullptr;

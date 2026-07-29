@@ -324,7 +324,14 @@ assert(kitchensinkVideoUtils.includes(
     'return SDL_PIXELFORMAT_IYUV'));
 assert(player.includes('make_video_format_request'));
 assert(player.includes(
-    'video-output-request source=%dx%d output=%dx%d downscale=%d'));
+    'video-output-request source=%dx%d output=%dx%d display=%dx%d downscale=%d true_4k=%d'));
+assert(player.includes('constexpr int kPreferredOutputWidth = 3840'));
+assert(player.includes('constexpr int kPreferredOutputHeight = 2160'));
+assert(player.includes('configure_fullscreen_output(app)'));
+assert(player.includes('display-output current=%dx%d@%d'));
+assert(build.includes(
+    "'vendor\\SDL_ps5_backend\\lib\\SDL_ps5video.c.o'"));
+assert(build.includes('$objects += $sdlVideoOverrideObject'));
 assert(player.includes('migrate_legacy_library_database()'));
 assert(player.includes(
     'Kit_SetHint(KIT_HINT_VIDEO_BUFFER_PACKETS, policy.video_packets)'));
@@ -352,7 +359,10 @@ assert(dlnaClient.includes('kMaxSsdpResponses'));
 assert(dlnaClient.includes('kMaxDescribedServers'));
 assert(build.includes("'src\\network\\dlna_client.cpp'"));
 assert(build.includes("'-ltinyxml2'"));
-assert(player.includes('video_update_fps=%.2f'));
+assert(player.includes('video_update_fps=%.3f'));
+assert(player.includes('present_p95_ms=%.3f'));
+assert(player.includes('media_read_ms=%.3f'));
+assert(player.includes('remote-control start failed'));
 assert(player.includes('demanding_software_decode'));
 assert(player.includes('display_aspect_from_sample_aspect('));
 assert(player.includes('av_guess_sample_aspect_ratio('));

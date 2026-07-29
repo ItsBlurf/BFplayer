@@ -30,6 +30,13 @@ license texts and source.
 | Noto Sans | SIL Open Font License 1.1 | `assets/fonts/OFL.txt` in this package |
 | PS5 BigApp/ELF loader core | GPL-3.0-or-later | <https://github.com/ps5-payload-dev/websrv> |
 
+BFplayer also links an altered PS5 video-backend object from SDL commit
+`0baf4ac49382b537ba449901b5b6d0d189bb1fbb`. The corresponding patch and
+rebuild script are in `vendor/SDL_ps5_backend`. The alteration exposes the
+backend's 3840x2160 mode and repairs framebuffer resizing during mode changes.
+It remains under SDL's Zlib license and is not represented as unmodified
+upstream code.
+
 The exact FFmpeg configure string embedded in PacBrew's `libavcodec.a` includes
 `--enable-static`, `--disable-shared`, `--enable-openssl`, and
 `--enable-version3`. It does not include `--enable-gpl` or
@@ -75,6 +82,16 @@ The vendored `kitpacketbuffer.c` and `kitdemuxer.c` are modified to enforce
 compressed-packet byte budgets in addition to upstream packet-count limits.
 This keeps the larger PS5 input queues while bounding their retained payload
 memory and preserving seek and shutdown wakeups.
+
+The vendored `kitaudio.c`, `kittimer.c`, and `kitplayer.c` are also modified
+to retain partially consumed decoded audio, use audible audio as a stable
+master clock, freeze that clock during pause, and preserve it across resume
+and seek operations.
+
+The vendored `kitvideo.c` is modified to detect PQ/HLG frame metadata and call
+BFplayer's in-place BT.2020 HDR to BT.709 SDR conversion before the frame is
+given to SDL. The conversion implementation is project-owned; the surrounding
+decoder integration remains covered by SDL_kitchensink's MIT license.
 
 The upstream file is covered by the following MIT license:
 

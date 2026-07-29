@@ -58,6 +58,18 @@ int main() {
             bfplayer_audio_audible_position(
                 20.0, kOneSecond * 11, kRate, kChannels, kBytes)),
         "sentinel or implausibly large backend queues are rejected");
+    check(
+        near(bfplayer_audio_monotonic_position(18.5, NAN), 18.5),
+        "the first timestamp establishes the monotonic clock");
+    check(
+        near(bfplayer_audio_monotonic_position(18.75, 18.5), 18.75),
+        "forward timestamps advance the monotonic clock");
+    check(
+        near(bfplayer_audio_monotonic_position(0.25, 18.75), 18.75),
+        "an EOF timestamp reset cannot rewind playback");
+    check(
+        std::isnan(bfplayer_audio_monotonic_position(NAN, 18.75)),
+        "invalid candidate timestamps remain invalid");
 
     std::cout << "kitchensink_audio_clock_tests: PASS\n";
     return 0;

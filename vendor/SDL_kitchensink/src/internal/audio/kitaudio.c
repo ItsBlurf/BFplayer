@@ -13,6 +13,7 @@
 #include "kitchensink2/internal/utils/kithelpers.h"
 #include "kitchensink2/internal/utils/kitlog.h"
 #include "kitchensink2/kiterror.h"
+#include "bfplayer/kitchensink_audio_consume.h"
 #include "bfplayer/kitchensink_audio_clock.h"
 
 #define KIT_AUDIO_EARLY_FAIL 5.0
@@ -28,6 +29,7 @@ typedef struct Kit_AudioDecoder {
     int64_t fifo_start_pts;       ///< Audio fifo start PTS
     Kit_PacketBuffer *buffer;     ///< Packet ringbuffer for decoded audio packets
     Kit_AudioOutputFormat output; ///< Output audio format description
+    double last_clock_pts;        ///< Last monotonic audible media timestamp
 } Kit_AudioDecoder;
 
 int Kit_GetAudioDecoderOutputFormat(const Kit_Decoder *decoder, Kit_AudioOutputFormat *output) {
@@ -38,6 +40,16 @@ int Kit_GetAudioDecoderOutputFormat(const Kit_Decoder *decoder, Kit_AudioOutputF
     Kit_AudioDecoder *audio_decoder = decoder->userdata;
     memcpy(output, &audio_decoder->output, sizeof(Kit_AudioOutputFormat));
     return 0;
+}
+
+void Kit_ClearAudioDecoderCurrent(Kit_Decoder *decoder) {
+    if(decoder == NULL)
+        return;
+    Kit_AudioDecoder *audio_decoder = decoder->userdata;
+    if(audio_decoder != NULL) {
+        av_frame_unref(audio_decoder->current);
+        audio_decoder->last_clock_pts = NAN;
+    }
 }
 
 static void write_packet(Kit_AudioDecoder *audio_decoder, int nb_samples) {
@@ -116,6 +128,7 @@ static void dec_flush_audio_cb(Kit_Decoder *decoder) {
     Kit_FlushPacketBuffer(audio_decoder->buffer);
     av_audio_fifo_reset(audio_decoder->fifo);
     audio_decoder->fifo_start_pts = -1;
+    audio_decoder->last_clock_pts = NAN;
 }
 
 static void dec_signal_audio_cb(Kit_Decoder *decoder) {
@@ -296,6 +309,7 @@ Kit_Decoder *Kit_CreateAudioDecoder(
     audio_decoder->output = output;
     audio_decoder->fifo = fifo;
     audio_decoder->fifo_start_pts = -1;
+    audio_decoder->last_clock_pts = NAN;
     return decoder;
 
 exit_swr:
@@ -327,28 +341,35 @@ static double Kit_GetCurrentPTS(const Kit_Decoder *decoder) {
 int Kit_GetAudioDecoderData(Kit_Decoder *decoder, size_t backend_buffer_size, unsigned char *buf, size_t len) {
     assert(decoder != NULL);
 
-    const Kit_AudioDecoder *audio_decoder = decoder->userdata;
+    Kit_AudioDecoder *audio_decoder = decoder->userdata;
     int ret = 0;
-    size_t *size;
-    size_t *left;
 
     if(len <= 0)
         return 0;
-    if(!Kit_BeginPacketBufferRead(audio_decoder->buffer, audio_decoder->current, 0))
-        goto no_data;
+    if(audio_decoder->current->crop_bottom == 0) {
+        av_frame_unref(audio_decoder->current);
+        if(!Kit_ReadPacketBuffer(
+                audio_decoder->buffer,
+                audio_decoder->current,
+                0))
+            goto no_data;
+    }
 
     // Initialize timer if it's the primary sync source, and it's not yet initialized.
     Kit_InitTimerBase(decoder->sync_timer);
     if(!Kit_IsTimerInitialized(decoder->sync_timer)) {
         // If this was not the sync source and timer is not set, wait for another stream to set it.
-        av_frame_unref(audio_decoder->current);
-        Kit_CancelPacketBufferRead(audio_decoder->buffer);
         return 0;
     }
 
-    size = &audio_decoder->current->crop_top;
-    left = &audio_decoder->current->crop_bottom;
-    const size_t consumed_bytes = *size >= *left ? *size - *left : 0;
+    const size_t initial_frame_bytes =
+        audio_decoder->current->crop_top;
+    const size_t initial_remaining_bytes =
+        audio_decoder->current->crop_bottom;
+    const size_t consumed_bytes =
+        initial_frame_bytes >= initial_remaining_bytes
+            ? initial_frame_bytes - initial_remaining_bytes
+            : 0;
     const double bytes_per_second =
         (double)audio_decoder->output.sample_rate *
         (double)SAMPLE_BYTES(audio_decoder);
@@ -369,16 +390,22 @@ int Kit_GetAudioDecoderData(Kit_Decoder *decoder, size_t backend_buffer_size, un
             audio_decoder->output.sample_rate,
             audio_decoder->output.channels,
             audio_decoder->output.bytes);
-        if(audible_pts == audible_pts) {
-            Kit_AdjustTimerBase(decoder->sync_timer, audible_pts);
+        const double monotonic_pts = bfplayer_audio_monotonic_position(
+            audible_pts,
+            audio_decoder->last_clock_pts);
+        if(monotonic_pts == monotonic_pts) {
+            Kit_AdjustTimerBase(decoder->sync_timer, monotonic_pts);
+            audio_decoder->last_clock_pts = monotonic_pts;
         }
     } else {
         // If this stream is NOT the sync source, try to skip packets until we see something reasonable.
         while(pts > sync_ts + KIT_AUDIO_EARLY_FAIL) {
             // LOG("[AUDIO] FAIL-EARLY: pts = %lf < %lf + %lf\n", pts, sync_ts, KIT_AUDIO_EARLY_FAIL);
             av_frame_unref(audio_decoder->current);
-            Kit_FinishPacketBufferRead(audio_decoder->buffer);
-            if(!Kit_BeginPacketBufferRead(audio_decoder->buffer, audio_decoder->current, 0))
+            if(!Kit_ReadPacketBuffer(
+                    audio_decoder->buffer,
+                    audio_decoder->current,
+                    0))
                 goto no_data;
             pts = Kit_GetCurrentPTS(decoder);
         }
@@ -386,32 +413,45 @@ int Kit_GetAudioDecoderData(Kit_Decoder *decoder, size_t backend_buffer_size, un
         // Secondary audio follows another stream's clock. Primary audio must
         // always feed its backend queue because that queue is the clock.
         if(pts > sync_ts + early_threshold) {
-            av_frame_unref(audio_decoder->current);
-            Kit_CancelPacketBufferRead(audio_decoder->buffer);
             goto no_data;
         }
         while(pts < sync_ts - late_threshold) {
             av_frame_unref(audio_decoder->current);
-            Kit_FinishPacketBufferRead(audio_decoder->buffer);
-            if(!Kit_BeginPacketBufferRead(audio_decoder->buffer, audio_decoder->current, 0))
+            if(!Kit_ReadPacketBuffer(
+                    audio_decoder->buffer,
+                    audio_decoder->current,
+                    0))
                 goto no_data;
             pts = Kit_GetCurrentPTS(decoder);
         }
     }
 
-    len = floor(len / SAMPLE_BYTES(audio_decoder)) * SAMPLE_BYTES(audio_decoder);
-    if(*left) {
-        ret = (len > *left) ? *left : len;
-        int pos = *size - *left;
-        memcpy(buf, audio_decoder->current->data[0] + pos, ret);
-        *left -= ret;
+    BfplayerAudioConsumePlan plan;
+    const size_t frame_bytes =
+        audio_decoder->current->crop_top;
+    const size_t remaining_bytes =
+        audio_decoder->current->crop_bottom;
+    if(!bfplayer_audio_consume_plan(
+            frame_bytes,
+            remaining_bytes,
+            len,
+            SAMPLE_BYTES(audio_decoder),
+            &plan)) {
+        Kit_SetError("Invalid decoded audio frame byte accounting");
+        av_frame_unref(audio_decoder->current);
+        return 0;
     }
+    if(plan.bytes == 0)
+        return 0;
 
-    av_frame_unref(audio_decoder->current);
-    if(*left) {
-        Kit_CancelPacketBufferRead(audio_decoder->buffer);
-    } else {
-        Kit_FinishPacketBufferRead(audio_decoder->buffer);
+    memcpy(
+        buf,
+        audio_decoder->current->data[0] + plan.offset,
+        plan.bytes);
+    audio_decoder->current->crop_bottom = plan.remaining;
+    ret = (int)plan.bytes;
+    if(plan.remaining == 0) {
+        av_frame_unref(audio_decoder->current);
     }
     return ret;
 

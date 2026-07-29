@@ -58,6 +58,10 @@ int main() {
     check(file.is_open(), "invalid caller buffer does not retire a valid handle");
     check(file.seek(0, 12345) < 0, "invalid seek origin is rejected");
     check(file.is_open(), "invalid seek origin does not retire a valid handle");
+    const bfplayer::SafeReadFileStats stats = file.stats();
+    check(stats.bytes_read == 5, "read telemetry counts delivered bytes");
+    check(stats.read_calls == 4, "read telemetry counts all calls");
+    check(stats.seek_calls == 2, "seek telemetry counts all calls");
     file.close();
     check(file.read(buffer.data(), 1) < 0, "closed handle cannot be reused");
     check(file.last_error_code() != 0, "closed-handle error is recorded");

@@ -30,10 +30,17 @@ Playback is powered by FFmpeg 7.0.1, SDL2, SDL_kitchensink, and libass. Decoding
 is currently software-based, so demanding 4K HEVC or AV1 files may not play
 smoothly.
 
-The same limitation applies to 4K 50/60 fps VP9 WebM, especially 10-bit HDR
-files. The player uses the 16 logical processors reported by SDL, enlarged
-video buffers, and proportional 1080p output conversion for oversized sources,
-but these formats can still exceed the PS5 homebrew software-decoding budget.
+The player selects 1920x1080 output for media up to 1080p and native
+3840x2160 output for larger sources. Its PS5 presentation path uses persistent
+parallel workers and pipelined framebuffer flips. PQ and HLG sources are
+tone-mapped in place from BT.2020 HDR to BT.709 SDR because the current public
+PS5 SDL homebrew path does not expose safe native HDR output signalling.
+
+On the alpha.42 hardware samples, a 3840x2160 59.94 fps VP9/PQ WebM reached
+38.33 delivered fps with about 955 MiB peak resident memory, while a
+1920x1080 23.976 fps file held 24 fps. These are sample-specific measurements,
+not format guarantees. Demanding 4K HEVC, AV1, or 50/60 fps software-decoded
+files can still exceed the available processing budget.
 
 Every video starts in **Best fit**, **Original** aspect, and **No crop** mode.
 The player uses the source stream's display ratio, including anamorphic

@@ -1,5 +1,44 @@
 # Changelog
 
+## 0.1.0-alpha.42 - playback recovery and measured 4K test build
+
+- Repair partial-audio consumption, audible-clock handling, pause, resume, and
+  seek behavior that caused fast playback and post-seek frame drops.
+- Select 1920x1080 output for normal media and native 3840x2160 output for
+  sources above 1080p.
+- Reduce PS5 presentation overhead with persistent parallel tile workers,
+  pipelined framebuffer flips, and fewer full-frame copies.
+- Tone-map PQ and HLG video in place from BT.2020 HDR to BT.709 SDR when the
+  current PS5 output path cannot signal native HDR.
+- Add authenticated hardware automation and detailed playback, timing, I/O,
+  CPU, memory, queue, display, and HDR telemetry.
+- On the final hardware test samples, 3840x2160 59.94 fps VP9/PQ reached 38.33
+  delivered fps with 2.70 ms average tone mapping and 955 MiB peak RSS;
+  1920x1080 23.976 fps playback held 24 fps. Pause drift was zero.
+
+## 0.1.0-alpha.41 - native 4K output test build
+
+- Enable the PS5 SDL backend's 3840x2160 display mode and repair framebuffer
+  resizing when switching away from the default 1080p mode.
+- Keep the interface on its 1920x1080 logical canvas while presenting video
+  through a real 3840x2160 renderer and framebuffer.
+- Preserve source resolution up to the active physical display size instead
+  of always converting oversized video to 1080p.
+- Fall back cleanly to 1920x1080 if the 4K mode cannot be activated.
+- Log the current display mode, renderer size, true-4K status, and source HDR
+  color metadata for hardware verification.
+
+## 0.1.0-alpha.40 - playback timing regression fix
+
+- Preserve partially consumed decoded audio frames instead of dropping their
+  remaining samples, which had advanced the audio-master clock too quickly and
+  forced valid video frames to be discarded as late.
+- Freeze the shared media clock while paused and resume from the exact paused
+  position.
+- Apply seek targets immediately while clearing any pre-seek decoded audio.
+- Add regression tests for partial audio consumption and pause/resume/seek
+  clock behavior.
+
 ## 0.1.0-alpha.39 - bounded decoder input memory
 
 - Keep the larger compressed input queues used for 4K and network playback,

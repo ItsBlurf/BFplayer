@@ -6,6 +6,7 @@
 #include "kitchensink2/internal/kitdecoder.h"
 #include "kitchensink2/internal/kittimer.h"
 #include "kitchensink2/kitconfig.h"
+#include "kitchensink2/kitformat.h"
 #include "kitchensink2/kitsource.h"
 
 KIT_LOCAL Kit_Decoder *Kit_CreateVideoDecoder(
@@ -15,5 +16,8 @@ KIT_LOCAL int Kit_GetVideoDecoderSDLTexture(Kit_Decoder *dec, SDL_Texture *textu
 KIT_LOCAL int Kit_LockVideoDecoderRaw(Kit_Decoder *decoder, unsigned char ***data, int **line_size, SDL_Rect *area);
 KIT_LOCAL void Kit_UnlockVideoDecoderRaw(Kit_Decoder *decoder);
 KIT_LOCAL int Kit_GetVideoDecoderOutputFormat(const Kit_Decoder *dec, Kit_VideoOutputFormat *output);
+KIT_LOCAL void Kit_GetVideoDecoderToneMapInfo(
+    const Kit_Decoder *dec,
+    Kit_VideoToneMapInfo *info);
 
 #endif // KITVIDEO_H

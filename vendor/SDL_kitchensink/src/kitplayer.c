@@ -476,6 +476,18 @@ void Kit_GetPlayerInfo(const Kit_Player *player, Kit_PlayerInfo *info) {
     Kit_GetSubtitleDecoderOutputFormat(subtitle_decoder, &info->subtitle_format);
 }
 
+void Kit_GetPlayerVideoToneMapInfo(
+    const Kit_Player *player,
+    Kit_VideoToneMapInfo *info) {
+    assert(info != NULL);
+    memset(info, 0, sizeof(*info));
+    if(player == NULL)
+        return;
+    Kit_GetVideoDecoderToneMapInfo(
+        player->decoders[KIT_VIDEO_INDEX],
+        info);
+}
+
 int Kit_HasBufferFillRate(
     const Kit_Player *player, int audio_input, int audio_output, int video_input, int video_output
 ) {
@@ -582,7 +594,7 @@ void Kit_PlayerPlay(Kit_Player *player) {
         case KIT_CLOSED:
             break;
         case KIT_PAUSED:
-            Kit_ResetTimerBase(player->sync_timer);
+            Kit_ResumeTimer(player->sync_timer);
             player->state = KIT_PLAYING;
             break;
         case KIT_STOPPED:
@@ -609,7 +621,10 @@ void Kit_PlayerStop(Kit_Player *player) {
 
 void Kit_PlayerPause(Kit_Player *player) {
     assert(player != NULL);
-    player->state = KIT_PAUSED;
+    if(player->state == KIT_PLAYING) {
+        Kit_PauseTimer(player->sync_timer);
+        player->state = KIT_PAUSED;
+    }
 }
 
 int Kit_PlayerSeek(Kit_Player *player, double seek_set) {
@@ -623,6 +638,8 @@ int Kit_PlayerSeek(Kit_Player *player, double seek_set) {
         seek_set = 0;
     if(seek_set >= duration)
         seek_set = duration;
+    Kit_ClearAudioDecoderCurrent(player->decoders[KIT_AUDIO_INDEX]);
+    Kit_AdjustTimerBase(player->sync_timer, seek_set);
     Kit_SeekDemuxerThread(player->demux_thread, seek_set * AV_TIME_BASE);
     return 0;
 }

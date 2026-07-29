@@ -41,3 +41,15 @@ double bfplayer_audio_audible_position(
     const double audible = next_sample_pts - queued_seconds;
     return audible > 0.0 ? audible : 0.0;
 }
+
+double bfplayer_audio_monotonic_position(
+    double candidate,
+    double previous) {
+    if (!__builtin_isfinite(candidate)) {
+        return NAN;
+    }
+    if (!__builtin_isfinite(previous) || candidate >= previous) {
+        return candidate;
+    }
+    return previous;
+}

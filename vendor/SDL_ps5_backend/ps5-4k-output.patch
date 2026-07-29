@@ -1,0 +1,375 @@
+diff --git a/src/video/ps5/SDL_ps5video.c b/src/video/ps5/SDL_ps5video.c
+index 699812e..4622bc2 100644
+--- a/src/video/ps5/SDL_ps5video.c
++++ b/src/video/ps5/SDL_ps5video.c
+@@ -33,49 +33,179 @@
+
+ #define PS5_THREAD_COUNT 12
+
++typedef struct PS5_TileWorkerPool {
++    pthread_t threads[PS5_THREAD_COUNT];
++    PS5_DrawChunk chunks[PS5_THREAD_COUNT];
++    pthread_mutex_t mutex;
++    pthread_cond_t work_ready;
++    pthread_cond_t work_done;
++    uint64_t generation;
++    int completed;
++    int started;
++    int stopping;
++    int ready;
++} PS5_TileWorkerPool;
++
++static PS5_TileWorkerPool PS5_tile_workers;
++static uint32_t PS5_frame_id;
++
++static void PS5_DrawTileRows(const PS5_DrawChunk *chunk)
++{
++    const size_t width = chunk->frame_width;
++    const size_t first_row = chunk->src_start;
++    const size_t last_row = chunk->src_end;
++
++    for (size_t y = first_row; y < last_row; y++) {
++        const size_t tile_y = y / PS5_TILE_HEIGHT;
++        const size_t local_y = y % PS5_TILE_HEIGHT;
++        const size_t src_row = y * width;
++        const size_t dst_tile_row = tile_y * width * PS5_TILE_HEIGHT;
++        const unsigned short *tile_offsets = PS5_tilemap[local_y];
++
++        /*
++         * Every four adjacent source pixels remain adjacent in the PS5 tile
++         * map. Keep source reads strictly row-major and copy each four-pixel
++         * run with one 16-byte operation.
++         */
++        for (size_t tile_x = 0; tile_x < width;
++             tile_x += PS5_TILE_WIDTH) {
++            const size_t copy_width =
++                SDL_min((size_t)PS5_TILE_WIDTH, width - tile_x);
++            const size_t dst_tile =
++                dst_tile_row +
++                (tile_x / PS5_TILE_WIDTH) * PS5_TILE_SIZE;
++            const uint32_t *source =
++                chunk->src + src_row + tile_x;
++            size_t local_x = 0;
++
++            for (; local_x + 4 <= copy_width; local_x += 4) {
++                SDL_memcpy(
++                    chunk->dst + dst_tile + tile_offsets[local_x],
++                    source + local_x,
++                    4 * sizeof(uint32_t));
++            }
++            for (; local_x < copy_width; local_x++) {
++                chunk->dst[dst_tile + tile_offsets[local_x]] =
++                    source[local_x];
++            }
++        }
++    }
++}
+
+-static void* PS5_DrawTileThread(void* arg) {
+-    const PS5_DrawChunk* chunk = (PS5_DrawChunk*)arg;
++static void* PS5_DrawTileThread(void* arg)
++{
++    PS5_DrawChunk *chunk = (PS5_DrawChunk *)arg;
++    uint64_t observed_generation = 0;
++
++    pthread_mutex_lock(&PS5_tile_workers.mutex);
++    for (;;) {
++        while (!PS5_tile_workers.stopping &&
++               observed_generation == PS5_tile_workers.generation)
++            pthread_cond_wait(&PS5_tile_workers.work_ready,
++                              &PS5_tile_workers.mutex);
++
++        if (PS5_tile_workers.stopping)
++            break;
++
++        observed_generation = PS5_tile_workers.generation;
++        PS5_DrawChunk work = *chunk;
++        pthread_mutex_unlock(&PS5_tile_workers.mutex);
++        PS5_DrawTileRows(&work);
++        pthread_mutex_lock(&PS5_tile_workers.mutex);
++
++        PS5_tile_workers.completed++;
++        if (PS5_tile_workers.completed == PS5_THREAD_COUNT)
++            pthread_cond_signal(&PS5_tile_workers.work_done);
++    }
++    pthread_mutex_unlock(&PS5_tile_workers.mutex);
++    return NULL;
++}
+
+-    for (int ind = chunk->src_start; ind < chunk->src_end; ind++) {
+-        int x = ind % chunk->frame_width;
+-        int y = ind / chunk->frame_width;
+-        int ty = y / PS5_TILE_HEIGHT;
+-        int tx = x / PS5_TILE_WIDTH;
++static int PS5_StartTileWorkers(void)
++{
++    SDL_zero(PS5_tile_workers);
++    if (pthread_mutex_init(&PS5_tile_workers.mutex, NULL) != 0)
++        return -1;
++    if (pthread_cond_init(&PS5_tile_workers.work_ready, NULL) != 0) {
++        pthread_mutex_destroy(&PS5_tile_workers.mutex);
++        return -1;
++    }
++    if (pthread_cond_init(&PS5_tile_workers.work_done, NULL) != 0) {
++        pthread_cond_destroy(&PS5_tile_workers.work_ready);
++        pthread_mutex_destroy(&PS5_tile_workers.mutex);
++        return -1;
++    }
+
+-        int t = (int)(PS5_TILE_SIZE * (tx + ty * ((double)chunk->frame_width /
+-                                                  PS5_TILE_WIDTH)));
+-        int i = PS5_tilemap[y % PS5_TILE_HEIGHT][x % PS5_TILE_WIDTH];
+-        chunk->dst[t + i] = chunk->src[ind];
++    for (int i = 0; i < PS5_THREAD_COUNT; i++) {
++        if (pthread_create(&PS5_tile_workers.threads[i], NULL,
++                           PS5_DrawTileThread,
++                           &PS5_tile_workers.chunks[i]) != 0) {
++            pthread_mutex_lock(&PS5_tile_workers.mutex);
++            PS5_tile_workers.stopping = 1;
++            pthread_cond_broadcast(&PS5_tile_workers.work_ready);
++            pthread_mutex_unlock(&PS5_tile_workers.mutex);
++            for (int joined = 0; joined < i; joined++)
++                pthread_join(PS5_tile_workers.threads[joined], NULL);
++            pthread_cond_destroy(&PS5_tile_workers.work_done);
++            pthread_cond_destroy(&PS5_tile_workers.work_ready);
++            pthread_mutex_destroy(&PS5_tile_workers.mutex);
++            SDL_zero(PS5_tile_workers);
++            return -1;
++        }
++        PS5_tile_workers.started++;
+     }
++    PS5_tile_workers.ready = 1;
+     return 0;
+ }
+
++static void PS5_StopTileWorkers(void)
++{
++    if (!PS5_tile_workers.ready)
++        return;
++
++    pthread_mutex_lock(&PS5_tile_workers.mutex);
++    PS5_tile_workers.stopping = 1;
++    pthread_cond_broadcast(&PS5_tile_workers.work_ready);
++    pthread_mutex_unlock(&PS5_tile_workers.mutex);
++    for (int i = 0; i < PS5_tile_workers.started; i++)
++        pthread_join(PS5_tile_workers.threads[i], NULL);
++    pthread_cond_destroy(&PS5_tile_workers.work_done);
++    pthread_cond_destroy(&PS5_tile_workers.work_ready);
++    pthread_mutex_destroy(&PS5_tile_workers.mutex);
++    SDL_zero(PS5_tile_workers);
++}
++
+ static void PS5_DrawPixelsAsTiles(uint32_t *src, uint32_t *dst,
+                                   int frame_width, int frame_height)
+ {
+-    int chunk_size = frame_width * frame_height / PS5_THREAD_COUNT;
+-    PS5_DrawChunk chunks[PS5_THREAD_COUNT];
+-    pthread_t threads[PS5_THREAD_COUNT];
+-
+-    for (int i=0; i<PS5_THREAD_COUNT; i++) {
+-        chunks[i].src = src;
+-        chunks[i].dst = dst;
+-        chunks[i].src_start = i * chunk_size;
+-        chunks[i].src_end = (i + 1) * chunk_size;
+-        chunks[i].frame_width = frame_width;
+-        chunks[i].frame_height = frame_height;
+-
+-        if(i == PS5_THREAD_COUNT - 1) {
+-            chunks[i].src_end = frame_width * frame_height;
+-        }
+-
+-        pthread_create(&threads[i], 0, &PS5_DrawTileThread, &chunks[i]);
++    if (!PS5_tile_workers.ready) {
++        PS5_DrawChunk fallback = {
++            src, dst, (uint16_t)frame_width, (uint16_t)frame_height,
++            0, (size_t)frame_height
++        };
++        PS5_DrawTileRows(&fallback);
++        return;
+     }
+
+-    for (int i=0; i<PS5_THREAD_COUNT; i++) {
+-        pthread_join(threads[i], 0);
++    pthread_mutex_lock(&PS5_tile_workers.mutex);
++    PS5_tile_workers.completed = 0;
++    for (int i = 0; i < PS5_THREAD_COUNT; i++) {
++        PS5_DrawChunk *chunk = &PS5_tile_workers.chunks[i];
++        chunk->src = src;
++        chunk->dst = dst;
++        chunk->frame_width = (uint16_t)frame_width;
++        chunk->frame_height = (uint16_t)frame_height;
++        chunk->src_start =
++            (size_t)frame_height * (size_t)i / PS5_THREAD_COUNT;
++        chunk->src_end =
++            (size_t)frame_height * (size_t)(i + 1) / PS5_THREAD_COUNT;
+     }
++    PS5_tile_workers.generation++;
++    pthread_cond_broadcast(&PS5_tile_workers.work_ready);
++    while (PS5_tile_workers.completed < PS5_THREAD_COUNT)
++        pthread_cond_wait(&PS5_tile_workers.work_done,
++                          &PS5_tile_workers.mutex);
++    pthread_mutex_unlock(&PS5_tile_workers.mutex);
+ }
+
+ static void PS5_DestroyWindowFramebuffer(_THIS, SDL_Window *window)
+@@ -116,8 +246,7 @@ static int PS5_UpdateWindowFramebuffer(_THIS, SDL_Window *window,
+                                        const SDL_Rect *rects, int numrects)
+ {
+     PS5_DeviceData *device_data = (PS5_DeviceData *)_this->driverdata;
+-    static uint32_t frame_id = 0;
+-    uint8_t idx = frame_id % 2;
++    uint8_t idx = PS5_frame_id % 2;
+     SDL_Surface *surface;
+     struct kevent evt;
+     int junk;
+@@ -127,29 +256,41 @@ static int PS5_UpdateWindowFramebuffer(_THIS, SDL_Window *window,
+         return SDL_SetError("Couldn't find surface for window");
+     }
+
++    /*
++     * Keep at most two submitted flips in flight. Waiting before reusing a
++     * video buffer lets SDL's YUV conversion and software render for this
++     * frame overlap the previous display flip instead of serializing both
++     * costs after every submission.
++     */
++    if (PS5_frame_id >= 2 &&
++        sceKernelWaitEqueue(
++            device_data->evt_queue, &evt, 1, &junk, 0)) {
++        return SDL_SetError("sceKernelWaitEqueue: %s", strerror(errno));
++    }
++
+     if(surface->w == device_data->surface->w &&
+        surface->h == device_data->surface->h) {
+         PS5_DrawPixelsAsTiles(surface->pixels, device_data->vbuf[idx].data,
+                               surface->w, surface->h);
+     } else {
+-        SDL_BlitSurface(surface, NULL, device_data->surface,
+-                        &(SDL_Rect){(device_data->surface->w - surface->w) / 2,
+-                                    (device_data->surface->h - surface->h) / 2,
+-                                    surface->w, surface->h});
++        SDL_Rect destination = {
++            0,
++            0,
++            device_data->surface->w,
++            device_data->surface->h
++        };
++        SDL_BlitScaled(surface, NULL, device_data->surface, &destination);
+         PS5_DrawPixelsAsTiles(device_data->surface->pixels,
+                               device_data->vbuf[idx].data,
+                               device_data->surface->w,
+                               device_data->surface->h);
+     }
+
+-    if (sceVideoOutSubmitFlip(device_data->handle, idx, 1, frame_id)) {
++    if (sceVideoOutSubmitFlip(
++            device_data->handle, idx, 1, PS5_frame_id)) {
+         return SDL_SetError("sceVideoOutSubmitFlip: %s", strerror(errno));
+     }
+-
+-    if (sceKernelWaitEqueue(device_data->evt_queue, &evt, 1, &junk, 0)) {
+-        return SDL_SetError("sceKernelWaitEqueue: %s", strerror(errno));
+-    }
+-    frame_id++;
++    PS5_frame_id++;
+
+     return 0;
+ }
+@@ -165,7 +306,8 @@ static void PS5_GetDisplayModes(_THIS, SDL_VideoDisplay * display)
+     mode.refresh_rate = 60;
+
+     SDL_AddDisplayMode(display, &display->current_mode);
+-    //SDL_AddDisplayMode(display, &mode);
++    if (display->current_mode.w != mode.w || display->current_mode.h != mode.h)
++        SDL_AddDisplayMode(display, &mode);
+ }
+
+ static int PS5_SetDisplayMode(_THIS, SDL_VideoDisplay * display,
+@@ -173,6 +315,24 @@ static int PS5_SetDisplayMode(_THIS, SDL_VideoDisplay * display,
+ {
+     PS5_DeviceData *device_data = (PS5_DeviceData *)_this->driverdata;
+     PS5_VideoAttr vattr = {0};
++    SDL_Surface *replacement;
++    size_t frame_bytes;
++
++    if (mode->w <= 0 || mode->h <= 0)
++        return SDL_SetError("Invalid PS5 display mode %dx%d", mode->w, mode->h);
++
++    frame_bytes = (size_t)mode->w * (size_t)mode->h * sizeof(uint32_t);
++    if (frame_bytes > device_data->memsize / 2)
++        return SDL_SetError("PS5 display mode %dx%d exceeds framebuffer memory",
++                            mode->w, mode->h);
++
++    replacement = SDL_CreateRGBSurfaceWithFormat(
++        0, mode->w, mode->h, 32, SDL_PIXELFORMAT_ABGR8888);
++    if (!replacement)
++        return -1;
++
++    SDL_memset(device_data->vbuf[0].data, 0, frame_bytes);
++    SDL_memset(device_data->vbuf[1].data, 0, frame_bytes);
+
+     if(device_data->evt_queue) {
+         sceVideoOutDeleteFlipEvent(device_data->evt_queue, device_data->handle);
+@@ -185,12 +345,15 @@ static int PS5_SetDisplayMode(_THIS, SDL_VideoDisplay * display,
+     device_data->handle = sceVideoOutOpen(0xff, 0, 0, NULL);
+
+     if (sceKernelCreateEqueue(&device_data->evt_queue, "flip queue")) {
++        SDL_FreeSurface(replacement);
+         return SDL_SetError("sceKernelCreateEqueue: %s", strerror(errno));
+     }
+     if (sceVideoOutAddFlipEvent(device_data->evt_queue, device_data->handle, 0)) {
++        SDL_FreeSurface(replacement);
+         return SDL_SetError("sceVideoOutAddFlipEvent: %s", strerror(errno));
+     }
+     if (sceVideoOutSetFlipRate(device_data->handle, 0)) {
++        SDL_FreeSurface(replacement);
+         return SDL_SetError("sceVideoOutSetFlipRate: %s", strerror(errno));
+     }
+
+@@ -199,9 +362,16 @@ static int PS5_SetDisplayMode(_THIS, SDL_VideoDisplay * display,
+
+     if (sceVideoOutRegisterBuffers2(device_data->handle, 0, 0,
+                                     device_data->vbuf, 2, &vattr, 0, NULL)) {
++        SDL_FreeSurface(replacement);
+         return SDL_SetError("sceVideoOutRegisterBuffers2: %s", strerror(errno));
+     }
+
++    if (device_data->surface)
++        SDL_FreeSurface(device_data->surface);
++    device_data->surface = replacement;
++    PS5_frame_id = 0;
++    display->current_mode = *mode;
++
+     return 0;
+ }
+
+@@ -221,6 +391,7 @@ static int PS5_VideoInit(_THIS)
+
+     memset(device_data->vbuf, 0, sizeof(device_data->vbuf));
+     memset(&vattr, 0, sizeof(vattr));
++    PS5_frame_id = 0;
+
+     sceSystemServiceHideSplashScreen();
+     device_data->handle = sceVideoOutOpen(0xff, 0, 0, NULL);
+@@ -268,6 +439,8 @@ static int PS5_VideoInit(_THIS)
+     display.current_mode = mode;
+
+     SDL_AddVideoDisplay(&display, SDL_FALSE);
++    if (PS5_StartTileWorkers() != 0)
++        return SDL_SetError("Unable to create persistent PS5 tile workers");
+
+     return 0;
+ }
+@@ -276,6 +449,13 @@ static void PS5_VideoQuit(_THIS)
+ {
+     PS5_DeviceData *device_data = (PS5_DeviceData *)_this->driverdata;
+
++    PS5_StopTileWorkers();
++
++    if (device_data->surface) {
++        SDL_FreeSurface(device_data->surface);
++        device_data->surface = NULL;
++    }
++
+     if (device_data->handle != 0) {
+         sceVideoOutClose(device_data->handle);
+         device_data->handle = 0;

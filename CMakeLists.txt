@@ -10,12 +10,14 @@ add_library(bfplayer_core STATIC
     src/core/bulk_import.cpp
     src/core/diagnostics.cpp
     src/core/dlna_protocol.cpp
+    src/core/hdr_tonemap.cpp
     src/core/library_scanner.cpp
     src/core/library_view.cpp
     src/core/list_navigation.cpp
     src/core/media_sources.cpp
     src/core/player_settings.cpp
     src/core/playlist.cpp
+    src/core/remote_control.cpp
     src/core/safe_read_file.cpp
     src/core/source_uri.cpp
     src/core/subtitle_browser.cpp
@@ -54,6 +56,15 @@ if(BUILD_TESTING)
     add_executable(video_layout_tests tests/video_layout_tests.cpp)
     target_link_libraries(video_layout_tests PRIVATE bfplayer_core)
     add_test(NAME video_layout_tests COMMAND video_layout_tests)
+
+    add_executable(hdr_tonemap_tests tests/hdr_tonemap_tests.cpp)
+    target_link_libraries(hdr_tonemap_tests PRIVATE bfplayer_core)
+    if(MSVC)
+        target_compile_options(hdr_tonemap_tests PRIVATE /UNDEBUG)
+    else()
+        target_compile_options(hdr_tonemap_tests PRIVATE -UNDEBUG)
+    endif()
+    add_test(NAME hdr_tonemap_tests COMMAND hdr_tonemap_tests)
 
     add_executable(library_view_tests tests/library_view_tests.cpp)
     target_link_libraries(library_view_tests PRIVATE bfplayer_core)
@@ -104,6 +115,32 @@ if(BUILD_TESTING)
     add_test(
         NAME kitchensink_audio_clock_tests
         COMMAND kitchensink_audio_clock_tests
+    )
+
+    add_executable(
+        kitchensink_audio_consume_tests
+        tests/kitchensink_audio_consume_tests.cpp
+    )
+    target_include_directories(
+        kitchensink_audio_consume_tests
+        PRIVATE include
+    )
+    add_test(
+        NAME kitchensink_audio_consume_tests
+        COMMAND kitchensink_audio_consume_tests
+    )
+
+    add_executable(
+        kitchensink_timer_tests
+        tests/kitchensink_timer_tests.cpp
+    )
+    target_include_directories(
+        kitchensink_timer_tests
+        PRIVATE vendor/SDL_kitchensink/include
+    )
+    add_test(
+        NAME kitchensink_timer_tests
+        COMMAND kitchensink_timer_tests
     )
 
     add_executable(

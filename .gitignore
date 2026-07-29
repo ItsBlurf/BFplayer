@@ -1,6 +1,7 @@
 /build/
 /diagnostics/
 /dist/
+/logs/
 /assets/icon0-alpha8-legacy.png
 *.log
 *.tmp

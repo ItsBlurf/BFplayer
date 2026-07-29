@@ -456,6 +456,10 @@ Kit_GetPlayerAudioData(const Kit_Player *player, size_t backend_buffer_size, uns
  */
 KIT_API void Kit_GetPlayerInfo(const Kit_Player *player, Kit_PlayerInfo *info);
 
+KIT_API void Kit_GetPlayerVideoToneMapInfo(
+    const Kit_Player *player,
+    Kit_VideoToneMapInfo *info);
+
 /**
  * @brief Returns the current state of the player
  *

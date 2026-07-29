@@ -11,5 +11,6 @@ KIT_LOCAL Kit_Decoder *Kit_CreateAudioDecoder(
 );
 KIT_LOCAL int Kit_GetAudioDecoderData(Kit_Decoder *dec, size_t backend_buffer_size, unsigned char *buf, size_t len);
 KIT_LOCAL int Kit_GetAudioDecoderOutputFormat(const Kit_Decoder *dec, Kit_AudioOutputFormat *output);
+KIT_LOCAL void Kit_ClearAudioDecoderCurrent(Kit_Decoder *dec);
 
 #endif // KITAUDIO_H

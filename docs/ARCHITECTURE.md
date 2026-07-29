@@ -29,9 +29,11 @@ standalone payload -> loopback :9040 <- BFplayer tile
                        VideoOut / AudioOut
 ```
 
-There is no daemon/child-player boundary. Playback and the media library share
-one UI process, so exiting a movie returns to the library without killing or
-restarting unrelated PS5 processes.
+The only process boundary is the resident standalone launcher handing off to
+the BigApp player. Playback and the media library share that one UI process,
+so exiting a movie returns to the library without killing or restarting
+unrelated PS5 processes. The optional websrv package starts the same player ELF
+through websrv's existing host instead of BFplayer's resident launcher.
 
 ## Dependencies
 
@@ -90,6 +92,21 @@ empty queue to preserve forward progress. These limits do not eliminate
 codec-internal reference frames, so the diagnostics also record peak resident
 memory, queue occupancy, and queued-audio milliseconds for hardware
 measurement.
+
+The display backend uses 1920x1080 for media up to 1080p and switches to a
+real 3840x2160 renderer and framebuffer for larger sources. Its software
+presentation path divides each frame into tiles handled by a persistent worker
+pool, copies pixels in row-major groups, and pipelines framebuffer flips to
+reduce the time spent presenting 4K frames. The UI keeps a 1920x1080 logical
+canvas in both modes.
+
+The public PS5 SDL output path currently exposes only 8-bit ABGR8888 and no
+safe HDR metadata or transfer signalling. BFplayer therefore detects PQ and
+HLG frames, reads MaxCLL or mastering-display peak metadata when present, and
+tone-maps BT.2020 HDR to limited-range BT.709 SDR before presentation. The
+conversion uses a compact 17 by 17 chroma and 256 luma lookup table, updates
+YUV420 frames in place, and shares work across the decoder thread and seven
+persistent workers. It does not allocate another full decoded frame.
 
 The video renderer separates decoded pixel dimensions from the stream display
 aspect ratio. Pure, host-tested layout math independently applies the complete

@@ -1,10 +1,19 @@
 #pragma once
 
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <string>
 
 namespace bfplayer {
+
+struct SafeReadFileStats {
+    std::uint64_t bytes_read = 0;
+    std::uint64_t read_calls = 0;
+    std::uint64_t read_time_us = 0;
+    std::uint64_t seek_calls = 0;
+    std::uint64_t seek_time_us = 0;
+};
 
 // Read-only regular-file handle used by FFmpeg callbacks. Opening rejects a
 // symlink/reparse-point final component and verifies the opened object before it
@@ -26,6 +35,7 @@ public:
     [[nodiscard]] int last_error_code() const noexcept {
         return last_error_code_;
     }
+    [[nodiscard]] SafeReadFileStats stats() const noexcept;
 
     // Returns bytes read, zero at EOF, or a negative errno-style value.
     int read(std::uint8_t* buffer, int length) noexcept;
@@ -44,6 +54,11 @@ private:
 #endif
     std::uint64_t size_ = 0;
     int last_error_code_ = 0;
+    std::atomic<std::uint64_t> bytes_read_{0};
+    std::atomic<std::uint64_t> read_calls_{0};
+    std::atomic<std::uint64_t> read_time_us_{0};
+    std::atomic<std::uint64_t> seek_calls_{0};
+    std::atomic<std::uint64_t> seek_time_us_{0};
 };
 
 } // namespace bfplayer

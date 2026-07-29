@@ -1,6 +1,7 @@
 #include "bfplayer/safe_read_file.hpp"
 
 #include <cerrno>
+#include <chrono>
 #include <cstdio>
 #include <limits>
 #include <string>
@@ -24,6 +25,15 @@ namespace {
 
 constexpr int negative_error(int value) noexcept {
     return value > 0 ? -value : -EIO;
+}
+
+std::uint64_t elapsed_microseconds(
+    const std::chrono::steady_clock::time_point& started) noexcept {
+    const auto elapsed = std::chrono::duration_cast<std::chrono::microseconds>(
+        std::chrono::steady_clock::now() - started);
+    return elapsed.count() > 0
+        ? static_cast<std::uint64_t>(elapsed.count())
+        : 0;
 }
 
 #if defined(_WIN32)
@@ -70,6 +80,11 @@ SafeReadFile::~SafeReadFile() {
 
 bool SafeReadFile::open(const std::string& path, std::string& error) {
     close();
+    bytes_read_.store(0, std::memory_order_relaxed);
+    read_calls_.store(0, std::memory_order_relaxed);
+    read_time_us_.store(0, std::memory_order_relaxed);
+    seek_calls_.store(0, std::memory_order_relaxed);
+    seek_time_us_.store(0, std::memory_order_relaxed);
     last_error_code_ = 0;
     error.clear();
     if (path.empty() || path.find('\0') != std::string::npos) {
@@ -188,21 +203,43 @@ bool SafeReadFile::is_open() const noexcept {
 #endif
 }
 
+SafeReadFileStats SafeReadFile::stats() const noexcept {
+    return {
+        bytes_read_.load(std::memory_order_relaxed),
+        read_calls_.load(std::memory_order_relaxed),
+        read_time_us_.load(std::memory_order_relaxed),
+        seek_calls_.load(std::memory_order_relaxed),
+        seek_time_us_.load(std::memory_order_relaxed),
+    };
+}
+
 void SafeReadFile::retire() noexcept {
     close();
 }
 
 int SafeReadFile::read(std::uint8_t* buffer, int length) noexcept {
+    const auto started = std::chrono::steady_clock::now();
+    read_calls_.fetch_add(1, std::memory_order_relaxed);
+    const auto finish = [this, &started](int result) noexcept {
+        read_time_us_.fetch_add(
+            elapsed_microseconds(started), std::memory_order_relaxed);
+        if (result > 0) {
+            bytes_read_.fetch_add(
+                static_cast<std::uint64_t>(result),
+                std::memory_order_relaxed);
+        }
+        return result;
+    };
     if (!is_open()) {
         last_error_code_ = EBADF;
-        return -EBADF;
+        return finish(-EBADF);
     }
     if (!buffer || length < 0) {
         last_error_code_ = EINVAL;
-        return -EINVAL;
+        return finish(-EINVAL);
     }
     if (length == 0) {
-        return 0;
+        return finish(0);
     }
 #if defined(_WIN32)
     DWORD count = 0;
@@ -214,15 +251,15 @@ int SafeReadFile::read(std::uint8_t* buffer, int length) noexcept {
             nullptr)) {
         retire();
         last_error_code_ = EIO;
-        return -EIO;
+        return finish(-EIO);
     }
-    return static_cast<int>(count);
+    return finish(static_cast<int>(count));
 #else
     for (;;) {
         const ssize_t count = ::read(
             descriptor_, buffer, static_cast<std::size_t>(length));
         if (count >= 0) {
-            return static_cast<int>(count);
+            return finish(static_cast<int>(count));
         }
         if (errno == EINTR) {
             continue;
@@ -230,19 +267,26 @@ int SafeReadFile::read(std::uint8_t* buffer, int length) noexcept {
         const int value = errno;
         retire();
         last_error_code_ = value;
-        return negative_error(value);
+        return finish(negative_error(value));
     }
 #endif
 }
 
 std::int64_t SafeReadFile::seek(std::int64_t offset, int whence) noexcept {
+    const auto started = std::chrono::steady_clock::now();
+    seek_calls_.fetch_add(1, std::memory_order_relaxed);
+    const auto finish = [this, &started](std::int64_t result) noexcept {
+        seek_time_us_.fetch_add(
+            elapsed_microseconds(started), std::memory_order_relaxed);
+        return result;
+    };
     if (!is_open()) {
         last_error_code_ = EBADF;
-        return -EBADF;
+        return finish(-EBADF);
     }
     if (whence != SEEK_SET && whence != SEEK_CUR && whence != SEEK_END) {
         last_error_code_ = EINVAL;
-        return -EINVAL;
+        return finish(-EINVAL);
     }
 #if defined(_WIN32)
     DWORD method = FILE_BEGIN;
@@ -259,18 +303,18 @@ std::int64_t SafeReadFile::seek(std::int64_t offset, int whence) noexcept {
         result.QuadPart < 0) {
         retire();
         last_error_code_ = EIO;
-        return -EIO;
+        return finish(-EIO);
     }
-    return result.QuadPart;
+    return finish(result.QuadPart);
 #else
     const off_t result = lseek(descriptor_, static_cast<off_t>(offset), whence);
     if (result < 0) {
         const int value = errno;
         retire();
         last_error_code_ = value;
-        return negative_error(value);
+        return finish(negative_error(value));
     }
-    return static_cast<std::int64_t>(result);
+    return finish(static_cast<std::int64_t>(result));
 #endif
 }
 

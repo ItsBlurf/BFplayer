@@ -1,11 +1,13 @@
 #include "kitchensink2/internal/kittimer.h"
+#include "kitchensink2/internal/kittimerstate.h"
 #include "kitchensink2/internal/utils/kithelpers.h"
+#include <SDL_atomic.h>
 #include <stdlib.h>
 
 typedef struct Kit_TimerValue {
     int count;
-    bool initialized;
-    double value;
+    SDL_SpinLock lock;
+    Kit_TimerState state;
 } Kit_TimerValue;
 
 struct Kit_Timer {
@@ -25,8 +27,8 @@ Kit_Timer *Kit_CreateTimer() {
     }
 
     value->count = 1;
-    value->value = 0;
-    value->initialized = false;
+    value->lock = 0;
+    Kit_TimerStateReset(&value->state);
     timer->ref = value;
     timer->writeable = true;
     return timer;
@@ -49,45 +51,82 @@ Kit_Timer *Kit_CreateSecondaryTimer(const Kit_Timer *src, bool writeable) {
 }
 
 void Kit_InitTimerBase(Kit_Timer *timer) {
-    if(timer->writeable && !timer->ref->initialized) {
-        timer->ref->value = Kit_GetSystemTime();
-        timer->ref->initialized = true;
+    if(timer->writeable) {
+        SDL_AtomicLock(&timer->ref->lock);
+        Kit_TimerStateInit(&timer->ref->state, Kit_GetSystemTime());
+        SDL_AtomicUnlock(&timer->ref->lock);
     }
 }
 
 bool Kit_IsTimerInitialized(const Kit_Timer *timer) {
-    return timer->ref->initialized;
+    SDL_AtomicLock(&timer->ref->lock);
+    const bool initialized = timer->ref->state.initialized;
+    SDL_AtomicUnlock(&timer->ref->lock);
+    return initialized;
 }
 
 void Kit_ResetTimerBase(Kit_Timer *timer) {
     if(timer->writeable) {
-        timer->ref->initialized = false;
+        SDL_AtomicLock(&timer->ref->lock);
+        Kit_TimerStateReset(&timer->ref->state);
+        SDL_AtomicUnlock(&timer->ref->lock);
     }
 }
 
 void Kit_SetTimerBase(Kit_Timer *timer) {
     if(timer->writeable) {
-        timer->ref->value = Kit_GetSystemTime();
-        timer->ref->initialized = true;
+        SDL_AtomicLock(&timer->ref->lock);
+        Kit_TimerStateSet(&timer->ref->state, Kit_GetSystemTime());
+        SDL_AtomicUnlock(&timer->ref->lock);
     }
 }
 
 void Kit_AdjustTimerBase(Kit_Timer *timer, double adjust) {
     if(timer->writeable) {
-        timer->ref->value = Kit_GetSystemTime() - adjust;
-        timer->ref->initialized = true;
+        SDL_AtomicLock(&timer->ref->lock);
+        Kit_TimerStateAdjust(
+            &timer->ref->state,
+            Kit_GetSystemTime(),
+            adjust);
+        SDL_AtomicUnlock(&timer->ref->lock);
     }
 }
 
 void Kit_AddTimerBase(Kit_Timer *timer, double add) {
     if(timer->writeable) {
-        timer->ref->value += add;
-        timer->ref->initialized = true;
+        SDL_AtomicLock(&timer->ref->lock);
+        Kit_TimerStateAdd(&timer->ref->state, add);
+        SDL_AtomicUnlock(&timer->ref->lock);
+    }
+}
+
+void Kit_PauseTimer(Kit_Timer *timer) {
+    if(timer->writeable) {
+        SDL_AtomicLock(&timer->ref->lock);
+        Kit_TimerStatePause(
+            &timer->ref->state,
+            Kit_GetSystemTime());
+        SDL_AtomicUnlock(&timer->ref->lock);
+    }
+}
+
+void Kit_ResumeTimer(Kit_Timer *timer) {
+    if(timer->writeable) {
+        SDL_AtomicLock(&timer->ref->lock);
+        Kit_TimerStateResume(
+            &timer->ref->state,
+            Kit_GetSystemTime());
+        SDL_AtomicUnlock(&timer->ref->lock);
     }
 }
 
 double Kit_GetTimerElapsed(const Kit_Timer *timer) {
-    return Kit_GetSystemTime() - timer->ref->value;
+    SDL_AtomicLock(&timer->ref->lock);
+    const double elapsed = Kit_TimerStateElapsed(
+        &timer->ref->state,
+        Kit_GetSystemTime());
+    SDL_AtomicUnlock(&timer->ref->lock);
+    return elapsed;
 }
 
 bool Kit_IsTimerPrimary(const Kit_Timer *timer) {

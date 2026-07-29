@@ -29,7 +29,13 @@ The log includes:
   inventory, decoder/audio/video setup, and playback heartbeats every five
   seconds;
 - local/network buffer policy, decoded and compressed queue occupancy, SDL
-  audio queue milliseconds, delivered video-frame rate, and process peak RSS;
+  audio queue milliseconds, delivered and missed video-frame rates, and
+  process peak RSS;
+- source and output dimensions, true-4K state, HDR transfer and color metadata,
+  tone-map activity, worker count, per-frame tone-map cost, and frame count;
+- process user/system CPU time, effective core use, voluntary/involuntary
+  context switches, media bytes and calls, read/seek time, and render-loop,
+  audio-pull, video-pull, render, and present averages, maxima, and percentiles;
 - DLNA discovery, device-description, directory-browse, cancellation,
   truncation, and selected-resource events without signed URL secrets;
 - pause, seek, chapter, volume, mute, aspect, subtitle-delay, subtitle-track,
@@ -40,6 +46,21 @@ The log includes:
 
 The logger deliberately does not record credentials. Network URLs are redacted
 before being written.
+
+## Hardware automation
+
+While the player is running, alpha.42 starts a bounded authenticated control
+endpoint on TCP port 9042. It supports status, open, play, pause, seek, stop,
+and exit commands for the repository's PS5 playback harness. A new random
+32-byte token is written to `/data/BFplayer/automation.json` with mode 0600 for
+each process and the file is removed on clean shutdown. Requests are limited
+to 16 KiB, media paths to 4096 bytes, and the command queue to 32 entries.
+
+`tools/hardware-playback-test.mjs` uses this endpoint to run the 4K WebM and
+1080p regression sequence without controller input. It records every status
+sample in `timeline.jsonl`, writes assertion results to `summary.json`, and
+collects the player logs. The endpoint is intended only for testing on a
+trusted local network and must not be forwarded to the internet.
 
 ## Collecting logs
 

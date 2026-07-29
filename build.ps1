@@ -19,6 +19,22 @@ if (-not $pacbrewHome) {
     $pacbrewHome = Join-Path $toolchains 'pacbrew-v0.37\homebrew'
 }
 $pacbrewHome = (Resolve-Path -LiteralPath $pacbrewHome).Path
+$sdlVideoOverrideSource = Join-Path $projectRoot (
+    'vendor\SDL_ps5_backend\lib\SDL_ps5video.c.o')
+$sdlVideoOverrideHashFile = "$sdlVideoOverrideSource.sha256"
+if (-not (Test-Path -LiteralPath $sdlVideoOverrideSource) -or
+    -not (Test-Path -LiteralPath $sdlVideoOverrideHashFile)) {
+    throw 'Missing PS5 SDL video override. Run tools\rebuild-sdl-ps5-video.ps1.'
+}
+$expectedSdlVideoOverrideHash = ((
+    Get-Content -Raw -LiteralPath $sdlVideoOverrideHashFile
+).Trim() -split '\s+')[0].ToLowerInvariant()
+$actualSdlVideoOverrideHash = (
+    Get-FileHash -Algorithm SHA256 -LiteralPath $sdlVideoOverrideSource
+).Hash.ToLowerInvariant()
+if ($actualSdlVideoOverrideHash -ne $expectedSdlVideoOverrideHash) {
+    throw 'PS5 SDL video override hash mismatch. Rebuild it before linking.'
+}
 
 $required = @(
     'include\SDL2\SDL.h',
@@ -111,12 +127,14 @@ try {
         'src\core\bulk_import.cpp',
         'src\core\diagnostics.cpp',
         'src\core\dlna_protocol.cpp',
+        'src\core\hdr_tonemap.cpp',
         'src\core\library_scanner.cpp',
         'src\core\library_view.cpp',
         'src\core\list_navigation.cpp',
         'src\core\media_sources.cpp',
         'src\core\player_settings.cpp',
         'src\core\playlist.cpp',
+        'src\core\remote_control.cpp',
         'src\core\safe_read_file.cpp',
         'src\core\source_uri.cpp',
         'src\core\subtitle_browser.cpp',
@@ -197,6 +215,10 @@ try {
         }
         $objects += $object
     }
+    $sdlVideoOverrideObject = 'build\ps5\SDL_ps5video.override.o'
+    Copy-Item -LiteralPath $sdlVideoOverrideSource -Destination (
+        Join-Path $projectRoot $sdlVideoOverrideObject) -Force
+    $objects += $sdlVideoOverrideObject
 
     $unstrippedElf = Join-Path $buildDir 'bfplayer.unstripped.elf'
     $linkArgs = @(

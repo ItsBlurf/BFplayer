@@ -92,6 +92,21 @@ typedef struct Kit_VideoOutputFormat {
 } Kit_VideoOutputFormat;
 
 /**
+ * @brief Runtime state for BFplayer's software HDR-to-SDR path.
+ */
+typedef struct Kit_VideoToneMapInfo {
+    int active;
+    int transfer;
+    int input_full_range;
+    int input_bt2020;
+    double source_peak_nits;
+    double target_peak_nits;
+    unsigned long long frames;
+    unsigned long long processing_us;
+    unsigned int workers;
+} Kit_VideoToneMapInfo;
+
+/**
  * @brief Contains information about the audio data format coming out from the player
  */
 typedef struct Kit_AudioOutputFormat {

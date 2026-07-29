@@ -1,9 +1,13 @@
 #include <assert.h>
+#include <math.h>
 
 #include <libavformat/avformat.h>
 #include <libavutil/imgutils.h>
+#include <libavutil/mastering_display_metadata.h>
+#include <libavutil/time.h>
 #include <libswscale/swscale.h>
 
+#include "bfplayer/hdr_yuv_tonemap.h"
 #include "kitchensink2/internal/kitdecoder.h"
 #include "kitchensink2/internal/kitlibstate.h"
 #include "kitchensink2/internal/utils/kithelpers.h"
@@ -23,7 +27,207 @@ typedef struct Kit_VideoDecoder {
     Kit_PacketBuffer *buffer;     ///< Packet ringbuffer for decoded video packets
     Kit_VideoOutputFormat output; ///< Output video format description
     AVFrame *current;             ///< video frame we are currently reading from
+    BfplayerHdrYuvLut *hdr_lut;   ///< Compact in-place HDR-to-SDR lookup table
+    BfplayerHdrWorkerPool *hdr_workers;
+    int sws_colorspace;
+    int sws_full_range;
+    unsigned long long hdr_frames;
+    unsigned long long hdr_processing_us;
+    unsigned int hdr_source_peak_millinits;
+    unsigned int hdr_target_peak_millinits;
+    int hdr_transfer;
+    int hdr_input_full_range;
+    int hdr_input_bt2020;
+    int hdr_active;
 } Kit_VideoDecoder;
+
+static int Kit_FrameColorTransfer(
+    const Kit_Decoder *decoder,
+    const AVFrame *frame
+) {
+    if(frame->color_trc != AVCOL_TRC_UNSPECIFIED)
+        return frame->color_trc;
+    return decoder->stream->codecpar->color_trc;
+}
+
+static int Kit_FrameColorSpace(
+    const Kit_Decoder *decoder,
+    const AVFrame *frame
+) {
+    if(frame->colorspace != AVCOL_SPC_UNSPECIFIED)
+        return frame->colorspace;
+    return decoder->stream->codecpar->color_space;
+}
+
+static int Kit_FrameColorPrimaries(
+    const Kit_Decoder *decoder,
+    const AVFrame *frame
+) {
+    if(frame->color_primaries != AVCOL_PRI_UNSPECIFIED)
+        return frame->color_primaries;
+    return decoder->stream->codecpar->color_primaries;
+}
+
+static int Kit_FrameFullRange(
+    const Kit_Decoder *decoder,
+    const AVFrame *frame
+) {
+    int range = frame->color_range;
+    if(range == AVCOL_RANGE_UNSPECIFIED)
+        range = decoder->stream->codecpar->color_range;
+    return range == AVCOL_RANGE_JPEG;
+}
+
+static double Kit_FrameHdrPeakNits(const AVFrame *frame) {
+    double peak = 1000.0;
+    const AVFrameSideData *content_light = av_frame_get_side_data(
+        frame,
+        AV_FRAME_DATA_CONTENT_LIGHT_LEVEL);
+    if(content_light != NULL &&
+       content_light->size >= sizeof(AVContentLightMetadata)) {
+        const AVContentLightMetadata *metadata =
+            (const AVContentLightMetadata *)content_light->data;
+        if(metadata->MaxCLL >= 100 && metadata->MaxCLL <= 10000)
+            peak = metadata->MaxCLL;
+    } else {
+        const AVFrameSideData *mastering = av_frame_get_side_data(
+            frame,
+            AV_FRAME_DATA_MASTERING_DISPLAY_METADATA);
+        if(mastering != NULL &&
+           mastering->size >= sizeof(AVMasteringDisplayMetadata)) {
+            const AVMasteringDisplayMetadata *metadata =
+                (const AVMasteringDisplayMetadata *)mastering->data;
+            if(metadata->has_luminance) {
+                const double mastering_peak =
+                    av_q2d(metadata->max_luminance);
+                if(mastering_peak >= 100.0 &&
+                   mastering_peak <= 10000.0)
+                    peak = mastering_peak;
+            }
+        }
+    }
+    return peak;
+}
+
+static int Kit_ConfigureHdrLut(
+    const Kit_Decoder *decoder,
+    Kit_VideoDecoder *video_decoder,
+    const AVFrame *frame
+) {
+    const int transfer = Kit_FrameColorTransfer(decoder, frame);
+    if(transfer != AVCOL_TRC_SMPTE2084 &&
+       transfer != AVCOL_TRC_ARIB_STD_B67)
+        return 0;
+
+    const int colorspace = Kit_FrameColorSpace(decoder, frame);
+    const int primaries = Kit_FrameColorPrimaries(decoder, frame);
+    BfplayerHdrYuvConfig config;
+    config.transfer =
+        transfer == AVCOL_TRC_ARIB_STD_B67
+        ? BFPLAYER_HDR_TRANSFER_HLG
+        : BFPLAYER_HDR_TRANSFER_PQ;
+    config.input_full_range = Kit_FrameFullRange(decoder, frame);
+    config.input_bt2020 =
+        colorspace == AVCOL_SPC_BT2020_NCL ||
+        colorspace == AVCOL_SPC_BT2020_CL ||
+        primaries == AVCOL_PRI_BT2020 ||
+        (colorspace == AVCOL_SPC_UNSPECIFIED &&
+         primaries == AVCOL_PRI_UNSPECIFIED);
+    config.source_peak_nits = Kit_FrameHdrPeakNits(frame);
+    config.target_peak_nits = 100.0;
+
+    if(video_decoder->hdr_lut != NULL) {
+        const BfplayerHdrYuvConfig *current =
+            &video_decoder->hdr_lut->config;
+        if(current->transfer == config.transfer &&
+           current->input_full_range == config.input_full_range &&
+           current->input_bt2020 == config.input_bt2020 &&
+           fabs(current->source_peak_nits - config.source_peak_nits) < 0.5)
+            return 1;
+    } else {
+        video_decoder->hdr_lut = malloc(sizeof(*video_decoder->hdr_lut));
+        if(video_decoder->hdr_lut == NULL)
+            return 0;
+    }
+
+    if(bfplayer_build_hdr_yuv420_lut(
+           &config,
+           video_decoder->hdr_lut) != 0) {
+        free(video_decoder->hdr_lut);
+        video_decoder->hdr_lut = NULL;
+        return 0;
+    }
+    if(video_decoder->hdr_workers == NULL)
+        video_decoder->hdr_workers =
+            bfplayer_create_hdr_worker_pool(7);
+    __atomic_store_n(
+        &video_decoder->hdr_transfer,
+        config.transfer,
+        __ATOMIC_RELAXED);
+    __atomic_store_n(
+        &video_decoder->hdr_input_full_range,
+        config.input_full_range,
+        __ATOMIC_RELAXED);
+    __atomic_store_n(
+        &video_decoder->hdr_input_bt2020,
+        config.input_bt2020,
+        __ATOMIC_RELAXED);
+    __atomic_store_n(
+        &video_decoder->hdr_source_peak_millinits,
+        (unsigned int)llround(config.source_peak_nits * 1000.0),
+        __ATOMIC_RELAXED);
+    __atomic_store_n(
+        &video_decoder->hdr_target_peak_millinits,
+        (unsigned int)llround(config.target_peak_nits * 1000.0),
+        __ATOMIC_RELAXED);
+    __atomic_store_n(
+        &video_decoder->hdr_active,
+        1,
+        __ATOMIC_RELEASE);
+    return 1;
+}
+
+static void Kit_ApplyHdrToneMap(
+    const Kit_Decoder *decoder,
+    Kit_VideoDecoder *video_decoder
+) {
+    AVFrame *frame = video_decoder->out_frame;
+    if(frame->format != AV_PIX_FMT_YUV420P ||
+       !Kit_ConfigureHdrLut(
+           decoder,
+           video_decoder,
+           video_decoder->in_frame))
+        return;
+
+    const int64_t started = av_gettime_relative();
+    if(bfplayer_apply_hdr_yuv420_lut_parallel(
+           video_decoder->hdr_workers,
+           video_decoder->hdr_lut,
+           frame->data[0],
+           frame->linesize[0],
+           frame->data[1],
+           frame->linesize[1],
+           frame->data[2],
+           frame->linesize[2],
+           frame->width,
+           frame->height) != 0)
+        return;
+    const int64_t elapsed = av_gettime_relative() - started;
+    __atomic_add_fetch(
+        &video_decoder->hdr_frames,
+        1ULL,
+        __ATOMIC_RELAXED);
+    if(elapsed > 0) {
+        __atomic_add_fetch(
+            &video_decoder->hdr_processing_us,
+            (unsigned long long)elapsed,
+            __ATOMIC_RELAXED);
+    }
+    frame->color_range = AVCOL_RANGE_MPEG;
+    frame->colorspace = AVCOL_SPC_BT709;
+    frame->color_trc = AVCOL_TRC_BT709;
+    frame->color_primaries = AVCOL_PRI_BT709;
+}
 
 static struct SwsContext *Kit_GetSwsContext(
     struct SwsContext *old_context,
@@ -83,6 +287,7 @@ static void dec_read_video(const Kit_Decoder *decoder) {
 
     // Convert frame format, if needed. Note that converter context MAY need to be changed here,
     // as video frame size can, in theory, change whenever.
+    struct SwsContext *old_sws = video_decoder->sws;
     video_decoder->sws = Kit_GetSwsContext(
         video_decoder->sws,
         input_w,
@@ -94,8 +299,44 @@ static void dec_read_video(const Kit_Decoder *decoder) {
     if(video_decoder->sws == NULL) {
         return;
     }
-    sws_scale_frame(video_decoder->sws, video_decoder->out_frame, video_decoder->in_frame);
-    av_frame_copy_props(video_decoder->out_frame, video_decoder->in_frame);
+    const int colorspace = Kit_FrameColorSpace(
+        decoder,
+        video_decoder->in_frame);
+    const int full_range = Kit_FrameFullRange(
+        decoder,
+        video_decoder->in_frame);
+    if(old_sws != video_decoder->sws ||
+       colorspace != video_decoder->sws_colorspace ||
+       full_range != video_decoder->sws_full_range) {
+        const int *coefficients = sws_getCoefficients(
+            colorspace == AVCOL_SPC_UNSPECIFIED
+            ? AVCOL_SPC_BT709
+            : colorspace);
+        if(coefficients != NULL) {
+            (void)sws_setColorspaceDetails(
+                video_decoder->sws,
+                coefficients,
+                full_range,
+                coefficients,
+                full_range,
+                0,
+                1 << 16,
+                1 << 16);
+        }
+        video_decoder->sws_colorspace = colorspace;
+        video_decoder->sws_full_range = full_range;
+    }
+    if(av_frame_copy_props(
+           video_decoder->out_frame,
+           video_decoder->in_frame) < 0 ||
+       sws_scale_frame(
+           video_decoder->sws,
+           video_decoder->out_frame,
+           video_decoder->in_frame) < 0) {
+        av_frame_unref(video_decoder->out_frame);
+        return;
+    }
+    Kit_ApplyHdrToneMap(decoder, video_decoder);
 
     // Write video packet to packet buffer. This may block!
     // - if write succeeds, no need to av_packet_unref, since Kit_WritePacketBuffer will move the refs.
@@ -164,6 +405,8 @@ static void dec_close_video_cb(Kit_Decoder *ref) {
     av_frame_free(&video_decoder->current);
     av_frame_free(&video_decoder->out_frame);
     sws_freeContext(video_decoder->sws);
+    bfplayer_destroy_hdr_worker_pool(video_decoder->hdr_workers);
+    free(video_decoder->hdr_lut);
     free(video_decoder);
 }
 
@@ -278,6 +521,8 @@ Kit_Decoder *Kit_CreateVideoDecoder(
     video_decoder->sws = sws;
     video_decoder->buffer = buffer;
     video_decoder->output = output;
+    video_decoder->sws_colorspace = AVCOL_SPC_UNSPECIFIED;
+    video_decoder->sws_full_range = -1;
     return decoder;
 
 exit_7:
@@ -297,6 +542,48 @@ exit_1:
     free(video_decoder);
 exit_0:
     return NULL;
+}
+
+void Kit_GetVideoDecoderToneMapInfo(
+    const Kit_Decoder *decoder,
+    Kit_VideoToneMapInfo *info
+) {
+    memset(info, 0, sizeof(*info));
+    if(decoder == NULL || decoder->userdata == NULL)
+        return;
+    const Kit_VideoDecoder *video_decoder = decoder->userdata;
+    info->active = __atomic_load_n(
+        &video_decoder->hdr_active,
+        __ATOMIC_ACQUIRE);
+    if(info->active) {
+        info->transfer = __atomic_load_n(
+            &video_decoder->hdr_transfer,
+            __ATOMIC_RELAXED);
+        info->input_full_range = __atomic_load_n(
+            &video_decoder->hdr_input_full_range,
+            __ATOMIC_RELAXED);
+        info->input_bt2020 = __atomic_load_n(
+            &video_decoder->hdr_input_bt2020,
+            __ATOMIC_RELAXED);
+        info->source_peak_nits =
+            __atomic_load_n(
+                &video_decoder->hdr_source_peak_millinits,
+                __ATOMIC_RELAXED) /
+            1000.0;
+        info->target_peak_nits =
+            __atomic_load_n(
+                &video_decoder->hdr_target_peak_millinits,
+                __ATOMIC_RELAXED) /
+            1000.0;
+    }
+    info->frames = __atomic_load_n(
+        &video_decoder->hdr_frames,
+        __ATOMIC_RELAXED);
+    info->processing_us = __atomic_load_n(
+        &video_decoder->hdr_processing_us,
+        __ATOMIC_RELAXED);
+    info->workers = bfplayer_hdr_worker_count(
+        video_decoder->hdr_workers);
 }
 
 static double Kit_GetCurrentPTS(const Kit_Decoder *decoder) {
