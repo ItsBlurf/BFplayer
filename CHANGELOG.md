@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.1.0-alpha.38 - wider NAS compatibility
+
+- Match each media server's advertised ContentDirectory service version.
+- Select the best valid audio or video resource when a DLNA item provides
+  multiple original, transcoded, thumbnail, or unusable alternatives.
+- Recognize media from protocol MIME metadata when a server reports only a
+  generic item class.
+- Correct IPv6 HTTP Host headers and trim whitespace around server URLs.
+
 ## 0.1.0-alpha.37 - hardened DLNA interoperability
 
 - Preserve absolute DLNA resource schemes so unsupported SMB links are

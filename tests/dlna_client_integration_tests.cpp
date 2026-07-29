@@ -574,6 +574,100 @@ void test_resource_filtering_and_result_cap() {
         "result cap truncates a larger server listing");
 }
 
+void test_versioned_service_and_resource_fallback() {
+    FakeHttpServer server(
+        1,
+        [](std::string_view request,
+           std::size_t,
+           std::uint16_t port) {
+            check(
+                request.find(
+                    "SOAPACTION: "
+                    "\"urn:schemas-upnp-org:service:"
+                    "ContentDirectory:2#Browse\"") !=
+                    std::string_view::npos,
+                "browse uses the server's ContentDirectory version");
+            check(
+                request.find(
+                    "xmlns:u=\"urn:schemas-upnp-org:service:"
+                    "ContentDirectory:2\"") !=
+                    std::string_view::npos,
+                "browse body uses the server's service namespace");
+            const std::string origin =
+                "http://127.0.0.1:" + std::to_string(port);
+            const std::string didl =
+                didl_header() +
+                "<item id=\"fallback\" parentID=\"0\">"
+                "<dc:title>Fallback Video</dc:title>"
+                "<upnp:class>object.item.videoItem</upnp:class>"
+                "<res protocolInfo=\"http-get:*:video/mp4:*\">"
+                "http://user:password@nas/rejected.mp4</res>"
+                "<res protocolInfo=\"smb-get:*:video/mp4:*\">"
+                "smb://nas/share/rejected.mp4</res>"
+                "<res protocolInfo=\"HTTP-GET:*:video/mp4:*\" "
+                "duration=\"0:01:02.500\"> \n" +
+                origin + "/media/fallback.mp4 \n</res>"
+                "</item>"
+                "<item id=\"typed\" parentID=\"0\">"
+                "<dc:title>Protocol-typed Audio</dc:title>"
+                "<upnp:class>object.item</upnp:class>"
+                "<res protocolInfo=\"http-get:*:audio/flac:*\">"
+                "/media/song.flac</res>"
+                "</item>"
+                "<item id=\"matching\" parentID=\"0\">"
+                "<dc:title>Matching Video</dc:title>"
+                "<upnp:class>object.item.videoItem</upnp:class>"
+                "<res protocolInfo=\"http-get:*:audio/mpeg:*\">"
+                "/media/wrong.mp3</res>"
+                "<res protocolInfo=\"http-get:*:video/x-matroska:*\" "
+                "resolution=\"3840x2160\">"
+                "/media/right.mkv</res>"
+                "</item>"
+                "</DIDL-Lite>";
+            return http_response(
+                200,
+                "OK",
+                soap_browse_response(didl, 3, 3));
+        });
+
+    bfplayer::DlnaServer description =
+        server_description(server);
+    description.content_directory_type =
+        "urn:schemas-upnp-org:service:ContentDirectory:2";
+    std::atomic<bool> cancel{false};
+    bfplayer::DlnaBrowseResult result;
+    std::string error;
+    check(
+        bfplayer::browse_dlna_directory(
+            description,
+            "0",
+            10,
+            cancel,
+            result,
+            error),
+        "versioned multi-resource browse succeeds");
+    server.finish();
+    check(error.empty(), "versioned browse has no error");
+    check(
+        result.objects.size() == 3,
+        "generic typed media and valid fallbacks are retained");
+    check(
+        result.objects[0].resource_url ==
+                server.base_url() + "/media/fallback.mp4" &&
+            result.objects[0].duration_us == 62500000LL,
+        "invalid earlier resources do not hide a valid later stream");
+    check(
+        result.objects[1].resource_url ==
+            server.base_url() +
+                "/upnp/control/media/song.flac",
+        "protocol MIME identifies generic media items");
+    check(
+        result.objects[2].resource_url ==
+                server.base_url() + "/media/right.mkv" &&
+            result.objects[2].resolution == "3840x2160",
+        "resource MIME matching the item class wins");
+}
+
 void test_partial_failure_and_cancellation() {
     FakeHttpServer partial_server(
         2,
@@ -667,6 +761,7 @@ void test_partial_failure_and_cancellation() {
 int main() {
     test_paged_chunked_browse();
     test_resource_filtering_and_result_cap();
+    test_versioned_service_and_resource_fallback();
     test_partial_failure_and_cancellation();
     std::cout << "dlna_client_integration_tests: PASS\n";
     return 0;

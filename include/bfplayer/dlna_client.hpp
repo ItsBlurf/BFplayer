@@ -20,6 +20,8 @@ struct DlnaServer {
     std::string udn;
     std::string location;
     std::string control_url;
+    std::string content_directory_type =
+        "urn:schemas-upnp-org:service:ContentDirectory:1";
 };
 
 struct DlnaObject {

@@ -41,6 +41,10 @@ constexpr std::size_t kMaxDescribedServers = 16;
 constexpr int kHttpTimeoutMs = 6000;
 constexpr int kDescriptionRequestTimeoutMs = 3000;
 constexpr int kDescriptionBudgetMs = 10000;
+constexpr std::string_view kContentDirectoryPrefix =
+    "urn:schemas-upnp-org:service:ContentDirectory:";
+constexpr std::string_view kDefaultContentDirectoryType =
+    "urn:schemas-upnp-org:service:ContentDirectory:1";
 
 struct HttpResponse {
     int status = 0;
@@ -74,6 +78,97 @@ std::string trim_http_value(std::string_view value) {
         --end;
     }
     return std::string(value.substr(begin, end - begin));
+}
+
+std::string trim_ascii_whitespace(std::string_view value) {
+    std::size_t begin = 0;
+    while (begin < value.size() &&
+           std::isspace(
+               static_cast<unsigned char>(value[begin])) != 0) {
+        ++begin;
+    }
+    std::size_t end = value.size();
+    while (end > begin &&
+           std::isspace(
+               static_cast<unsigned char>(value[end - 1])) != 0) {
+        --end;
+    }
+    return std::string(value.substr(begin, end - begin));
+}
+
+bool valid_content_directory_type(
+    std::string_view value) noexcept {
+    if (!value.starts_with(kContentDirectoryPrefix)) {
+        return false;
+    }
+    const std::string_view version =
+        value.substr(kContentDirectoryPrefix.size());
+    if (version.empty() || version.size() > 3) {
+        return false;
+    }
+    return std::all_of(
+        version.begin(),
+        version.end(),
+        [](unsigned char character) {
+            return std::isdigit(character) != 0;
+        });
+}
+
+enum class DlnaMediaKind {
+    unknown,
+    audio,
+    video,
+    image,
+};
+
+DlnaMediaKind media_kind_from_mime(
+    std::string_view value) {
+    const std::string mime = lower_ascii(
+        trim_ascii_whitespace(value));
+    if (mime.starts_with("audio/")) {
+        return DlnaMediaKind::audio;
+    }
+    if (mime.starts_with("video/")) {
+        return DlnaMediaKind::video;
+    }
+    if (mime.starts_with("image/")) {
+        return DlnaMediaKind::image;
+    }
+    return DlnaMediaKind::unknown;
+}
+
+DlnaMediaKind media_kind_from_protocol(
+    std::string_view value) {
+    const std::size_t first = value.find(':');
+    const std::size_t second =
+        first == std::string_view::npos
+            ? std::string_view::npos
+            : value.find(':', first + 1);
+    const std::size_t third =
+        second == std::string_view::npos
+            ? std::string_view::npos
+            : value.find(':', second + 1);
+    if (second == std::string_view::npos ||
+        third == std::string_view::npos) {
+        return DlnaMediaKind::unknown;
+    }
+    return media_kind_from_mime(
+        value.substr(second + 1, third - second - 1));
+}
+
+DlnaMediaKind media_kind_from_class(
+    std::string_view value) {
+    const std::string lowered = lower_ascii(std::string(value));
+    if (lowered.starts_with("object.item.audioitem")) {
+        return DlnaMediaKind::audio;
+    }
+    if (lowered.starts_with("object.item.videoitem")) {
+        return DlnaMediaKind::video;
+    }
+    if (lowered.starts_with("object.item.imageitem")) {
+        return DlnaMediaKind::image;
+    }
+    return DlnaMediaKind::unknown;
 }
 
 int remaining_timeout(std::int64_t deadline) noexcept {
@@ -348,8 +443,13 @@ bool http_request(
 
     std::string request =
         method + " " + url.path + " HTTP/1.1\r\n";
-    request += "Host: " + url.host + ":" +
-        std::to_string(url.port) + "\r\n";
+    request += "Host: ";
+    if (url.host.find(':') != std::string::npos) {
+        request += "[" + url.host + "]";
+    } else {
+        request += url.host;
+    }
+    request += ":" + std::to_string(url.port) + "\r\n";
     request += "User-Agent: BFplayer/1.0 UPnP/1.1\r\n";
     request += "Accept: text/xml, application/xml, */*\r\n";
     request += "Connection: close\r\n";
@@ -679,10 +779,12 @@ bool describe_server(
              services ? services->FirstChildElement() : nullptr;
          service;
          service = service->NextSiblingElement()) {
-        if (!name_is(service, "service") ||
-            child_text(service, "serviceType").find(
-                ":service:ContentDirectory:") ==
-                std::string::npos) {
+        if (!name_is(service, "service")) {
+            continue;
+        }
+        const std::string service_type =
+            child_text(service, "serviceType");
+        if (!valid_content_directory_type(service_type)) {
             continue;
         }
         const std::string control =
@@ -690,6 +792,7 @@ bool describe_server(
         if (!control.empty()) {
             server.control_url =
                 resolve_dlna_url(base, control);
+            server.content_directory_type = service_type;
             break;
         }
     }
@@ -725,13 +828,20 @@ DlnaObject parse_didl_object(
         return object;
     }
 
-    std::string art = child_text(element, "albumArtURI");
+    std::string art = trim_ascii_whitespace(
+        child_text(element, "albumArtURI"));
     if (!art.empty()) {
-        object.artwork_url =
+        std::string resolved_art =
             resolve_dlna_url(base_url, art);
+        if (is_supported_stream_uri(resolved_art) &&
+            !uri_has_credentials(resolved_art)) {
+            object.artwork_url = std::move(resolved_art);
+        }
     }
+    const DlnaMediaKind class_kind =
+        media_kind_from_class(object.upnp_class);
     const XMLElement* selected = nullptr;
-    const XMLElement* fallback = nullptr;
+    int selected_score = -1;
     for (const XMLElement* resource =
              element->FirstChildElement();
          resource;
@@ -743,37 +853,69 @@ DlnaObject parse_didl_object(
         if (!resource_text || !resource_text[0]) {
             continue;
         }
+        const std::string resource_reference =
+            trim_ascii_whitespace(resource_text);
+        if (resource_reference.empty()) {
+            continue;
+        }
         const char* protocol =
             resource->Attribute("protocolInfo");
-        if (protocol && std::strstr(protocol, ":image/")) {
+        const std::string protocol_text =
+            protocol ? protocol : "";
+        const DlnaMediaKind resource_kind =
+            media_kind_from_protocol(protocol_text);
+        if (resource_kind == DlnaMediaKind::image) {
             if (object.artwork_url.empty()) {
-                object.artwork_url =
-                    resolve_dlna_url(base_url, resource_text);
+                std::string resolved_art =
+                    resolve_dlna_url(
+                        base_url, resource_reference);
+                if (is_supported_stream_uri(resolved_art) &&
+                    !uri_has_credentials(resolved_art)) {
+                    object.artwork_url =
+                        std::move(resolved_art);
+                }
             }
             continue;
         }
-        if (!fallback) {
-            fallback = resource;
+        if ((class_kind == DlnaMediaKind::audio &&
+             resource_kind == DlnaMediaKind::video) ||
+            (class_kind == DlnaMediaKind::video &&
+             resource_kind == DlnaMediaKind::audio)) {
+            continue;
         }
-        if (!selected && protocol &&
-            std::strncmp(protocol, "http-get", 8) == 0) {
+        const std::string resolved =
+            resolve_dlna_url(base_url, resource_reference);
+        if (!is_supported_stream_uri(resolved) ||
+            uri_has_credentials(resolved)) {
+            continue;
+        }
+
+        int score = 0;
+        const std::string lowered_protocol =
+            lower_ascii(protocol_text);
+        if (lowered_protocol.starts_with("http-get:")) {
+            score += 4;
+        }
+        if (resource_kind == DlnaMediaKind::audio ||
+            resource_kind == DlnaMediaKind::video) {
+            score += 2;
+        }
+        if (class_kind != DlnaMediaKind::unknown &&
+            class_kind == resource_kind) {
+            score += 8;
+        }
+        if (score > selected_score) {
             selected = resource;
+            selected_score = score;
         }
-    }
-    if (!selected) {
-        selected = fallback;
     }
     if (!selected) {
         return object;
     }
     object.resource_url = resolve_dlna_url(
         base_url,
-        selected->GetText() ? selected->GetText() : "");
-    if (!is_supported_stream_uri(object.resource_url) ||
-        uri_has_credentials(object.resource_url)) {
-        object.resource_url.clear();
-        return object;
-    }
+        trim_ascii_whitespace(
+            selected->GetText() ? selected->GetText() : ""));
     if (const char* protocol =
             selected->Attribute("protocolInfo")) {
         object.protocol_info = protocol;
@@ -806,12 +948,17 @@ bool browse_page(
     DlnaBrowseResult& output,
     std::uint32_t& returned,
     std::string& error) {
+    const std::string service_type =
+        valid_content_directory_type(
+            server.content_directory_type)
+            ? server.content_directory_type
+            : std::string(kDefaultContentDirectoryType);
     const std::string body =
         "<?xml version=\"1.0\" encoding=\"utf-8\"?>"
         "<s:Envelope xmlns:s=\"http://schemas.xmlsoap.org/soap/envelope/\""
         " s:encodingStyle=\"http://schemas.xmlsoap.org/soap/encoding/\">"
         "<s:Body>"
-        "<u:Browse xmlns:u=\"urn:schemas-upnp-org:service:ContentDirectory:1\">"
+        "<u:Browse xmlns:u=\"" + service_type + "\">"
         "<ObjectID>" + xml_escape(object_id) + "</ObjectID>"
         "<BrowseFlag>BrowseDirectChildren</BrowseFlag>"
         "<Filter>*</Filter>"
@@ -823,7 +970,7 @@ bool browse_page(
         "</s:Envelope>";
     const std::string headers =
         "Content-Type: text/xml; charset=\"utf-8\"\r\n"
-        "SOAPACTION: \"urn:schemas-upnp-org:service:ContentDirectory:1#Browse\"\r\n";
+        "SOAPACTION: \"" + service_type + "#Browse\"\r\n";
 
     HttpResponse response;
     if (!http_request(
@@ -901,11 +1048,15 @@ bool browse_page(
             container,
             server.control_url);
         ++parsed;
+        const DlnaMediaKind class_kind =
+            media_kind_from_class(object.upnp_class);
+        const DlnaMediaKind resource_kind =
+            media_kind_from_protocol(object.protocol_info);
         const bool media_item =
-            object.upnp_class.starts_with(
-                "object.item.videoItem") ||
-            object.upnp_class.starts_with(
-                "object.item.audioItem");
+            class_kind == DlnaMediaKind::video ||
+            class_kind == DlnaMediaKind::audio ||
+            resource_kind == DlnaMediaKind::video ||
+            resource_kind == DlnaMediaKind::audio;
         if ((object.container && !object.id.empty()) ||
             (media_item && object.playable())) {
             if (object.title.empty()) {
