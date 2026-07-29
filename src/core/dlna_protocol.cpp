@@ -142,6 +142,18 @@ bool parse_dlna_http_url(
     return true;
 }
 
+std::string format_dlna_http_authority(
+    const DlnaHttpUrl& url) {
+    std::string authority;
+    if (url.host.find(':') != std::string::npos) {
+        authority = "[" + url.host + "]";
+    } else {
+        authority = url.host;
+    }
+    authority += ":" + std::to_string(url.port);
+    return authority;
+}
+
 std::string resolve_dlna_url(
     std::string_view base,
     std::string_view reference) {

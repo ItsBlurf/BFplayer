@@ -33,6 +33,16 @@ int main() {
             url.path == "/device.xml?x=1",
         "parsed IPv6 URL fields match");
     check(
+        bfplayer::format_dlna_http_authority(url) ==
+            "[fe80::1]:8080",
+        "IPv6 HTTP authority uses brackets");
+    check(
+        bfplayer::parse_dlna_http_url(
+            "http://192.168.1.20:8200/device.xml", url) &&
+            bfplayer::format_dlna_http_authority(url) ==
+                "192.168.1.20:8200",
+        "IPv4 HTTP authority remains unchanged");
+    check(
         !bfplayer::parse_dlna_http_url(
             "http://user:password@nas/device.xml", url),
         "URL credentials are rejected");

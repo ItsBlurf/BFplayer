@@ -52,6 +52,8 @@ struct DlnaBrowseResult {
 [[nodiscard]] bool parse_dlna_http_url(
     std::string_view value,
     DlnaHttpUrl& output) noexcept;
+[[nodiscard]] std::string format_dlna_http_authority(
+    const DlnaHttpUrl& url);
 [[nodiscard]] std::string resolve_dlna_url(
     std::string_view base,
     std::string_view reference);

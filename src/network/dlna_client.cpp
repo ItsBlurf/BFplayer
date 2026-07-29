@@ -443,13 +443,8 @@ bool http_request(
 
     std::string request =
         method + " " + url.path + " HTTP/1.1\r\n";
-    request += "Host: ";
-    if (url.host.find(':') != std::string::npos) {
-        request += "[" + url.host + "]";
-    } else {
-        request += url.host;
-    }
-    request += ":" + std::to_string(url.port) + "\r\n";
+    request += "Host: " +
+        format_dlna_http_authority(url) + "\r\n";
     request += "User-Agent: BFplayer/1.0 UPnP/1.1\r\n";
     request += "Accept: text/xml, application/xml, */*\r\n";
     request += "Connection: close\r\n";
