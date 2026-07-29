@@ -1,7 +1,7 @@
 # BFplayer
 
-**AI use notice:** I used ai and specifaclly Codex with gpt 5.5 and 5.6 while developing BFplayer. I make the
-decisions and test every release on my own PS5.
+**AI use notice:** I used ai and specifaclly Codex with gpt 5.5 and 5.6 while developing BFplayer.  I direct the development and have spent many hours across 
+multiple days testing builds and playback behavior on my own PS5.
 
 BFplayer is a native media library and player for jailbroken
 PlayStation 5 consoles. The standalone release installs its own tile in the
