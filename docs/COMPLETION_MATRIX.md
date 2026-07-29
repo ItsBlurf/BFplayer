@@ -9,8 +9,8 @@ and [FULL_VERIFICATION_AUDIT.md](FULL_VERIFICATION_AUDIT.md). The alpha.36
 audio-clock, buffer, and DLNA/NAS changes have a separate
 [offline verification record](ALPHA36_OFFLINE_VERIFICATION.md). Alpha.37 adds
 [executable DLNA client integration evidence](ALPHA37_OFFLINE_VERIFICATION.md).
-Alpha.38 extends that coverage to versioned services and multi-resource NAS
-listings.
+Alpha.38 extends that coverage to
+[versioned services and multi-resource NAS listings](ALPHA38_OFFLINE_VERIFICATION.md).
 
 | Requirement | Current evidence | Status |
 | --- | --- | --- |
