@@ -7,7 +7,8 @@ Historical
 offline evidence remains in [ALPHA5_VERIFICATION.md](ALPHA5_VERIFICATION.md)
 and [FULL_VERIFICATION_AUDIT.md](FULL_VERIFICATION_AUDIT.md). The alpha.36
 audio-clock, buffer, and DLNA/NAS changes have a separate
-[offline verification record](ALPHA36_OFFLINE_VERIFICATION.md).
+[offline verification record](ALPHA36_OFFLINE_VERIFICATION.md). Alpha.37 adds
+[executable DLNA client integration evidence](ALPHA37_OFFLINE_VERIFICATION.md).
 
 | Requirement | Current evidence | Status |
 | --- | --- | --- |
