@@ -173,7 +173,7 @@ licenses.
 
 ## Acknowledgements
 
-- John Törnblom and
+-
   [ps5-payload-websrv](https://github.com/ps5-payload-dev/websrv) for the
   BigApp and ELF loading foundation and the websrv homebrew format
 - [FFmpeg and ffplay](https://ffmpeg.org/) for the media and playback
