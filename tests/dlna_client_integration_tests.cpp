@@ -658,8 +658,7 @@ void test_versioned_service_and_resource_fallback() {
         "invalid earlier resources do not hide a valid later stream");
     check(
         result.objects[1].resource_url ==
-            server.base_url() +
-                "/upnp/control/media/song.flac",
+            server.base_url() + "/media/song.flac",
         "protocol MIME identifies generic media items");
     check(
         result.objects[2].resource_url ==
