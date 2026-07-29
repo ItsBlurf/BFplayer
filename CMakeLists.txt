@@ -106,6 +106,16 @@ if(BUILD_TESTING)
         COMMAND kitchensink_audio_clock_tests
     )
 
+    add_executable(
+        packet_budget_tests
+        tests/packet_budget_tests.cpp
+    )
+    target_include_directories(
+        packet_budget_tests
+        PRIVATE vendor/SDL_kitchensink/include
+    )
+    add_test(NAME packet_budget_tests COMMAND packet_budget_tests)
+
     if(BFPLAYER_BUILD_DLNA_INTEGRATION_TESTS)
         if(NOT UNIX)
             message(

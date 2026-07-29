@@ -71,6 +71,11 @@ SDL_kitchensink 2.0.0-a2. It calls the library's existing explicit subtitle
 synchronization-timestamp entry point so the application can apply a
 user-selected subtitle delay.
 
+The vendored `kitpacketbuffer.c` and `kitdemuxer.c` are modified to enforce
+compressed-packet byte budgets in addition to upstream packet-count limits.
+This keeps the larger PS5 input queues while bounding their retained payload
+memory and preserving seek and shutdown wakeups.
+
 The upstream file is covered by the following MIT license:
 
 > Copyright (c) 2018 Tuomas Virtanen

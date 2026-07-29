@@ -5,8 +5,21 @@
 
 #include "kitchensink2/internal/kitdemuxer.h"
 #include "kitchensink2/internal/kitlibstate.h"
+#include "kitchensink2/internal/kitpacketbudget.h"
 #include "kitchensink2/internal/kitpacketbuffer.h"
 #include "kitchensink2/kiterror.h"
+
+static size_t Kit_GetAVPacketSize(const void *object) {
+    const AVPacket *packet = object;
+    if(!packet)
+        return 0;
+    size_t bytes =
+        packet->size > 0 ? (size_t)packet->size : 0;
+    for(int i = 0; i < packet->side_data_elems; i++)
+        bytes = Kit_PacketBudgetAdd(
+            bytes, packet->side_data[i].size);
+    return bytes;
+}
 
 static void Kit_SendEOFPacket(Kit_Demuxer *demuxer) {
     for(int i = 0; i < KIT_INDEX_COUNT; i++) {
@@ -28,7 +41,10 @@ bool Kit_RunDemuxer(Kit_Demuxer *demuxer) {
     // references to its own buffer, leaving the scratch_buffer in a clean state.
     for(int i = 0; i < KIT_INDEX_COUNT; i++) {
         if(demuxer->scratch_packet->stream_index == demuxer->stream_indexes[i]) {
-            Kit_WritePacketBuffer(demuxer->buffers[i], demuxer->scratch_packet);
+            if(!Kit_WritePacketBuffer(
+                    demuxer->buffers[i],
+                    demuxer->scratch_packet))
+                av_packet_unref(demuxer->scratch_packet);
             return true;
         }
     }
@@ -66,6 +82,10 @@ Kit_Demuxer *Kit_CreateDemuxer(const Kit_Source *src, int video_index, int audio
             Kit_SetError("Unable to allocate video packet buffer");
             goto error_2;
         }
+        Kit_SetPacketBufferByteLimit(
+            video_buf,
+            KIT_VIDEO_PACKET_BYTE_LIMIT,
+            Kit_GetAVPacketSize);
     }
     if(audio_index >= 0) {
         audio_buf = Kit_CreatePacketBuffer(
@@ -80,6 +100,10 @@ Kit_Demuxer *Kit_CreateDemuxer(const Kit_Source *src, int video_index, int audio
             Kit_SetError("Unable to allocate audio packet buffer");
             goto error_3;
         }
+        Kit_SetPacketBufferByteLimit(
+            audio_buf,
+            KIT_AUDIO_PACKET_BYTE_LIMIT,
+            Kit_GetAVPacketSize);
     }
     if(subtitle_index >= 0) {
         subtitle_buf = Kit_CreatePacketBuffer(
@@ -94,6 +118,10 @@ Kit_Demuxer *Kit_CreateDemuxer(const Kit_Source *src, int video_index, int audio
             Kit_SetError("Unable to allocate subtitle packet buffer");
             goto error_4;
         }
+        Kit_SetPacketBufferByteLimit(
+            subtitle_buf,
+            KIT_SUBTITLE_PACKET_BYTE_LIMIT,
+            Kit_GetAVPacketSize);
     }
 
     demuxer->src = src;

@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.1.0-alpha.39 - bounded decoder input memory
+
+- Keep the larger compressed input queues used for 4K and network playback,
+  but cap video packets at 96 MiB, audio at 16 MiB, and subtitles at 8 MiB.
+- Allow one oversized packet through an empty queue so malformed or unusual
+  media cannot deadlock playback.
+- Wake byte-limited writers safely for seeking and shutdown.
+- Added overflow, underflow, exact-limit, and oversized-packet budget tests.
+
 ## 0.1.0-alpha.38 - wider NAS compatibility
 
 - Match each media server's advertised ContentDirectory service version.

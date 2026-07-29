@@ -1,6 +1,7 @@
 #include <SDL_mutex.h>
 #include <assert.h>
 
+#include "kitchensink2/internal/kitpacketbudget.h"
 #include "kitchensink2/internal/kitpacketbuffer.h"
 #include "kitchensink2/internal/utils/kitlog.h"
 #include "kitchensink2/kiterror.h"
@@ -13,11 +14,15 @@ struct Kit_PacketBuffer {
     size_t head;
     size_t tail;
     size_t capacity;
+    size_t byte_limit;
+    size_t used_bytes;
     bool full;
+    bool interrupted;
     buf_obj_unref unref_cb;
     buf_obj_free free_cb;
     buf_obj_move move_cb;
     buf_obj_ref ref_cb;
+    buf_obj_size size_cb;
 };
 
 Kit_PacketBuffer *Kit_CreatePacketBuffer(
@@ -67,13 +72,17 @@ Kit_PacketBuffer *Kit_CreatePacketBuffer(
     buffer->can_read = can_read;
     buffer->mutex = mutex;
     buffer->capacity = capacity;
+    buffer->byte_limit = 0;
+    buffer->used_bytes = 0;
     buffer->head = 0;
     buffer->tail = 0;
     buffer->full = false;
+    buffer->interrupted = false;
     buffer->unref_cb = unref_cb;
     buffer->free_cb = free_cb;
     buffer->move_cb = move_cb;
     buffer->ref_cb = ref_cb;
+    buffer->size_cb = NULL;
     return buffer;
 
 error_4:
@@ -98,8 +107,7 @@ void Kit_FreePacketBuffer(Kit_PacketBuffer **ref) {
         return;
 
     Kit_PacketBuffer *buffer = *ref;
-    SDL_CondBroadcast(buffer->can_read);
-    SDL_CondBroadcast(buffer->can_write);
+    Kit_SignalPacketBuffer(buffer);
     if(SDL_LockMutex(buffer->mutex) == 0) {
         for(size_t i = 0; i < buffer->capacity; i++) {
             buffer->free_cb((void **)&buffer->packets[i]);
@@ -114,9 +122,28 @@ void Kit_FreePacketBuffer(Kit_PacketBuffer **ref) {
     *ref = NULL;
 }
 
+void Kit_SetPacketBufferByteLimit(
+    Kit_PacketBuffer *buffer,
+    size_t byte_limit,
+    buf_obj_size size_cb
+) {
+    if(!buffer)
+        return;
+    if(SDL_LockMutex(buffer->mutex) == 0) {
+        if(Kit_IsPacketBufferEmpty(buffer)) {
+            buffer->byte_limit = byte_limit;
+            buffer->used_bytes = 0;
+            buffer->size_cb = size_cb;
+        }
+        SDL_UnlockMutex(buffer->mutex);
+    }
+}
+
 bool Kit_IsPacketBufferFull(const Kit_PacketBuffer *buffer) {
     assert(buffer);
-    return buffer->full;
+    return buffer->full ||
+        (buffer->byte_limit > 0 &&
+         buffer->used_bytes >= buffer->byte_limit);
 }
 
 bool Kit_IsPacketBufferEmpty(const Kit_PacketBuffer *buffer) {
@@ -146,7 +173,9 @@ void Kit_FlushPacketBuffer(Kit_PacketBuffer *buffer) {
         }
         buffer->head = 0;
         buffer->tail = 0;
+        buffer->used_bytes = 0;
         buffer->full = false;
+        buffer->interrupted = false;
         SDL_UnlockMutex(buffer->mutex);
         SDL_CondSignal(buffer->can_write);
     }
@@ -155,6 +184,10 @@ void Kit_FlushPacketBuffer(Kit_PacketBuffer *buffer) {
 void Kit_SignalPacketBuffer(Kit_PacketBuffer *buffer) {
     if(buffer == NULL)
         return;
+    if(SDL_LockMutex(buffer->mutex) == 0) {
+        buffer->interrupted = true;
+        SDL_UnlockMutex(buffer->mutex);
+    }
     SDL_CondBroadcast(buffer->can_write);
     SDL_CondBroadcast(buffer->can_read);
 }
@@ -181,11 +214,24 @@ bool Kit_WritePacketBuffer(Kit_PacketBuffer *buffer, void *src) {
     assert(src);
     if(SDL_LockMutex(buffer->mutex) < 0)
         goto error_0;
-    if(Kit_IsPacketBufferFull(buffer))
-        SDL_CondWait(buffer->can_write, buffer->mutex);
-    if(Kit_IsPacketBufferFull(buffer))
+    const size_t source_bytes =
+        buffer->size_cb ? buffer->size_cb(src) : 0;
+    while(!buffer->interrupted &&
+          (Kit_IsPacketBufferFull(buffer) ||
+           !Kit_PacketBudgetAllows(
+               buffer->used_bytes,
+               buffer->byte_limit,
+               source_bytes,
+               Kit_IsPacketBufferEmpty(buffer))))
+        if(SDL_CondWait(buffer->can_write, buffer->mutex) != 0)
+            goto error_1;
+    if(buffer->interrupted) {
+        buffer->interrupted = false;
         goto error_1;
+    }
     buffer->move_cb(buffer->packets[buffer->head], src);
+    buffer->used_bytes = Kit_PacketBudgetAdd(
+        buffer->used_bytes, source_bytes);
     advance_write(buffer);
     // LOG("WRITE -- HEAD = %lld, TAIL = %lld, USED = %lld/%lld\n", buffer->head, buffer->tail,
     // Kit_GetPacketBufferLength(buffer), buffer->capacity);
@@ -211,7 +257,13 @@ bool Kit_ReadPacketBuffer(Kit_PacketBuffer *buffer, void *dst, int timeout) {
     }
     if(Kit_IsPacketBufferEmpty(buffer))
         goto error_1;
+    const size_t packet_bytes =
+        buffer->size_cb
+            ? buffer->size_cb(buffer->packets[buffer->tail])
+            : 0;
     buffer->move_cb(dst, buffer->packets[buffer->tail]);
+    buffer->used_bytes = Kit_PacketBudgetRemove(
+        buffer->used_bytes, packet_bytes);
     advance_read(buffer);
     // LOG("READ -- HEAD = %lld, TAIL = %lld, USED = %lld/%lld\n", buffer->head, buffer->tail,
     // Kit_GetPacketBufferLength(buffer), buffer->capacity);
@@ -250,7 +302,13 @@ error_0:
 
 void Kit_FinishPacketBufferRead(Kit_PacketBuffer *buffer) {
     assert(buffer);
+    const size_t packet_bytes =
+        buffer->size_cb
+            ? buffer->size_cb(buffer->packets[buffer->tail])
+            : 0;
     buffer->unref_cb(buffer->packets[buffer->tail]);
+    buffer->used_bytes = Kit_PacketBudgetRemove(
+        buffer->used_bytes, packet_bytes);
     advance_read(buffer);
     SDL_UnlockMutex(buffer->mutex);
     // LOG("FINISH -- HEAD = %lld, TAIL = %lld, USED = %lld/%lld\n", buffer->head, buffer->tail,

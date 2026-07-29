@@ -84,9 +84,12 @@ Local playback uses 64 compressed video packets and 3 converted video frames.
 Network playback uses 128 compressed video packets and 4 converted video
 frames to absorb LAN jitter without creating a deep frame cache. Audio output
 keeps Kitchensink's bounded 64-frame queue; network audio packet capacity is
-raised from 64 to 128. These limits do not eliminate codec-internal reference
-frames, so the diagnostics also record peak resident memory, queue occupancy,
-and queued-audio milliseconds for hardware measurement.
+raised from 64 to 128. Compressed input is also capped at 96 MiB for video,
+16 MiB for audio, and 8 MiB for subtitles. One oversized packet can enter an
+empty queue to preserve forward progress. These limits do not eliminate
+codec-internal reference frames, so the diagnostics also record peak resident
+memory, queue occupancy, and queued-audio milliseconds for hardware
+measurement.
 
 The video renderer separates decoded pixel dimensions from the stream display
 aspect ratio. Pure, host-tested layout math independently applies the complete
