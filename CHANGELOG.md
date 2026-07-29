@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.0-alpha.35 - matched websrv package
+
+- Rebuilt the standalone and websrv packages from the same player ELF.
+- Verified the plain `eboot.elf` launch path against current upstream websrv.
+- Corrected the websrv working-directory documentation.
+- Added a release parity check for the embedded and direct player ELFs.
+
 ## 0.1.0-alpha.34 - reliable browsing and faster navigation
 
 - Replaced subtitle folder enumeration with the PS5-proven `opendir` path

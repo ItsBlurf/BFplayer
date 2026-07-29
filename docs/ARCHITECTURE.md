@@ -171,7 +171,9 @@ BFplayer-websrv.zip
 
 This ZIP contains the player and its runtime assets without the standalone
 installer, Media tile, embedded player copy, or port 9040 listener. websrv
-discovers `eboot.elf`, supplies the BFplayer folder as the working directory,
-and performs the BigApp transition through its existing `FAKE00000` host.
-BFplayer recognizes both the standalone `PSMC00001` host and websrv's
-`FAKE00000` host when returning to PlayStation Home.
+discovers `eboot.elf`, supplies its absolute path as `argv[0]`, and performs
+the BigApp transition through its existing `FAKE00000` host. The stock
+plain-ELF path may use `/` as the working directory, so BFplayer resolves its
+packaged assets from `argv[0]` instead. BFplayer recognizes both the standalone
+`PSMC00001` host and websrv's `FAKE00000` host when returning to PlayStation
+Home.

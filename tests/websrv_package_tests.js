@@ -28,12 +28,15 @@ assert(build.includes("'Websrv eboot.elf is not an ELF file.'"));
 
 assert(player.includes('kWebsrvTitleId = "FAKE00000"'));
 assert(player.includes('!is_bfplayer_host && !is_websrv_host'));
+assert(player.includes("executable_path[0] != '/'"));
+assert(player.includes('return directory + "/" +'));
 
 const readmeTop = readme.split(/\r?\n/).slice(0, 10).join('\n');
 const normalizedReadmeTop = readmeTop.replace(/\s+/g, ' ');
-assert(normalizedReadmeTop.includes(
-    'I used OpenAI Codex while developing BFplayer'));
-assert(normalizedReadmeTop.includes('I make the decisions'));
+assert(normalizedReadmeTop.includes('AI use notice:'));
+assert(normalizedReadmeTop.includes('Codex'));
+assert(normalizedReadmeTop.includes('I direct the development'));
+assert(normalizedReadmeTop.includes('my own PS5'));
 assert(readme.includes('## Contributors'));
 assert(readme.includes('OpenAI Codex'));
 assert(readme.includes('## Acknowledgements'));
@@ -43,6 +46,9 @@ assert(install.includes('/mnt/usbN/homebrew/BFplayer/eboot.elf'));
 assert(install.includes('/mnt/extN/homebrew/BFplayer/eboot.elf'));
 assert(install.includes('does not contain `homebrew.js`'));
 assert(install.includes('does not need `bfplayer-standalone.elf`'));
+assert(install.includes('full executable path'));
+assert(install.includes('working directory at `/`'));
+assert(install.includes('absolute `argv[0]` path'));
 
 assert(verifier.includes("'BFplayer/eboot.elf'"));
 assert(verifier.includes("$header[7] -ne 9"));

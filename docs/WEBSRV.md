@@ -26,8 +26,12 @@ THIRD_PARTY_NOTICES.md
 ```
 
 Start websrv, open its homebrew list, and select BFplayer. Websrv discovers
-`eboot.elf`, supplies the folder as the working directory, creates the BigApp
-context, and launches the player directly.
+`eboot.elf`, creates the BigApp context, and launches the player directly.
+For a plain `eboot.elf` entry, current websrv supplies the full executable path
+as `argv[0]` and may leave the process working directory at `/`. BFplayer does
+not depend on that working directory: it resolves the font, icon, and build
+manifest from the absolute `argv[0]` path. This applies equally under
+`/data/homebrew`, `/mnt/usbN/homebrew`, and `/mnt/extN/homebrew`.
 
 The package deliberately does not contain `homebrew.js`. No custom picker or
 extra launcher is needed because websrv already recognizes `eboot.elf`.
