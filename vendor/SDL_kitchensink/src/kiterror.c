@@ -10,7 +10,7 @@
 static char _error_available = false;
 static char _error_message[KIT_ERRBUFSIZE] = "\0";
 
-const char *Kit_GetError() {
+const char *Kit_GetError(void) {
     if(_error_available) {
         _error_available = false;
         return _error_message;
@@ -27,7 +27,7 @@ void Kit_SetError(const char *fmt, ...) {
     _error_available = true;
 }
 
-void Kit_ClearError() {
+void Kit_ClearError(void) {
     _error_message[0] = 0;
     _error_available = false;
 }

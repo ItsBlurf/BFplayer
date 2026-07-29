@@ -44,4 +44,8 @@ int load_libass(void *handle) {
     return 0;
 }
 
+#else
+
+typedef int Kit_StaticLibassTranslationUnit;
+
 #endif // USE_DYNAMIC_LIBASS

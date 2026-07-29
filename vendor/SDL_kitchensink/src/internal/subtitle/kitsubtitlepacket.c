@@ -1,6 +1,6 @@
 #include "kitchensink2/internal/subtitle/kitsubtitlepacket.h"
 
-Kit_SubtitlePacket *Kit_CreateSubtitlePacket() {
+Kit_SubtitlePacket *Kit_CreateSubtitlePacket(void) {
     return calloc(1, sizeof(Kit_SubtitlePacket));
 }
 
@@ -42,9 +42,6 @@ void Kit_MoveSubtitlePacketRefs(Kit_SubtitlePacket *dst, Kit_SubtitlePacket *src
     dst->surface = src->surface;
     dst->clear = src->clear;
     memset(src, 0, sizeof(Kit_SubtitlePacket));
-}
-
-void Kit_CreateSubtitlePacketRef(Kit_SubtitlePacket *dst, Kit_SubtitlePacket *src) {
 }
 
 void Kit_DelSubtitlePacketRefs(Kit_SubtitlePacket *packet, bool free_surface) {

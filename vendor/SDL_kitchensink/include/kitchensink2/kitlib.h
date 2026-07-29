@@ -98,7 +98,7 @@ KIT_API int Kit_Init(unsigned int flags);
  *
  * Note that any calls to library functions after this will cause undefined behaviour!
  */
-KIT_API void Kit_Quit();
+KIT_API void Kit_Quit(void);
 
 /**
  * @brief Sets a library-wide hint
@@ -118,6 +118,17 @@ KIT_API void Kit_SetHint(Kit_HintType type, int value);
  * @return Hint value
  */
 KIT_API int Kit_GetHint(Kit_HintType type);
+
+/**
+ * @brief Sets the fallback font file used by embedded ASS/SSA subtitles.
+ *
+ * Passing NULL or an empty string restores libass font-provider autodetection.
+ * Set this before creating a player.
+ *
+ * @param path UTF-8 path to a readable font file
+ * @return Returns 0 on success, 1 if the path is too long.
+ */
+KIT_API int Kit_SetSubtitleFallbackFont(const char *path);
 
 /**
  * @brief Can be used to fetch the version of the linked SDL_kitchensink library

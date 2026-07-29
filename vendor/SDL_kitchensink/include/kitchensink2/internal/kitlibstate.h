@@ -18,10 +18,11 @@ typedef struct Kit_LibraryState {
     unsigned int video_late_threshold;
     unsigned int audio_early_threshold;
     unsigned int audio_late_threshold;
+    char subtitle_fallback_font[1024];
     ASS_Library *libass_handle;
     void *ass_so_handle;
 } Kit_LibraryState;
 
-KIT_LOCAL Kit_LibraryState *Kit_GetLibraryState();
+KIT_LOCAL Kit_LibraryState *Kit_GetLibraryState(void);
 
 #endif // KITLIBSTATE_H

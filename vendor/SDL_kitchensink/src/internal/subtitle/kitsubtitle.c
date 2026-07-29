@@ -71,6 +71,7 @@ static Kit_DecoderInputResult dec_input_subtitle_cb(const Kit_Decoder *dec, cons
 }
 
 static bool dec_decode_subtitle_cb(const Kit_Decoder *dec, double *pts) {
+    (void)dec;
     *pts = -1.0;
     return false;
 }
@@ -133,7 +134,8 @@ Kit_Decoder *Kit_CreateSubtitleDecoder(
     Kit_TextureAtlas *atlas = NULL;
 
     // Find and set up stream.
-    if(stream_index < 0 || stream_index >= format_ctx->nb_streams) {
+    if(stream_index < 0 ||
+       (unsigned int)stream_index >= format_ctx->nb_streams) {
         Kit_SetError("Invalid subtitle stream index %d", stream_index);
         return NULL;
     }

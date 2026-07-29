@@ -6,21 +6,22 @@
 #include "kitchensink2/internal/utils/kitlog.h"
 #include "kitchensink2/kiterror.h"
 
-static void Kit_ProcessPacket(Kit_DecoderThread *thread, bool *pts_jumped, bool *eof_received) {
+static void Kit_ProcessPacket(Kit_DecoderThread *thread, bool *eof_received) {
     Kit_DecoderInputResult ret;
     bool is_eof;
 
     if(!Kit_BeginPacketBufferRead(thread->input, thread->scratch_packet, 100))
         return;
 
-    // If a valid packet was found, first check if it's a control packet. Value 1 means seek.
+    // If a valid packet was found, first check whether it is a seek marker.
     // Seek packet is created in the demuxer, and is sent after avformat_seek_file() is called.
-    if(thread->scratch_packet->opaque == (void *)1) {
+    if(thread->scratch_packet->stream_index ==
+       KIT_PACKET_STREAM_INDEX_SEEK) {
         Kit_ClearDecoderBuffers(thread->decoder);
-        *pts_jumped = true;
         goto finish;
     }
-    is_eof = thread->scratch_packet->opaque == (void *)2;
+    is_eof = thread->scratch_packet->stream_index ==
+        KIT_PACKET_STREAM_INDEX_EOF;
 
     // If valid packet was found and it is not a control packet, it must contain stream data.
     // Attempt to add it to the ffmpeg decoder internal queue. Note that the queue may be full, in which case
@@ -44,23 +45,16 @@ cancel:
 
 static int Kit_DecodeMain(void *ptr) {
     Kit_DecoderThread *thread = ptr;
-    bool pts_jumped = false;
     bool eof_received = false;
     double pts;
 
     while(SDL_AtomicGet(&thread->run)) {
-        Kit_ProcessPacket(thread, &pts_jumped, &eof_received);
+        Kit_ProcessPacket(thread, &eof_received);
 
         // Run the decoder. This will consume packets from the ffmpeg queue. We may need to call this multiple times,
         // since a single data packet might contain multiple frames.
-        while(SDL_AtomicGet(&thread->run) && Kit_RunDecoder(thread->decoder, &pts)) {
-            if(pts_jumped) {
-                // Note that we change the sync a bit to give decoders some time to decode.
-                // The 0.1 is essentially a hack that moves the sync time forwards a bit, so that the data getter
-                // functions wait a little bit before they start feeding again.
-                Kit_AdjustTimerBase(thread->decoder->sync_timer, pts - 0.1);
-                pts_jumped = false;
-            }
+        while(SDL_AtomicGet(&thread->run) &&
+              Kit_RunDecoder(thread->decoder, &pts)) {
         }
         if(eof_received)
             break;

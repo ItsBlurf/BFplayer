@@ -24,6 +24,30 @@ typedef struct Kit_ImageSubtitleRenderer {
     unsigned int cached_items_size;
 } Kit_ImageSubtitleRenderer;
 
+static void *Kit_AllocSubtitlePacket(void) {
+    return Kit_CreateSubtitlePacket();
+}
+
+static void Kit_UnrefSubtitlePacket(void *object) {
+    Kit_DelSubtitlePacketRefs(object, true);
+}
+
+static void Kit_FreeSubtitlePacketObject(void **object) {
+    Kit_SubtitlePacket *packet = *object;
+    Kit_FreeSubtitlePacket(&packet);
+    *object = packet;
+}
+
+static void Kit_MoveSubtitlePacket(void *dst, void *src) {
+    Kit_MoveSubtitlePacketRefs(dst, src);
+}
+
+static bool Kit_RefSubtitlePacket(void *dst, const void *src) {
+    (void)dst;
+    (void)src;
+    return false;
+}
+
 static void ren_render_image_cb(Kit_SubtitleRenderer *renderer, void *sub_src, double pts, double start, double end) {
     assert(renderer != NULL);
     assert(sub_src != NULL);
@@ -233,11 +257,11 @@ Kit_CreateImageSubtitleRenderer(Kit_Decoder *dec, int video_w, int video_h, int 
     }
     if((buffer = Kit_CreatePacketBuffer(
             state->subtitle_frame_buffer_size,
-            (buf_obj_alloc)Kit_CreateSubtitlePacket,
-            (buf_obj_unref)Kit_DelSubtitlePacketRefs,
-            (buf_obj_free)Kit_FreeSubtitlePacket,
-            (buf_obj_move)Kit_MoveSubtitlePacketRefs,
-            (buf_obj_ref)Kit_CreateSubtitlePacketRef
+            Kit_AllocSubtitlePacket,
+            Kit_UnrefSubtitlePacket,
+            Kit_FreeSubtitlePacketObject,
+            Kit_MoveSubtitlePacket,
+            Kit_RefSubtitlePacket
         )) == NULL) {
         Kit_SetError("Unable to create an output buffer for subtitle renderer");
         goto exit_2;

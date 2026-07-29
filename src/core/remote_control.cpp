@@ -187,6 +187,10 @@ const char* command_name(RemoteCommandType type) {
             return "seek";
         case RemoteCommandType::seek_absolute:
             return "seek-to";
+        case RemoteCommandType::cycle_audio:
+            return "cycle-audio";
+        case RemoteCommandType::cycle_subtitle:
+            return "cycle-subtitle";
         case RemoteCommandType::stop:
             return "stop";
         case RemoteCommandType::exit:
@@ -223,6 +227,7 @@ std::string status_json(const RemotePlaybackStatus& status) {
         "\"videoPackets\":{\"length\":%u,\"capacity\":%u},"
         "\"audioFrames\":{\"length\":%u,\"capacity\":%u},"
         "\"audioPackets\":{\"length\":%u,\"capacity\":%u},"
+        "\"audioStream\":%d,\"subtitleStream\":%d,"
         "\"sourceWidth\":%d,\"sourceHeight\":%d,"
         "\"outputWidth\":%d,\"outputHeight\":%d,\"hdrSource\":%s,"
         "\"hdrToneMapActive\":%s,\"hdrInputFullRange\":%s,"
@@ -273,6 +278,8 @@ std::string status_json(const RemotePlaybackStatus& status) {
         status.audio_frames_capacity,
         status.audio_packets_length,
         status.audio_packets_capacity,
+        status.audio_stream,
+        status.subtitle_stream,
         status.source_width,
         status.source_height,
         status.output_width,
@@ -627,6 +634,10 @@ void handle_client(RemoteControlServer::Impl& impl, int client) {
             !parse_finite_double(seconds, command.value)) {
             error = "missing or invalid seconds";
         }
+    } else if (route == "/v1/cycle-audio") {
+        command.type = RemoteCommandType::cycle_audio;
+    } else if (route == "/v1/cycle-subtitle") {
+        command.type = RemoteCommandType::cycle_subtitle;
     } else if (route == "/v1/stop") {
         command.type = RemoteCommandType::stop;
     } else if (route == "/v1/exit") {

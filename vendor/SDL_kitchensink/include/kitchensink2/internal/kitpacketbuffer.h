@@ -4,12 +4,18 @@
 #include "kitchensink2/kitconfig.h"
 #include <stdbool.h>
 
-typedef void *(*buf_obj_alloc)();
+typedef void *(*buf_obj_alloc)(void);
 typedef void (*buf_obj_unref)(void *obj);
 typedef void (*buf_obj_free)(void **obj);
 typedef void (*buf_obj_move)(void *dst, void *src);
-typedef void (*buf_obj_ref)(void *dst, void *src);
+typedef bool (*buf_obj_ref)(void *dst, const void *src);
 typedef size_t (*buf_obj_size)(const void *obj);
+
+enum
+{
+    KIT_PACKET_STREAM_INDEX_SEEK = -1,
+    KIT_PACKET_STREAM_INDEX_EOF = -2
+};
 
 typedef struct Kit_PacketBuffer Kit_PacketBuffer;
 

@@ -1,4 +1,5 @@
 #include <assert.h>
+#include <string.h>
 #ifdef USE_DYNAMIC_LIBASS
 #include <SDL_loadso.h>
 #endif
@@ -11,6 +12,10 @@
 #include "kitchensink2/kitchensink.h"
 
 static void _libass_msg_callback(int level, const char *fmt, va_list va, void *data) {
+    (void)level;
+    (void)fmt;
+    (void)va;
+    (void)data;
 }
 
 int Kit_InitASS(Kit_LibraryState *state) {
@@ -65,7 +70,7 @@ exit_0:
     return 1;
 }
 
-void Kit_Quit() {
+void Kit_Quit(void) {
     Kit_LibraryState *state = Kit_GetLibraryState();
     if(state->init_flags & KIT_INIT_NETWORK) {
         avformat_network_deinit();
@@ -148,6 +153,22 @@ int Kit_GetHint(Kit_HintType type) {
         default:
             return 0;
     }
+}
+
+int Kit_SetSubtitleFallbackFont(const char *path) {
+    Kit_LibraryState *state = Kit_GetLibraryState();
+    if(path == NULL || path[0] == '\0') {
+        state->subtitle_fallback_font[0] = '\0';
+        return 0;
+    }
+
+    const size_t length = strlen(path);
+    if(length >= sizeof(state->subtitle_fallback_font)) {
+        Kit_SetError("Subtitle fallback font path is too long");
+        return 1;
+    }
+    memcpy(state->subtitle_fallback_font, path, length + 1);
+    return 0;
 }
 
 void Kit_GetVersion(Kit_Version *version) {

@@ -168,6 +168,50 @@ int main() {
     assert(u_plane[2] == 0xee);
     assert(v_plane[2] == 0xee);
 
+    const auto deterministic_y = y_plane;
+    const auto deterministic_u = u_plane;
+    const auto deterministic_v = v_plane;
+    auto repeated_y = std::array<std::uint8_t, y_stride * height>{
+        0, 64, 128, 255, 0xee, 0xee,
+        16, 96, 160, 235, 0xee, 0xee,
+    };
+    auto repeated_u = std::array<std::uint8_t, chroma_stride>{
+        128, 128, 0xee, 0xee,
+    };
+    auto repeated_v = std::array<std::uint8_t, chroma_stride>{
+        128, 128, 0xee, 0xee,
+    };
+    assert(bfplayer_apply_hdr_yuv420_lut(
+        yuv_lut.get(),
+        repeated_y.data(),
+        y_stride,
+        repeated_u.data(),
+        chroma_stride,
+        repeated_v.data(),
+        chroma_stride,
+        width,
+        height) == 0);
+    assert(repeated_y == deterministic_y);
+    assert(repeated_u == deterministic_u);
+    assert(repeated_v == deterministic_v);
+
+    assert(BFPLAYER_HDR_CHROMA_LEVELS >= 65);
+    for (const auto value : y_plane) {
+        if (value != 0xee) {
+            assert(value >= 16 && value <= 235);
+        }
+    }
+    for (const auto value : u_plane) {
+        if (value != 0xee) {
+            assert(value >= 16 && value <= 240);
+        }
+    }
+    for (const auto value : v_plane) {
+        if (value != 0xee) {
+            assert(value >= 16 && value <= 240);
+        }
+    }
+
     BfplayerHdrYuvConfig invalid_yuv = yuv_config;
     invalid_yuv.source_peak_nits = 0.0;
     assert(bfplayer_build_hdr_yuv420_lut(

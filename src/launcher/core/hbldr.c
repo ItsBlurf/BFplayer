@@ -103,8 +103,8 @@ remount_system_ex(void) {
     IOVEC_ENTRY("fstype"),    IOVEC_ENTRY("exfatfs"),
     IOVEC_ENTRY("large"),     IOVEC_ENTRY("yes"),
     IOVEC_ENTRY("timezone"),  IOVEC_ENTRY("static"),
-    IOVEC_ENTRY("async"),     IOVEC_ENTRY(NULL),
-    IOVEC_ENTRY("ignoreacl"), IOVEC_ENTRY(NULL),
+    IOVEC_ENTRY("async"),     {NULL, 0},
+    IOVEC_ENTRY("ignoreacl"), {NULL, 0},
   };
 
   if(nmount(iov, IOVEC_SIZE(iov), MNT_UPDATE)) {

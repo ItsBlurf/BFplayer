@@ -246,15 +246,15 @@ double decode_chroma_code(int code, bool full_range) {
         0.5);
 }
 
-std::uint8_t encode_limited_luma(double value) {
-    const long code = std::lround(16.0 + 219.0 * clamp_unit(value));
-    return static_cast<std::uint8_t>(std::clamp(code, 16L, 235L));
+std::uint16_t encode_limited_luma_10bit(double value) {
+    const long code = std::lround(64.0 + 876.0 * clamp_unit(value));
+    return static_cast<std::uint16_t>(std::clamp(code, 64L, 940L));
 }
 
-std::uint8_t encode_limited_chroma(double value) {
+std::uint16_t encode_limited_chroma_10bit(double value) {
     const long code = std::lround(
-        128.0 + 224.0 * std::clamp(value, -0.5, 0.5));
-    return static_cast<std::uint8_t>(std::clamp(code, 16L, 240L));
+        512.0 + 896.0 * std::clamp(value, -0.5, 0.5));
+    return static_cast<std::uint16_t>(std::clamp(code, 64L, 960L));
 }
 
 std::size_t yuv_lut_index(int y, int u_level, int v_level) {
@@ -272,16 +272,40 @@ int quantize_chroma(std::uint8_t value) {
         255;
 }
 
-std::uint8_t packed_y(const BfplayerHdrYuvEntry& entry) {
-    return static_cast<std::uint8_t>(entry.packed);
+std::uint16_t packed_y_10bit(const BfplayerHdrYuvEntry& entry) {
+    return static_cast<std::uint16_t>(entry.packed & 0x3ffU);
 }
 
-std::uint8_t packed_u(const BfplayerHdrYuvEntry& entry) {
-    return static_cast<std::uint8_t>(entry.packed >> 8U);
+std::uint16_t packed_u_10bit(const BfplayerHdrYuvEntry& entry) {
+    return static_cast<std::uint16_t>((entry.packed >> 10U) & 0x3ffU);
 }
 
-std::uint8_t packed_v(const BfplayerHdrYuvEntry& entry) {
-    return static_cast<std::uint8_t>(entry.packed >> 16U);
+std::uint16_t packed_v_10bit(const BfplayerHdrYuvEntry& entry) {
+    return static_cast<std::uint16_t>((entry.packed >> 20U) & 0x3ffU);
+}
+
+std::uint8_t dither_10bit_to_8bit(
+    unsigned int value,
+    int x,
+    int y) {
+    /*
+     * A fixed Bayer pattern avoids temporal shimmer while preserving the
+     * two low bits produced by the HDR curve. Each threshold occurs equally
+     * often, so the spatial average is the original 10-bit value.
+     */
+    static constexpr std::uint8_t bayer_4x4[4][4] = {
+        {0, 8, 2, 10},
+        {12, 4, 14, 6},
+        {3, 11, 1, 9},
+        {15, 7, 13, 5},
+    };
+    value = std::min(value, 1023U);
+    const unsigned int base = value >> 2U;
+    const unsigned int remainder = value & 3U;
+    const unsigned int threshold =
+        bayer_4x4[y & 3][x & 3] >> 2U;
+    return static_cast<std::uint8_t>(
+        std::min(base + (remainder > threshold ? 1U : 0U), 255U));
 }
 
 void apply_hdr_yuv420_rows(
@@ -323,26 +347,46 @@ void apply_hdr_yuv420_rows(
             const BfplayerHdrYuvEntry first = entries[y_top[pixel_x]];
             const BfplayerHdrYuvEntry second =
                 entries[y_top[pixel_x + 1]];
-            y_top[pixel_x] = packed_y(first);
-            y_top[pixel_x + 1] = packed_y(second);
-            unsigned int u_sum = packed_u(first) + packed_u(second);
-            unsigned int v_sum = packed_v(first) + packed_v(second);
+            y_top[pixel_x] = dither_10bit_to_8bit(
+                packed_y_10bit(first),
+                pixel_x,
+                top_y);
+            y_top[pixel_x + 1] = dither_10bit_to_8bit(
+                packed_y_10bit(second),
+                pixel_x + 1,
+                top_y);
+            unsigned int u_sum =
+                packed_u_10bit(first) + packed_u_10bit(second);
+            unsigned int v_sum =
+                packed_v_10bit(first) + packed_v_10bit(second);
             unsigned int count = 2;
             if (y_bottom) {
                 const BfplayerHdrYuvEntry third =
                     entries[y_bottom[pixel_x]];
                 const BfplayerHdrYuvEntry fourth =
                     entries[y_bottom[pixel_x + 1]];
-                y_bottom[pixel_x] = packed_y(third);
-                y_bottom[pixel_x + 1] = packed_y(fourth);
-                u_sum += packed_u(third) + packed_u(fourth);
-                v_sum += packed_v(third) + packed_v(fourth);
+                y_bottom[pixel_x] = dither_10bit_to_8bit(
+                    packed_y_10bit(third),
+                    pixel_x,
+                    top_y + 1);
+                y_bottom[pixel_x + 1] = dither_10bit_to_8bit(
+                    packed_y_10bit(fourth),
+                    pixel_x + 1,
+                    top_y + 1);
+                u_sum +=
+                    packed_u_10bit(third) + packed_u_10bit(fourth);
+                v_sum +=
+                    packed_v_10bit(third) + packed_v_10bit(fourth);
                 count = 4;
             }
-            u_row[chroma_x] = static_cast<std::uint8_t>(
-                (u_sum + count / 2) / count);
-            v_row[chroma_x] = static_cast<std::uint8_t>(
-                (v_sum + count / 2) / count);
+            u_row[chroma_x] = dither_10bit_to_8bit(
+                (u_sum + count / 2) / count,
+                chroma_x,
+                chroma_y);
+            v_row[chroma_x] = dither_10bit_to_8bit(
+                (v_sum + count / 2) / count,
+                chroma_x + 2,
+                chroma_y);
         }
         if (pixel_x < width) {
             const int chroma_x = pixel_x / 2;
@@ -352,22 +396,32 @@ void apply_hdr_yuv420_rows(
                 lut->entries +
                 yuv_lut_index(0, u_level, v_level);
             const BfplayerHdrYuvEntry first = entries[y_top[pixel_x]];
-            y_top[pixel_x] = packed_y(first);
-            unsigned int u_sum = packed_u(first);
-            unsigned int v_sum = packed_v(first);
+            y_top[pixel_x] = dither_10bit_to_8bit(
+                packed_y_10bit(first),
+                pixel_x,
+                top_y);
+            unsigned int u_sum = packed_u_10bit(first);
+            unsigned int v_sum = packed_v_10bit(first);
             unsigned int count = 1;
             if (y_bottom) {
                 const BfplayerHdrYuvEntry second =
                     entries[y_bottom[pixel_x]];
-                y_bottom[pixel_x] = packed_y(second);
-                u_sum += packed_u(second);
-                v_sum += packed_v(second);
+                y_bottom[pixel_x] = dither_10bit_to_8bit(
+                    packed_y_10bit(second),
+                    pixel_x,
+                    top_y + 1);
+                u_sum += packed_u_10bit(second);
+                v_sum += packed_v_10bit(second);
                 count = 2;
             }
-            u_row[chroma_x] = static_cast<std::uint8_t>(
-                (u_sum + count / 2) / count);
-            v_row[chroma_x] = static_cast<std::uint8_t>(
-                (v_sum + count / 2) / count);
+            u_row[chroma_x] = dither_10bit_to_8bit(
+                (u_sum + count / 2) / count,
+                chroma_x,
+                chroma_y);
+            v_row[chroma_x] = dither_10bit_to_8bit(
+                (v_sum + count / 2) / count,
+                chroma_x + 2,
+                chroma_y);
         }
     }
 }
@@ -643,15 +697,15 @@ extern "C" int bfplayer_build_hdr_yuv420_lut(
                         u_level,
                         v_level)];
                 const std::uint32_t output_y =
-                    bfplayer::encode_limited_luma(output_yuv.red);
+                    bfplayer::encode_limited_luma_10bit(output_yuv.red);
                 const std::uint32_t output_u =
-                    bfplayer::encode_limited_chroma(output_yuv.green);
+                    bfplayer::encode_limited_chroma_10bit(output_yuv.green);
                 const std::uint32_t output_v =
-                    bfplayer::encode_limited_chroma(output_yuv.blue);
+                    bfplayer::encode_limited_chroma_10bit(output_yuv.blue);
                 entry.packed =
                     output_y |
-                    (output_u << 8U) |
-                    (output_v << 16U);
+                    (output_u << 10U) |
+                    (output_v << 20U);
             }
         }
     }

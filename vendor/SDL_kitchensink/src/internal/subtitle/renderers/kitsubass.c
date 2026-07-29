@@ -26,9 +26,9 @@ static void Kit_ProcessAssImage(unsigned char *dst, const ASS_Image *img, int pi
     const unsigned char a = 0xFF - ((img->color) & 0xFF);
     const unsigned char *src = img->bitmap;
 
-    for(unsigned int y = 0; y < img->h; y++) {
-        for(unsigned int x = 0; x < img->w; x++) {
-            const unsigned int rx = x * 4;
+    for(int y = 0; y < img->h; y++) {
+        for(int x = 0; x < img->w; x++) {
+            const int rx = x * 4;
             dst[rx + 0] = r;
             dst[rx + 1] = g;
             dst[rx + 2] = b;
@@ -50,7 +50,7 @@ static void ren_render_ass_cb(Kit_SubtitleRenderer *renderer, void *src, double 
     SDL_LockMutex(ass_renderer->decoder_lock);
     const long long start_ms = (start + pts) * 1000;
     const long long end_ms = end * 1000;
-    for(int r = 0; r < sub->num_rects; r++) {
+    for(unsigned int r = 0; r < sub->num_rects; r++) {
         if(sub->rects[r]->ass == NULL)
             continue;
 
@@ -241,7 +241,7 @@ Kit_SubtitleRenderer *Kit_CreateASSSubtitleRenderer(
 
     // Read fonts from attachment streams and give them to libass
     const AVStream *st = NULL;
-    for(int j = 0; j < format_ctx->nb_streams; j++) {
+    for(unsigned int j = 0; j < format_ctx->nb_streams; j++) {
         st = format_ctx->streams[j];
         const AVCodecParameters *codec = st->codecpar;
         if(Kit_StreamIsFontAttachment(st)) {
@@ -252,8 +252,25 @@ Kit_SubtitleRenderer *Kit_CreateASSSubtitleRenderer(
         }
     }
 
-    // Init libass fonts and window frame size
-    ass_set_fonts(render_handler, NULL, "sans-serif", ASS_FONTPROVIDER_AUTODETECT, NULL, 1);
+    // Prefer the application-provided fallback so platforms without a system
+    // Fontconfig database do not emit errors or lose missing glyph fallback.
+    if(state->subtitle_fallback_font[0] != '\0') {
+        ass_set_fonts(
+            render_handler,
+            state->subtitle_fallback_font,
+            "Noto Sans",
+            ASS_FONTPROVIDER_NONE,
+            NULL,
+            0);
+    } else {
+        ass_set_fonts(
+            render_handler,
+            NULL,
+            "sans-serif",
+            ASS_FONTPROVIDER_AUTODETECT,
+            NULL,
+            1);
+    }
     ass_set_storage_size(render_handler, video_w, video_h);
     ass_set_frame_size(render_handler, screen_w, screen_h);
     ass_set_hinting(render_handler, state->font_hinting);

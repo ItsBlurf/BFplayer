@@ -3046,8 +3046,12 @@ struct LibraryUi::Impl {
             self->persist_pending_favorites(database);
             self->persist_sort_setting(database);
         }
-        std::vector<MediaEntry> final_entries =
-            database_ready ? database.list_media() : std::move(fallback_entries);
+        std::vector<MediaEntry> final_entries;
+        if (database_ready) {
+            final_entries = database.list_media();
+        } else {
+            final_entries = std::move(fallback_entries);
+        }
         if (database_ready && !all_scans_complete) {
             // Keep the transaction-safe last-good cache, but do not hide media
             // that was successfully enumerated before a recoverable USB error.

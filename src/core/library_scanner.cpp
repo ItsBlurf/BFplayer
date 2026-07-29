@@ -594,7 +594,7 @@ ScanResult scan_media_library(
 
     struct Directory {
         std::string path;
-        std::size_t depth;
+        std::size_t depth = 0;
     };
     std::vector<Directory> pending{{root, 0}};
 

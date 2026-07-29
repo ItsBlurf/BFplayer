@@ -20,7 +20,7 @@ extern "C" {
  *
  * @return Error message or NULL
  */
-KIT_API const char *Kit_GetError();
+KIT_API const char *Kit_GetError(void);
 
 /**
  * @brief Sets the error message. This should really only be used by the library.
@@ -33,7 +33,7 @@ KIT_API void Kit_SetError(const char *fmt, ...);
 /**
  * @brief Clears latest error message. After this, Kit_GetError() will return NULL.
  */
-KIT_API void Kit_ClearError();
+KIT_API void Kit_ClearError(void);
 
 #ifdef __cplusplus
 }

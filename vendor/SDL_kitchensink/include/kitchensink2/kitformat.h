@@ -31,8 +31,9 @@ typedef enum
     KIT_HWDEVICE_TYPE_OPENCL = 0x100,
     KIT_HWDEVICE_TYPE_MEDIACODEC = 0x200,
     KIT_HWDEVICE_TYPE_VULKAN = 0x400,
-    KIT_HWDEVICE_TYPE_ALL = 0xFFFFFFFF,
 } Kit_HardwareDeviceType;
+
+#define KIT_HWDEVICE_TYPE_ALL (~0u)
 
 /**
  * @brief Used to request specific type for formats for output video

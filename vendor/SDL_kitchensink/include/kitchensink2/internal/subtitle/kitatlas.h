@@ -28,7 +28,7 @@ typedef struct Kit_TextureAtlas {
     Kit_Shelf *shelves;          //< Atlas shelves
 } Kit_TextureAtlas;
 
-KIT_LOCAL Kit_TextureAtlas *Kit_CreateAtlas();
+KIT_LOCAL Kit_TextureAtlas *Kit_CreateAtlas(void);
 KIT_LOCAL void Kit_FreeAtlas(Kit_TextureAtlas *atlas);
 KIT_LOCAL void Kit_ClearAtlasContent(Kit_TextureAtlas *atlas);
 KIT_LOCAL void Kit_CheckAtlasTextureSize(Kit_TextureAtlas *atlas, SDL_Texture *texture);

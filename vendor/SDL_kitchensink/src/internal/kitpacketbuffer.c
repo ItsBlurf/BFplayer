@@ -289,7 +289,8 @@ bool Kit_BeginPacketBufferRead(Kit_PacketBuffer *buffer, void *dst, int timeout)
     }
     if(Kit_IsPacketBufferEmpty(buffer))
         goto error_1;
-    buffer->ref_cb(dst, buffer->packets[buffer->tail]);
+    if(!buffer->ref_cb(dst, buffer->packets[buffer->tail]))
+        goto error_1;
     // LOG("BEGIN -- HEAD = %lld, TAIL = %lld, USED = %lld/%lld\n", buffer->head, buffer->tail,
     // Kit_GetPacketBufferLength(buffer), buffer->capacity);
     return true;

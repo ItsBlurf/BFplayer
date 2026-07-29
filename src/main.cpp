@@ -14,6 +14,7 @@ extern "C" {
 #include "bfplayer/external_subtitles.hpp"
 #include "bfplayer/controller_buttons.hpp"
 #include "bfplayer/diagnostics.hpp"
+#include "bfplayer/hdr_yuv_tonemap.h"
 #include "bfplayer/library_database.hpp"
 #include "bfplayer/library_scanner.hpp"
 #include "bfplayer/library_ui.hpp"
@@ -1923,6 +1924,16 @@ void consume_remote_commands(App& app, bool in_playback) {
                     seek_absolute(app, command.value);
                 }
                 break;
+            case bfplayer::RemoteCommandType::cycle_audio:
+                if (in_playback) {
+                    cycle_stream(app, KIT_STREAMTYPE_AUDIO, false);
+                }
+                break;
+            case bfplayer::RemoteCommandType::cycle_subtitle:
+                if (in_playback) {
+                    cycle_subtitles(app);
+                }
+                break;
             case bfplayer::RemoteCommandType::stop:
                 if (in_playback) {
                     app.playback_running = false;
@@ -3585,9 +3596,22 @@ PlaybackOutcome run_player(
         source_video.hdr_source
             ? "software-tone-map-bt709-limited"
             : "passthrough");
-    const bool wants_true_4k =
+    const bool source_above_1080p =
         source_video.width > kWindowWidth ||
         source_video.height > kWindowHeight;
+    /*
+     * The public PS5 homebrew stack currently has no usable hardware video
+     * decoder. Preserve native 4K for normal-rate sources, but avoid asking
+     * the CPU to decode, convert, render, and swizzle demanding 4K50/60
+     * sources at full output resolution. A 1080p output is substantially
+     * smoother and removes the presentation backlog that otherwise causes
+     * visible jumps and long input latency.
+     */
+    const bool smooth_software_output =
+        source_above_1080p &&
+        source_video.demanding_software_decode;
+    const bool wants_true_4k =
+        source_above_1080p && !smooth_software_output;
     if (wants_true_4k) {
         (void)switch_fullscreen_output(
             app,
@@ -3599,7 +3623,9 @@ PlaybackOutcome run_player(
             app,
             kWindowWidth,
             kWindowHeight,
-            "source-at-or-below-1080p");
+            smooth_software_output
+                ? "demanding-4k-software-decode"
+                : "source-at-or-below-1080p");
     }
     const Kit_VideoFormatRequest video_request =
         make_video_format_request(
@@ -3628,7 +3654,7 @@ PlaybackOutcome run_player(
         source_video.demanding_software_decode ? 1 : 0);
     bfplayer::diagnostics_log(
         bfplayer::DiagnosticLevel::info,
-        "video-output-request source=%dx%d output=%dx%d display=%dx%d downscale=%d true_4k=%d",
+        "video-output-request source=%dx%d output=%dx%d display=%dx%d downscale=%d true_4k=%d smooth_software_output=%d hdr_chroma_levels=%d hdr_static_dither=1",
         source_video.width,
         source_video.height,
         video_request.width,
@@ -3636,7 +3662,9 @@ PlaybackOutcome run_player(
         app.output_width,
         app.output_height,
         video_request.width > 0 && video_request.height > 0 ? 1 : 0,
-        app.true_4k_output ? 1 : 0);
+        app.true_4k_output ? 1 : 0,
+        smooth_software_output ? 1 : 0,
+        BFPLAYER_HDR_CHROMA_LEVELS);
     // Kitchensink requires a video decoder for subtitle layout. Audio-only
     // files with timed lyrics must still open instead of failing creation.
     const int initial_subtitle =
@@ -3824,6 +3852,10 @@ PlaybackOutcome run_player(
     remote_status.source_height = source_video.height;
     remote_status.output_width = info.video_format.width;
     remote_status.output_height = info.video_format.height;
+    remote_status.audio_stream =
+        Kit_GetPlayerAudioStream(app.player);
+    remote_status.subtitle_stream =
+        Kit_GetPlayerSubtitleStream(app.player);
     remote_status.hdr_source = source_video.hdr_source;
     remote_status.hdr_transfer = source_video.color_transfer;
     std::uint64_t video_updates = 0;
@@ -4181,6 +4213,10 @@ PlaybackOutcome run_player(
                 Kit_GetPlayerDuration(app.player);
             remote_status.audio_queued_bytes =
                 app.audio != 0 ? SDL_GetQueuedAudioSize(app.audio) : 0U;
+            remote_status.audio_stream =
+                Kit_GetPlayerAudioStream(app.player);
+            remote_status.subtitle_stream =
+                Kit_GetPlayerSubtitleStream(app.player);
             remote_status.peak_rss_kib = process_peak_rss_kib();
             const bfplayer::SafeReadFileStats file_stats =
                 app.local_media.stats();
@@ -4585,6 +4621,13 @@ int main(int argc, char** argv) {
     }
     boot_stage("sdl-init-complete");
     Kit_SetHint(KIT_HINT_THREAD_COUNT, kVideoDecoderThreads);
+    if (Kit_SetSubtitleFallbackFont(app.fallback_font.c_str()) != 0) {
+        bfplayer::diagnostics_log(
+            bfplayer::DiagnosticLevel::warning,
+            "subtitle-fallback-font rejected path=%s error=%s",
+            app.fallback_font.c_str(),
+            Kit_GetError());
+    }
     apply_playback_buffer_policy(playback_buffer_policy(false));
     boot_stage("kitchensink-init-begin");
     if (Kit_Init(KIT_INIT_NETWORK | KIT_INIT_ASS) != 0) {

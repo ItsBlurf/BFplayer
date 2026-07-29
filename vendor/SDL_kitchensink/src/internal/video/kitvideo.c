@@ -41,6 +41,28 @@ typedef struct Kit_VideoDecoder {
     int hdr_active;
 } Kit_VideoDecoder;
 
+static void *Kit_AllocVideoFrame(void) {
+    return av_frame_alloc();
+}
+
+static void Kit_UnrefVideoFrame(void *object) {
+    av_frame_unref(object);
+}
+
+static void Kit_FreeVideoFrame(void **object) {
+    AVFrame *frame = *object;
+    av_frame_free(&frame);
+    *object = frame;
+}
+
+static void Kit_MoveVideoFrame(void *dst, void *src) {
+    av_frame_move_ref(dst, src);
+}
+
+static bool Kit_RefVideoFrame(void *dst, const void *src) {
+    return av_frame_ref(dst, src) >= 0;
+}
+
 static int Kit_FrameColorTransfer(
     const Kit_Decoder *decoder,
     const AVFrame *frame
@@ -238,6 +260,10 @@ static struct SwsContext *Kit_GetSwsContext(
     int output_h,
     enum AVPixelFormat out_fmt
 ) {
+    const int scaling_flags =
+        (output_w < input_w || output_h < input_h)
+        ? SWS_BICUBIC | SWS_ACCURATE_RND | SWS_FULL_CHR_H_INT
+        : SWS_BILINEAR | SWS_ACCURATE_RND;
     struct SwsContext *new_context = sws_getCachedContext(
         old_context,
         input_w,
@@ -246,7 +272,7 @@ static struct SwsContext *Kit_GetSwsContext(
         output_w,
         output_h,
         out_fmt,
-        SWS_BILINEAR,
+        scaling_flags,
         NULL,
         NULL,
         NULL);
@@ -430,7 +456,8 @@ Kit_Decoder *Kit_CreateVideoDecoder(
     enum AVPixelFormat output_format;
 
     // Find and set up stream.
-    if(stream_index < 0 || stream_index >= format_ctx->nb_streams) {
+    if(stream_index < 0 ||
+       (unsigned int)stream_index >= format_ctx->nb_streams) {
         Kit_SetError("Invalid video stream index %d", stream_index);
         return NULL;
     }
@@ -474,11 +501,11 @@ Kit_Decoder *Kit_CreateVideoDecoder(
     }
     if((buffer = Kit_CreatePacketBuffer(
             state->video_frame_buffer_size,
-            (buf_obj_alloc)av_frame_alloc,
-            (buf_obj_unref)av_frame_unref,
-            (buf_obj_free)av_frame_free,
-            (buf_obj_move)av_frame_move_ref,
-            (buf_obj_ref)av_frame_ref
+            Kit_AllocVideoFrame,
+            Kit_UnrefVideoFrame,
+            Kit_FreeVideoFrame,
+            Kit_MoveVideoFrame,
+            Kit_RefVideoFrame
         )) == NULL) {
         Kit_SetError("Unable to create an output buffer for stream %d", stream_index);
         goto exit_6;

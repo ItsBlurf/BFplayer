@@ -2,6 +2,7 @@
 
 #include <cstdlib>
 #include <iostream>
+#include <limits>
 
 namespace {
 
@@ -16,6 +17,7 @@ void check(bool condition, const char* message) {
 
 int main() {
     BfplayerAudioConsumePlan plan{};
+    BfplayerAudioSeekPlan seek{};
 
     check(
         bfplayer_audio_consume_plan(131072, 131072, 65536, 4, &plan) &&
@@ -44,6 +46,79 @@ int main() {
     check(
         !bfplayer_audio_consume_plan(4096, 4096, 1024, 0, &plan),
         "zero-sized sample frames are rejected");
+    check(
+        bfplayer_audio_seek_plan(
+            192000,
+            192000,
+            4,
+            10.0,
+            192000.0,
+            10.25,
+            &seek) &&
+            seek.skip_bytes == 48000 &&
+            seek.target_reached,
+        "seek trimming lands on the requested sample");
+    check(
+        bfplayer_audio_seek_plan(
+            48000,
+            48000,
+            4,
+            7.0,
+            192000.0,
+            8.0,
+            &seek) &&
+            seek.skip_bytes == 48000 &&
+            !seek.target_reached,
+        "a fully stale decoded frame is discarded");
+    check(
+        bfplayer_audio_seek_plan(
+            4096,
+            2048,
+            4,
+            2.0,
+            192000.0,
+            2.005,
+            &seek) &&
+            seek.skip_bytes == 0 &&
+            seek.target_reached,
+        "the consumed portion contributes to the current timestamp");
+    check(
+        bfplayer_audio_seek_plan(
+            4096,
+            4096,
+            4,
+            3.0,
+            192000.0,
+            2.0,
+            &seek) &&
+            seek.skip_bytes == 0 &&
+            seek.target_reached,
+        "audio at or after the seek target is preserved");
+    check(
+        !bfplayer_audio_seek_plan(
+            4095,
+            4095,
+            4,
+            0.0,
+            192000.0,
+            1.0,
+            &seek),
+        "invalid seek frame accounting is rejected");
+    const auto max_aligned =
+        std::numeric_limits<std::size_t>::max() -
+        std::numeric_limits<std::size_t>::max() % 8u;
+    check(
+        bfplayer_audio_seek_plan(
+            max_aligned,
+            max_aligned,
+            8u,
+            0.0,
+            1.0e18,
+            static_cast<double>(max_aligned) / 1.0e18,
+            &seek) &&
+            seek.skip_bytes <= max_aligned &&
+            seek.skip_bytes % 8u == 0u,
+        "seek trimming cannot overflow or exceed the remaining frame");
 
     std::cout << "kitchensink_audio_consume_tests: PASS\n";
     return 0;

@@ -183,7 +183,7 @@ int Kit_GetSourceStreamInfo(const Kit_Source *src, Kit_SourceStreamInfo *info, i
     assert(info != NULL);
 
     const AVFormatContext *format_ctx = (AVFormatContext *)src->format_ctx;
-    if(index < 0 || index >= format_ctx->nb_streams) {
+    if(index < 0 || (unsigned int)index >= format_ctx->nb_streams) {
         Kit_SetError("Invalid stream index");
         return 1;
     }
@@ -214,11 +214,11 @@ static bool Kit_IsSubtitleSupported(const enum AVCodecID type) {
 
 static int Kit_GetBestSubtitleStream(const Kit_Source *src) {
     AVFormatContext *format_ctx = src->format_ctx;
-    for(int i = 0; i < format_ctx->nb_streams; i++) {
+    for(unsigned int i = 0; i < format_ctx->nb_streams; i++) {
         const AVStream *stream = format_ctx->streams[i];
         if(stream->codecpar->codec_type == AVMEDIA_TYPE_SUBTITLE &&
            Kit_IsSubtitleSupported(stream->codecpar->codec_id)) {
-            return i;
+            return (int)i;
         }
     }
     return -1;

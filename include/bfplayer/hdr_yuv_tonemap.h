@@ -7,7 +7,7 @@
 extern "C" {
 #endif
 
-#define BFPLAYER_HDR_CHROMA_LEVELS 17
+#define BFPLAYER_HDR_CHROMA_LEVELS 65
 #define BFPLAYER_HDR_LUMA_LEVELS 256
 #define BFPLAYER_HDR_YUV_ENTRY_COUNT \
     (BFPLAYER_HDR_CHROMA_LEVELS * BFPLAYER_HDR_CHROMA_LEVELS * \
@@ -27,6 +27,11 @@ typedef struct BfplayerHdrYuvConfig {
 } BfplayerHdrYuvConfig;
 
 typedef struct BfplayerHdrYuvEntry {
+    /*
+     * Limited-range BT.709 output stored at 10-bit precision:
+     * bits 0..9 Y, 10..19 U, and 20..29 V. The apply path performs
+     * deterministic spatial dithering when reducing this to 8-bit IYUV.
+     */
     uint32_t packed;
 } BfplayerHdrYuvEntry;
 

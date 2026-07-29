@@ -170,6 +170,8 @@ const result = {
   webm: {},
   pause: {},
   seek: {},
+  audioSwitch: {},
+  subtitleSwitch: {},
   romance: {},
   assertions: [],
 };
@@ -246,19 +248,27 @@ try {
   await remote("/v1/play", "POST");
   await waitFor("resume-applied", (state) => !state.paused, 5000);
   const beforeSeek = await status("before-seek");
+  const seekTargetSeconds = Math.min(
+    beforeSeek.durationSeconds,
+    beforeSeek.positionSeconds + 10,
+  );
   const seekIssuedAt = Date.now();
   await remote("/v1/seek", "POST", { seconds: 10 });
   const afterSeek = await waitFor(
     "seek-recovered",
     (state) =>
       state.phase === "playback" &&
-      state.positionSeconds >= beforeSeek.positionSeconds + 8 &&
-      state.videoUpdates > 0,
+      state.mediaSeekCalls > beforeSeek.mediaSeekCalls &&
+      state.positionSeconds >= seekTargetSeconds - 0.5,
     15000,
   );
   result.seek = {
     fromSeconds: beforeSeek.positionSeconds,
+    targetSeconds: seekTargetSeconds,
     recoveredSeconds: afterSeek.positionSeconds,
+    positionErrorSeconds: Math.abs(
+      afterSeek.positionSeconds - seekTargetSeconds,
+    ),
     recoveryMilliseconds: Date.now() - seekIssuedAt,
     deliveredFps: afterSeek.deliveredFps,
   };
@@ -273,14 +283,75 @@ try {
     15000,
   );
   const romanceSamples = await sampleFor("romance-steady", 20000);
+
+  const audioBefore = await status("audio-switch-before");
+  const audioSwitchAt = Date.now();
+  await remote("/v1/cycle-audio", "POST");
+  const audioAfter = await waitFor(
+    "audio-switch-recovered",
+    (state) =>
+      state.phase === "playback" &&
+      state.audioStream !== audioBefore.audioStream &&
+      state.mediaSeekCalls > audioBefore.mediaSeekCalls,
+    5000,
+  );
+  const audioSwitchMilliseconds = Date.now() - audioSwitchAt;
+  result.audioSwitch = {
+    previousStream: audioBefore.audioStream,
+    currentStream: audioAfter.audioStream,
+    recoveryMilliseconds: audioSwitchMilliseconds,
+    positionDiscontinuitySeconds: Math.abs(
+      (audioAfter.positionSeconds - audioBefore.positionSeconds) -
+        audioSwitchMilliseconds / 1000,
+    ),
+  };
+
+  let subtitleBefore = await status("subtitle-switch-before");
+  let subtitleSwitchAt = Date.now();
+  await remote("/v1/cycle-subtitle", "POST");
+  let subtitleAfter = await waitFor(
+    "subtitle-switch-selected",
+    (state) =>
+      state.phase === "playback" &&
+      state.subtitleStream !== subtitleBefore.subtitleStream,
+    5000,
+  );
+  if (subtitleAfter.subtitleStream < 0) {
+    subtitleBefore = subtitleAfter;
+    subtitleSwitchAt = Date.now();
+    await remote("/v1/cycle-subtitle", "POST");
+    subtitleAfter = await waitFor(
+      "subtitle-switch-recovered",
+      (state) =>
+        state.phase === "playback" &&
+        state.subtitleStream >= 0 &&
+        state.mediaSeekCalls > subtitleBefore.mediaSeekCalls,
+      5000,
+    );
+  }
+  const subtitleSwitchMilliseconds = Date.now() - subtitleSwitchAt;
+  result.subtitleSwitch = {
+    previousStream: subtitleBefore.subtitleStream,
+    currentStream: subtitleAfter.subtitleStream,
+    recoveryMilliseconds: subtitleSwitchMilliseconds,
+    positionDiscontinuitySeconds: Math.abs(
+      (subtitleAfter.positionSeconds - subtitleBefore.positionSeconds) -
+        subtitleSwitchMilliseconds / 1000,
+    ),
+  };
+
   const romanceBeforeSeek = await status("romance-before-seek");
+  const romanceSeekTargetSeconds = Math.min(
+    romanceBeforeSeek.durationSeconds,
+    romanceBeforeSeek.positionSeconds + 10,
+  );
   const romanceSeekAt = Date.now();
   await remote("/v1/seek", "POST", { seconds: 10 });
   const romanceAfterSeek = await waitFor(
     "romance-seek-recovered",
     (state) =>
-      state.positionSeconds >= romanceBeforeSeek.positionSeconds + 8 &&
-      state.videoUpdates > 0,
+      state.mediaSeekCalls > romanceBeforeSeek.mediaSeekCalls &&
+      state.positionSeconds >= romanceSeekTargetSeconds - 0.5,
     15000,
   );
   const romanceSeekRecoveryMilliseconds = Date.now() - romanceSeekAt;
@@ -299,7 +370,11 @@ try {
     maxPresentP95Ms: maximum(romancePlayback, "presentP95Ms"),
     maxCpuCores: maximum(romancePlayback, "cpuCoreEquivalents"),
     seekRecoveryMilliseconds: romanceSeekRecoveryMilliseconds,
+    seekTargetSeconds: romanceSeekTargetSeconds,
     recoveredPositionSeconds: romanceAfterSeek.positionSeconds,
+    seekPositionErrorSeconds: Math.abs(
+      romanceAfterSeek.positionSeconds - romanceSeekTargetSeconds,
+    ),
   };
   await remote("/v1/stop", "POST");
   await waitFor("romance-stop", (state) => state.phase === "library", 10000);
@@ -307,12 +382,12 @@ try {
   const pauseDrift = Math.abs(result.pause.positionDriftSeconds);
   result.assertions = [
     {
-      name: "true-4k-output",
+      name: "adaptive-4k60-software-output",
       passed:
         result.webm.sourceWidth === 3840 &&
         result.webm.sourceHeight === 2160 &&
-        result.webm.outputWidth === 3840 &&
-        result.webm.outputHeight === 2160,
+        result.webm.outputWidth === 1920 &&
+        result.webm.outputHeight === 1080,
     },
     {
       name: "webm-completes-once",
@@ -334,16 +409,25 @@ try {
         result.webm.hdrToneMapAverageMs <= 5,
     },
     {
-      name: "true-4k-webm-performance",
+      name: "webm-realtime-playback",
       passed:
-        Number.isFinite(result.webm.maxDeliveredFps) &&
-        result.webm.maxDeliveredFps >= 35,
+        Number.isFinite(result.webm.medianDeliveredFps) &&
+        result.webm.medianDeliveredFps >=
+          result.webm.sourceFps * 0.95,
+    },
+    {
+      name: "webm-frame-pipeline-budget",
+      passed:
+        Number.isFinite(result.webm.maxVideoPullMs) &&
+        result.webm.maxVideoPullMs <= 8 &&
+        Number.isFinite(result.webm.maxPresentP95Ms) &&
+        result.webm.maxPresentP95Ms <= 16,
     },
     {
       name: "bounded-playback-memory",
       passed:
         Number.isFinite(result.webm.maxPeakRssKiB) &&
-        result.webm.maxPeakRssKiB <= 1100000,
+        result.webm.maxPeakRssKiB <= 900000,
     },
     {
       name: "pause-clock-stable",
@@ -351,11 +435,32 @@ try {
     },
     {
       name: "webm-seek-recovers",
-      passed: result.seek.recoveryMilliseconds <= 5000,
+      passed:
+        result.seek.recoveryMilliseconds <= 1500 &&
+        result.seek.positionErrorSeconds <= 1,
     },
     {
       name: "romance-seek-recovers",
-      passed: result.romance.seekRecoveryMilliseconds <= 5000,
+      passed:
+        result.romance.seekRecoveryMilliseconds <= 1500 &&
+        result.romance.seekPositionErrorSeconds <= 1,
+    },
+    {
+      name: "audio-track-switch-recovers",
+      passed:
+        result.audioSwitch.currentStream !==
+          result.audioSwitch.previousStream &&
+        result.audioSwitch.recoveryMilliseconds <= 1500 &&
+        result.audioSwitch.positionDiscontinuitySeconds <= 1,
+    },
+    {
+      name: "subtitle-track-switch-recovers",
+      passed:
+        result.subtitleSwitch.currentStream >= 0 &&
+        result.subtitleSwitch.currentStream !==
+          result.subtitleSwitch.previousStream &&
+        result.subtitleSwitch.recoveryMilliseconds <= 1500 &&
+        result.subtitleSwitch.positionDiscontinuitySeconds <= 1,
     },
     {
       name: "romance-realtime-playback",

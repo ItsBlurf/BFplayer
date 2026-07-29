@@ -28,7 +28,7 @@ static bool Kit_TestSWFormat(const AVHWFramesConstraints *constraints) {
 /**
  * Make sure our hardware device seems like it can handle the video stream we want to feed it.
  */
-static AVBufferRef *Kit_TestHWDevice(const AVCodecHWConfig *config, unsigned int w, unsigned int h) {
+static AVBufferRef *Kit_TestHWDevice(const AVCodecHWConfig *config, int w, int h) {
     AVBufferRef *hw_device_ctx;
     AVHWFramesConstraints *constraints;
 

@@ -15,10 +15,11 @@ static Kit_LibraryState _library_state = {
     .audio_late_threshold = 50,
     .video_early_threshold = 5,
     .video_late_threshold = 50,
+    .subtitle_fallback_font = {0},
     .libass_handle = NULL,
     .ass_so_handle = NULL,
 };
 
-Kit_LibraryState *Kit_GetLibraryState() {
+Kit_LibraryState *Kit_GetLibraryState(void) {
     return &_library_state;
 }

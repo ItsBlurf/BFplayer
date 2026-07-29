@@ -9,10 +9,10 @@ namespace {
 
 template <typename Mode, std::size_t Size>
 struct RatioEntry {
-    Mode mode;
-    const char* key;
-    const char* name;
-    double ratio;
+    Mode mode{};
+    const char* key = nullptr;
+    const char* name = nullptr;
+    double ratio = 0.0;
 };
 
 constexpr std::array<RatioEntry<VideoAspectMode, 9>, 9> kAspectModes{{

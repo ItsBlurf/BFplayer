@@ -81,7 +81,7 @@ typedef void *(*buf_obj_alloc)(void);
 typedef void (*buf_obj_unref)(void *);
 typedef void (*buf_obj_free)(void **);
 typedef void (*buf_obj_move)(void *, void *);
-typedef void (*buf_obj_ref)(void *, void *);
+typedef bool (*buf_obj_ref)(void *, const void *);
 
 extern Kit_LibraryState *Kit_GetLibraryState(void);
 extern void Kit_SetError(const char *format, ...);
@@ -114,7 +114,6 @@ extern void Kit_SetSubtitlePacketData(
     Kit_SubtitlePacket *, bool, double, double, int, int, SDL_Surface *);
 extern void Kit_MoveSubtitlePacketRefs(Kit_SubtitlePacket *, Kit_SubtitlePacket *);
 extern void Kit_DelSubtitlePacketRefs(Kit_SubtitlePacket *, bool);
-extern void Kit_CreateSubtitlePacketRef(Kit_SubtitlePacket *, Kit_SubtitlePacket *);
 extern void Kit_CheckAtlasTextureSize(Kit_TextureAtlas *, SDL_Texture *);
 extern void Kit_ClearAtlasContent(Kit_TextureAtlas *);
 extern int Kit_AddAtlasItem(
@@ -129,7 +128,9 @@ static void packet_unref(void *packet) {
 }
 
 static void packet_free(void **packet) {
-    Kit_FreeSubtitlePacket((Kit_SubtitlePacket **)packet);
+    Kit_SubtitlePacket *subtitle_packet = *packet;
+    Kit_FreeSubtitlePacket(&subtitle_packet);
+    *packet = subtitle_packet;
 }
 
 static void packet_move(void *destination, void *source) {
@@ -138,10 +139,10 @@ static void packet_move(void *destination, void *source) {
         (Kit_SubtitlePacket *)source);
 }
 
-static void packet_ref(void *destination, void *source) {
-    Kit_CreateSubtitlePacketRef(
-        (Kit_SubtitlePacket *)destination,
-        (Kit_SubtitlePacket *)source);
+static bool packet_ref(void *destination, const void *source) {
+    (void)destination;
+    (void)source;
+    return false;
 }
 
 typedef struct Kit_ImageSubtitleRenderer {

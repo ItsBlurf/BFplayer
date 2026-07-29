@@ -30,7 +30,30 @@ typedef struct Kit_AudioDecoder {
     Kit_PacketBuffer *buffer;     ///< Packet ringbuffer for decoded audio packets
     Kit_AudioOutputFormat output; ///< Output audio format description
     double last_clock_pts;        ///< Last monotonic audible media timestamp
+    double pending_seek_pts;      ///< Exact first timestamp allowed after seek
 } Kit_AudioDecoder;
+
+static void *Kit_AllocAudioFrame(void) {
+    return av_frame_alloc();
+}
+
+static void Kit_UnrefAudioFrame(void *object) {
+    av_frame_unref(object);
+}
+
+static void Kit_FreeAudioFrame(void **object) {
+    AVFrame *frame = *object;
+    av_frame_free(&frame);
+    *object = frame;
+}
+
+static void Kit_MoveAudioFrame(void *dst, void *src) {
+    av_frame_move_ref(dst, src);
+}
+
+static bool Kit_RefAudioFrame(void *dst, const void *src) {
+    return av_frame_ref(dst, src) >= 0;
+}
 
 int Kit_GetAudioDecoderOutputFormat(const Kit_Decoder *decoder, Kit_AudioOutputFormat *output) {
     if(decoder == NULL) {
@@ -42,13 +65,14 @@ int Kit_GetAudioDecoderOutputFormat(const Kit_Decoder *decoder, Kit_AudioOutputF
     return 0;
 }
 
-void Kit_ClearAudioDecoderCurrent(Kit_Decoder *decoder) {
+void Kit_SeekAudioDecoder(Kit_Decoder *decoder, double target) {
     if(decoder == NULL)
         return;
     Kit_AudioDecoder *audio_decoder = decoder->userdata;
     if(audio_decoder != NULL) {
         av_frame_unref(audio_decoder->current);
-        audio_decoder->last_clock_pts = NAN;
+        audio_decoder->last_clock_pts = target;
+        audio_decoder->pending_seek_pts = target;
     }
 }
 
@@ -214,7 +238,8 @@ Kit_Decoder *Kit_CreateAudioDecoder(
     Kit_AudioOutputFormat output;
 
     // Find and set up stream.
-    if(stream_index < 0 || stream_index >= format_ctx->nb_streams) {
+    if(stream_index < 0 ||
+       (unsigned int)stream_index >= format_ctx->nb_streams) {
         Kit_SetError("Invalid audio stream index %d", stream_index);
         return NULL;
     }
@@ -254,11 +279,11 @@ Kit_Decoder *Kit_CreateAudioDecoder(
     }
     if((buffer = Kit_CreatePacketBuffer(
             state->audio_frame_buffer_size,
-            (buf_obj_alloc)av_frame_alloc,
-            (buf_obj_unref)av_frame_unref,
-            (buf_obj_free)av_frame_free,
-            (buf_obj_move)av_frame_move_ref,
-            (buf_obj_ref)av_frame_ref
+            Kit_AllocAudioFrame,
+            Kit_UnrefAudioFrame,
+            Kit_FreeAudioFrame,
+            Kit_MoveAudioFrame,
+            Kit_RefAudioFrame
         )) == NULL) {
         Kit_SetError("Unable to create an output buffer for stream %d", stream_index);
         goto exit_current;
@@ -310,6 +335,7 @@ Kit_Decoder *Kit_CreateAudioDecoder(
     audio_decoder->fifo = fifo;
     audio_decoder->fifo_start_pts = -1;
     audio_decoder->last_clock_pts = NAN;
+    audio_decoder->pending_seek_pts = NAN;
     return decoder;
 
 exit_swr:
@@ -338,6 +364,49 @@ static double Kit_GetCurrentPTS(const Kit_Decoder *decoder) {
     return audio_decoder->current->best_effort_timestamp * av_q2d(decoder->stream->time_base);
 }
 
+static bool Kit_ApplyPendingSeek(
+    Kit_Decoder *decoder,
+    Kit_AudioDecoder *audio_decoder,
+    double bytes_per_second
+) {
+    while(audio_decoder->pending_seek_pts ==
+          audio_decoder->pending_seek_pts) {
+        if(audio_decoder->current->crop_bottom == 0) {
+            av_frame_unref(audio_decoder->current);
+            if(!Kit_ReadPacketBuffer(
+                    audio_decoder->buffer,
+                    audio_decoder->current,
+                    0)) {
+                return false;
+            }
+        }
+
+        BfplayerAudioSeekPlan plan;
+        if(!bfplayer_audio_seek_plan(
+                audio_decoder->current->crop_top,
+                audio_decoder->current->crop_bottom,
+                SAMPLE_BYTES(audio_decoder),
+                Kit_GetCurrentPTS(decoder),
+                bytes_per_second,
+                audio_decoder->pending_seek_pts,
+                &plan)) {
+            audio_decoder->pending_seek_pts = NAN;
+            audio_decoder->last_clock_pts = NAN;
+            return true;
+        }
+        audio_decoder->current->crop_bottom -= plan.skip_bytes;
+        if(plan.target_reached) {
+            const double target = audio_decoder->pending_seek_pts;
+            audio_decoder->pending_seek_pts = NAN;
+            audio_decoder->last_clock_pts = target;
+            Kit_AdjustTimerBase(decoder->sync_timer, target);
+            return true;
+        }
+        av_frame_unref(audio_decoder->current);
+    }
+    return true;
+}
+
 int Kit_GetAudioDecoderData(Kit_Decoder *decoder, size_t backend_buffer_size, unsigned char *buf, size_t len) {
     assert(decoder != NULL);
 
@@ -362,6 +431,15 @@ int Kit_GetAudioDecoderData(Kit_Decoder *decoder, size_t backend_buffer_size, un
         return 0;
     }
 
+    const double bytes_per_second =
+        (double)audio_decoder->output.sample_rate *
+        (double)SAMPLE_BYTES(audio_decoder);
+    if(!Kit_ApplyPendingSeek(
+            decoder,
+            audio_decoder,
+            bytes_per_second)) {
+        goto no_data;
+    }
     const size_t initial_frame_bytes =
         audio_decoder->current->crop_top;
     const size_t initial_remaining_bytes =
@@ -370,9 +448,6 @@ int Kit_GetAudioDecoderData(Kit_Decoder *decoder, size_t backend_buffer_size, un
         initial_frame_bytes >= initial_remaining_bytes
             ? initial_frame_bytes - initial_remaining_bytes
             : 0;
-    const double bytes_per_second =
-        (double)audio_decoder->output.sample_rate *
-        (double)SAMPLE_BYTES(audio_decoder);
     double pts = Kit_GetCurrentPTS(decoder);
     if(bytes_per_second > 0.0)
         pts += (double)consumed_bytes / bytes_per_second;

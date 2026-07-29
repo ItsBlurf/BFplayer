@@ -13,6 +13,8 @@ enum class RemoteCommandType {
     toggle_pause,
     seek_relative,
     seek_absolute,
+    cycle_audio,
+    cycle_subtitle,
     stop,
     exit,
 };
@@ -70,6 +72,8 @@ struct RemotePlaybackStatus {
     unsigned int audio_frames_capacity = 0;
     unsigned int audio_packets_length = 0;
     unsigned int audio_packets_capacity = 0;
+    int audio_stream = -1;
+    int subtitle_stream = -1;
     int source_width = 0;
     int source_height = 0;
     int output_width = 0;

@@ -21,11 +21,34 @@ static size_t Kit_GetAVPacketSize(const void *object) {
     return bytes;
 }
 
+static void *Kit_AllocAVPacket(void) {
+    return av_packet_alloc();
+}
+
+static void Kit_UnrefAVPacket(void *object) {
+    av_packet_unref(object);
+}
+
+static void Kit_FreeAVPacket(void **object) {
+    AVPacket *packet = *object;
+    av_packet_free(&packet);
+    *object = packet;
+}
+
+static void Kit_MoveAVPacket(void *dst, void *src) {
+    av_packet_move_ref(dst, src);
+}
+
+static bool Kit_RefAVPacket(void *dst, const void *src) {
+    return av_packet_ref(dst, src) >= 0;
+}
+
 static void Kit_SendEOFPacket(Kit_Demuxer *demuxer) {
     for(int i = 0; i < KIT_INDEX_COUNT; i++) {
         if(!demuxer->buffers[i])
             continue;
-        demuxer->scratch_packet->opaque = (void *)2;
+        demuxer->scratch_packet->stream_index =
+            KIT_PACKET_STREAM_INDEX_EOF;
         Kit_WritePacketBuffer(demuxer->buffers[i], demuxer->scratch_packet);
     }
 }
@@ -72,11 +95,11 @@ Kit_Demuxer *Kit_CreateDemuxer(const Kit_Source *src, int video_index, int audio
     if(video_index >= 0) {
         video_buf = Kit_CreatePacketBuffer(
             state->video_packet_buffer_size,
-            (buf_obj_alloc)av_packet_alloc,
-            (buf_obj_unref)av_packet_unref,
-            (buf_obj_free)av_packet_free,
-            (buf_obj_move)av_packet_move_ref,
-            (buf_obj_ref)av_packet_ref
+            Kit_AllocAVPacket,
+            Kit_UnrefAVPacket,
+            Kit_FreeAVPacket,
+            Kit_MoveAVPacket,
+            Kit_RefAVPacket
         );
         if(video_buf == NULL) {
             Kit_SetError("Unable to allocate video packet buffer");
@@ -90,11 +113,11 @@ Kit_Demuxer *Kit_CreateDemuxer(const Kit_Source *src, int video_index, int audio
     if(audio_index >= 0) {
         audio_buf = Kit_CreatePacketBuffer(
             state->audio_packet_buffer_size,
-            (buf_obj_alloc)av_packet_alloc,
-            (buf_obj_unref)av_packet_unref,
-            (buf_obj_free)av_packet_free,
-            (buf_obj_move)av_packet_move_ref,
-            (buf_obj_ref)av_packet_ref
+            Kit_AllocAVPacket,
+            Kit_UnrefAVPacket,
+            Kit_FreeAVPacket,
+            Kit_MoveAVPacket,
+            Kit_RefAVPacket
         );
         if(audio_buf == NULL) {
             Kit_SetError("Unable to allocate audio packet buffer");
@@ -108,11 +131,11 @@ Kit_Demuxer *Kit_CreateDemuxer(const Kit_Source *src, int video_index, int audio
     if(subtitle_index >= 0) {
         subtitle_buf = Kit_CreatePacketBuffer(
             state->subtitle_packet_buffer_size,
-            (buf_obj_alloc)av_packet_alloc,
-            (buf_obj_unref)av_packet_unref,
-            (buf_obj_free)av_packet_free,
-            (buf_obj_move)av_packet_move_ref,
-            (buf_obj_ref)av_packet_ref
+            Kit_AllocAVPacket,
+            Kit_UnrefAVPacket,
+            Kit_FreeAVPacket,
+            Kit_MoveAVPacket,
+            Kit_RefAVPacket
         );
         if(subtitle_buf == NULL) {
             Kit_SetError("Unable to allocate subtitle packet buffer");
@@ -188,14 +211,37 @@ static void Kit_SendSeekPacket(Kit_Demuxer *demuxer) {
     for(int i = 0; i < KIT_INDEX_COUNT; i++) {
         if(!demuxer->buffers[i])
             continue;
-        demuxer->scratch_packet->opaque = (void *)1;
+        demuxer->scratch_packet->stream_index =
+            KIT_PACKET_STREAM_INDEX_SEEK;
         Kit_FlushPacketBuffer(demuxer->buffers[i]);
         Kit_WritePacketBuffer(demuxer->buffers[i], demuxer->scratch_packet);
     }
 }
 
 bool Kit_DemuxerSeek(Kit_Demuxer *demuxer, int64_t seek_target) {
-    if(avformat_seek_file(demuxer->src->format_ctx, -1, INT64_MIN, seek_target, INT64_MAX, 0) >= 0) {
+    /*
+     * Prefer a decode-safe point at or before the requested timestamp. An
+     * unconstrained max_ts lets Matroska/WebM choose a later cluster, which
+     * makes short forward seeks overshoot by several seconds. Decode queues
+     * then discard/trim forward to the exact target.
+     */
+    int result = avformat_seek_file(
+        demuxer->src->format_ctx,
+        -1,
+        INT64_MIN,
+        seek_target,
+        seek_target,
+        0);
+    if(result < 0) {
+        result = avformat_seek_file(
+            demuxer->src->format_ctx,
+            -1,
+            INT64_MIN,
+            seek_target,
+            INT64_MAX,
+            0);
+    }
+    if(result >= 0) {
         Kit_ClearDemuxerBuffers(demuxer);
         Kit_SendSeekPacket(demuxer);
         return true;

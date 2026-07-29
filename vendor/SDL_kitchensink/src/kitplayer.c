@@ -638,7 +638,7 @@ int Kit_PlayerSeek(Kit_Player *player, double seek_set) {
         seek_set = 0;
     if(seek_set >= duration)
         seek_set = duration;
-    Kit_ClearAudioDecoderCurrent(player->decoders[KIT_AUDIO_INDEX]);
+    Kit_SeekAudioDecoder(player->decoders[KIT_AUDIO_INDEX], seek_set);
     Kit_AdjustTimerBase(player->sync_timer, seek_set);
     Kit_SeekDemuxerThread(player->demux_thread, seek_set * AV_TIME_BASE);
     return 0;

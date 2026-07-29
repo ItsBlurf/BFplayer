@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.1.0-alpha.43 - smooth 4K60 WebM test build
+
+- Use adaptive 1920x1080 output for demanding 4K50/60 software-decoded video
+  while preserving native 4K output for less demanding sources.
+- Improve HDR-to-SDR color precision with a denser chroma table, 10-bit
+  intermediate values, and deterministic spatial dithering.
+- Make seeks sample-accurate on the audio path and constrain WebM/Matroska
+  seeks to a decode-safe point before the requested timestamp.
+- Fix decoder callback contracts, embedded subtitle font fallback, and delayed
+  audio or subtitle track changes.
+- Add live seek and track-switch recovery gates plus Linux ASan/UBSan coverage.
+- The exact standalone and websrv release players both passed all 13 hardware
+  gates. The supplied 3840x2160 59.94 fps VP9/PQ WebM held 59.94 fps with
+  about 773 MiB peak RSS; the 1080p sample held its source frame rate.
+
 ## 0.1.0-alpha.42 - playback recovery and measured 4K test build
 
 - Repair partial-audio consumption, audible-clock handling, pause, resume, and

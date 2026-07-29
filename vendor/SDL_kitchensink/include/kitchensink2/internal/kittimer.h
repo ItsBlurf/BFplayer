@@ -6,7 +6,7 @@
 
 typedef struct Kit_Timer Kit_Timer;
 
-KIT_LOCAL Kit_Timer *Kit_CreateTimer();
+KIT_LOCAL Kit_Timer *Kit_CreateTimer(void);
 KIT_LOCAL Kit_Timer *Kit_CreateSecondaryTimer(const Kit_Timer *src, bool writeable);
 
 KIT_LOCAL void Kit_InitTimerBase(Kit_Timer *timer);
