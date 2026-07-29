@@ -11,6 +11,8 @@ audio-clock, buffer, and DLNA/NAS changes have a separate
 [executable DLNA client integration evidence](ALPHA37_OFFLINE_VERIFICATION.md).
 Alpha.38 extends that coverage to
 [versioned services and multi-resource NAS listings](ALPHA38_OFFLINE_VERIFICATION.md).
+Alpha.39 adds a
+[bounded decoder-input memory record](ALPHA39_OFFLINE_VERIFICATION.md).
 
 | Requirement | Current evidence | Status |
 | --- | --- | --- |
