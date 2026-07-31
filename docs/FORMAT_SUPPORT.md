@@ -87,6 +87,13 @@ VP9, AV1, 4K, 10-bit, and high-bitrate files are experimental until measured
 on the console. Unsupported speed is reported as a limit; the player does not
 silently claim hardware acceleration.
 
+The alpha.44 PS5 test corpus includes a 3840x2160 59.94 fps 10-bit VP9
+Profile 2 WebM that reaches its source frame rate through the native HDR
+presenter. That result applies to the measured file, not every VP9 or 4K
+encode. An accurately converted 4K60 Main 10 HEVC HLG probe was
+software-decoder-limited below 60 fps even though its HDR presentation stayed
+inside the frame budget.
+
 ## Audio decoders
 
 Confirmed decoders include AAC, AC-3, E-AC-3, ALAC, MP2/MP3, FLAC, Opus,
@@ -102,6 +109,11 @@ pressing Triangle cycles three playback-local renderer modes: Fit
 Anamorphic pixel-aspect correction from Kitchensink is included in Fit/Fill
 math. These are renderer controls; playback-rate changes, pan/scan positioning,
 and a user-selectable deinterlace filter are not implemented.
+
+BT.2020/PQ 10-bit video uses native PS5 HDR10 output without tone mapping to
+SDR. BT.2020/HLG is converted to PQ for the same HDR10 output. The player
+preserves source resolution by default; proportional 1080p conversion is an
+explicit compatibility policy rather than an automatic response to 4K50/60.
 
 ## Subtitles
 

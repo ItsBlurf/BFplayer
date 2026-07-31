@@ -77,6 +77,8 @@ enum class FooterGlyph {
     dpad,
     touchpad,
     options,
+    left_stick,
+    right_stick,
     text_button,
 };
 
@@ -174,12 +176,101 @@ Label make_label(SDL_Renderer* renderer, TTF_Font* font, const std::string& text
     return label;
 }
 
+void fill_rounded_rect(SDL_Renderer* renderer, const SDL_Rect& rect, int radius) {
+    if (!renderer || rect.w <= 0 || rect.h <= 0) {
+        return;
+    }
+    radius = std::clamp(radius, 0, std::min(rect.w, rect.h) / 2);
+    if (radius == 0) {
+        SDL_RenderFillRect(renderer, &rect);
+        return;
+    }
+    SDL_Rect middle{rect.x + radius, rect.y, rect.w - radius * 2, rect.h};
+    SDL_Rect center{rect.x, rect.y + radius, rect.w, rect.h - radius * 2};
+    SDL_RenderFillRect(renderer, &middle);
+    SDL_RenderFillRect(renderer, &center);
+    for (int offset = 0; offset < radius; ++offset) {
+        const int dy = radius - offset;
+        const int inset = radius -
+            static_cast<int>(std::sqrt(
+                static_cast<double>(radius * radius - dy * dy)));
+        SDL_RenderDrawLine(
+            renderer,
+            rect.x + inset,
+            rect.y + offset,
+            rect.x + rect.w - inset - 1,
+            rect.y + offset);
+        SDL_RenderDrawLine(
+            renderer,
+            rect.x + inset,
+            rect.y + rect.h - offset - 1,
+            rect.x + rect.w - inset - 1,
+            rect.y + rect.h - offset - 1);
+    }
+}
+
+void draw_rounded_rect(SDL_Renderer* renderer, const SDL_Rect& rect, int radius) {
+    if (!renderer || rect.w <= 0 || rect.h <= 0) {
+        return;
+    }
+    radius = std::clamp(radius, 0, std::min(rect.w, rect.h) / 2);
+    if (radius == 0) {
+        SDL_RenderDrawRect(renderer, &rect);
+        return;
+    }
+    SDL_RenderDrawLine(
+        renderer, rect.x + radius, rect.y,
+        rect.x + rect.w - radius - 1, rect.y);
+    SDL_RenderDrawLine(
+        renderer, rect.x + radius, rect.y + rect.h - 1,
+        rect.x + rect.w - radius - 1, rect.y + rect.h - 1);
+    SDL_RenderDrawLine(
+        renderer, rect.x, rect.y + radius,
+        rect.x, rect.y + rect.h - radius - 1);
+    SDL_RenderDrawLine(
+        renderer, rect.x + rect.w - 1, rect.y + radius,
+        rect.x + rect.w - 1, rect.y + rect.h - radius - 1);
+    for (int degree = 0; degree <= 90; degree += 3) {
+        const double angle = degree * 3.14159265358979323846 / 180.0;
+        const int dx = static_cast<int>(std::llround(radius * std::cos(angle)));
+        const int dy = static_cast<int>(std::llround(radius * std::sin(angle)));
+        SDL_RenderDrawPoint(
+            renderer, rect.x + radius - dx, rect.y + radius - dy);
+        SDL_RenderDrawPoint(
+            renderer, rect.x + rect.w - radius - 1 + dx,
+            rect.y + radius - dy);
+        SDL_RenderDrawPoint(
+            renderer, rect.x + radius - dx,
+            rect.y + rect.h - radius - 1 + dy);
+        SDL_RenderDrawPoint(
+            renderer, rect.x + rect.w - radius - 1 + dx,
+            rect.y + rect.h - radius - 1 + dy);
+    }
+}
+
+void fill_circle(SDL_Renderer* renderer, int center_x, int center_y, int radius) {
+    for (int y = -radius; y <= radius; ++y) {
+        const int extent = static_cast<int>(std::sqrt(
+            static_cast<double>(radius * radius - y * y)));
+        SDL_RenderDrawLine(
+            renderer,
+            center_x - extent,
+            center_y + y,
+            center_x + extent,
+            center_y + y);
+    }
+}
+
 int footer_glyph_width(const FooterHint& hint) {
     if (hint.glyph == FooterGlyph::touchpad) {
-        return 43;
+        return 46;
     }
     if (hint.glyph == FooterGlyph::options) {
-        return 36;
+        return 32;
+    }
+    if (hint.glyph == FooterGlyph::left_stick ||
+        hint.glyph == FooterGlyph::right_stick) {
+        return 38;
     }
     if (hint.glyph == FooterGlyph::text_button) {
         return std::max(38, hint.button_label.width + 14);
@@ -194,16 +285,34 @@ void draw_footer_glyph(
     int center_y) {
     const int width = footer_glyph_width(hint);
     const int center_x = x + width / 2;
-    SDL_SetRenderDrawColor(renderer, 226, 235, 251, 255);
+    if (hint.glyph == FooterGlyph::cross ||
+        hint.glyph == FooterGlyph::circle ||
+        hint.glyph == FooterGlyph::square ||
+        hint.glyph == FooterGlyph::triangle) {
+        SDL_SetRenderDrawColor(renderer, 17, 29, 50, 255);
+        fill_circle(renderer, center_x, center_y, 16);
+        SDL_SetRenderDrawColor(renderer, 63, 91, 131, 255);
+        for (int degree = 0; degree < 360; degree += 3) {
+            const double angle = degree * 3.14159265358979323846 / 180.0;
+            SDL_RenderDrawPoint(
+                renderer,
+                center_x + static_cast<int>(16 * std::cos(angle)),
+                center_y + static_cast<int>(16 * std::sin(angle)));
+        }
+    }
     switch (hint.glyph) {
     case FooterGlyph::cross:
-        SDL_RenderDrawLine(renderer, center_x - 10, center_y - 10,
-                          center_x + 10, center_y + 10);
-        SDL_RenderDrawLine(renderer, center_x + 10, center_y - 10,
-                          center_x - 10, center_y + 10);
+        SDL_SetRenderDrawColor(renderer, 78, 194, 238, 255);
+        for (int offset = -1; offset <= 1; ++offset) {
+            SDL_RenderDrawLine(renderer, center_x - 8 + offset, center_y - 8,
+                              center_x + 8 + offset, center_y + 8);
+            SDL_RenderDrawLine(renderer, center_x + 8 + offset, center_y - 8,
+                              center_x - 8 + offset, center_y + 8);
+        }
         break;
     case FooterGlyph::circle:
-        for (int radius = 11; radius <= 12; ++radius) {
+        SDL_SetRenderDrawColor(renderer, 244, 105, 126, 255);
+        for (int radius = 8; radius <= 9; ++radius) {
             for (int degree = 0; degree < 360; degree += 4) {
                 const double angle = degree * 3.14159265358979323846 / 180.0;
                 SDL_RenderDrawPoint(
@@ -214,43 +323,91 @@ void draw_footer_glyph(
         }
         break;
     case FooterGlyph::square: {
-        SDL_Rect square{center_x - 11, center_y - 11, 23, 23};
-        SDL_RenderDrawRect(renderer, &square);
+        SDL_SetRenderDrawColor(renderer, 225, 109, 215, 255);
+        SDL_Rect square{center_x - 8, center_y - 8, 17, 17};
+        for (int inset = 0; inset < 2; ++inset) {
+            SDL_RenderDrawRect(renderer, &square);
+            ++square.x;
+            ++square.y;
+            square.w -= 2;
+            square.h -= 2;
+        }
         break;
     }
     case FooterGlyph::triangle:
-        SDL_RenderDrawLine(renderer, center_x, center_y - 13,
-                          center_x - 13, center_y + 11);
-        SDL_RenderDrawLine(renderer, center_x - 13, center_y + 11,
-                          center_x + 13, center_y + 11);
-        SDL_RenderDrawLine(renderer, center_x + 13, center_y + 11,
-                          center_x, center_y - 13);
+        SDL_SetRenderDrawColor(renderer, 96, 211, 157, 255);
+        for (int offset = 0; offset < 2; ++offset) {
+            SDL_RenderDrawLine(renderer, center_x, center_y - 10 + offset,
+                              center_x - 9, center_y + 8 + offset);
+            SDL_RenderDrawLine(renderer, center_x - 9, center_y + 8 + offset,
+                              center_x + 9, center_y + 8 + offset);
+            SDL_RenderDrawLine(renderer, center_x + 9, center_y + 8 + offset,
+                              center_x, center_y - 10 + offset);
+        }
         break;
     case FooterGlyph::dpad: {
-        SDL_Rect vertical{center_x - 4, center_y - 14, 9, 29};
-        SDL_Rect horizontal{center_x - 14, center_y - 4, 29, 9};
-        SDL_RenderDrawRect(renderer, &vertical);
-        SDL_RenderDrawRect(renderer, &horizontal);
+        SDL_SetRenderDrawColor(renderer, 198, 211, 234, 255);
+        SDL_Rect vertical{center_x - 5, center_y - 15, 11, 31};
+        SDL_Rect horizontal{center_x - 15, center_y - 5, 31, 11};
+        SDL_RenderFillRect(renderer, &vertical);
+        SDL_RenderFillRect(renderer, &horizontal);
+        SDL_SetRenderDrawColor(renderer, 70, 88, 116, 255);
+        SDL_Rect hub{center_x - 3, center_y - 3, 7, 7};
+        SDL_RenderFillRect(renderer, &hub);
         break;
     }
     case FooterGlyph::touchpad: {
-        SDL_Rect touchpad{x, center_y - 12, width, 25};
-        SDL_RenderDrawRect(renderer, &touchpad);
-        SDL_RenderDrawLine(renderer, center_x, center_y - 9,
-                          center_x, center_y + 9);
+        SDL_SetRenderDrawColor(renderer, 18, 31, 52, 255);
+        SDL_Rect touchpad{x, center_y - 14, width, 29};
+        fill_rounded_rect(renderer, touchpad, 6);
+        SDL_SetRenderDrawColor(renderer, 198, 211, 234, 255);
+        draw_rounded_rect(renderer, touchpad, 6);
+        SDL_SetRenderDrawColor(renderer, 58, 78, 109, 255);
+        SDL_RenderDrawLine(renderer, x + 7, center_y - 8,
+                          x + width - 7, center_y - 8);
         break;
     }
     case FooterGlyph::options: {
-        for (int offset = -7; offset <= 7; offset += 7) {
+        SDL_SetRenderDrawColor(renderer, 198, 211, 234, 255);
+        for (int offset = -8; offset <= 8; offset += 8) {
             SDL_RenderDrawLine(
-                renderer, x + 4, center_y + offset,
-                x + width - 4, center_y + offset);
+                renderer, x + 5, center_y + offset,
+                x + width - 5, center_y + offset);
+            SDL_RenderDrawLine(
+                renderer, x + 5, center_y + offset + 1,
+                x + width - 5, center_y + offset + 1);
+        }
+        break;
+    }
+    case FooterGlyph::left_stick:
+    case FooterGlyph::right_stick: {
+        SDL_SetRenderDrawColor(renderer, 18, 31, 52, 255);
+        fill_circle(renderer, center_x, center_y, 17);
+        SDL_SetRenderDrawColor(renderer, 198, 211, 234, 255);
+        for (int radius = 16; radius <= 17; ++radius) {
+            for (int degree = 0; degree < 360; degree += 4) {
+                const double angle =
+                    degree * 3.14159265358979323846 / 180.0;
+                SDL_RenderDrawPoint(
+                    renderer,
+                    center_x + static_cast<int>(radius * std::cos(angle)),
+                    center_y + static_cast<int>(radius * std::sin(angle)));
+            }
+        }
+        if (hint.button_label.texture) {
+            SDL_Rect target{
+                center_x - hint.button_label.width / 2,
+                center_y - hint.button_label.height / 2,
+                hint.button_label.width,
+                hint.button_label.height};
+            SDL_RenderCopy(renderer, hint.button_label.texture, nullptr, &target);
         }
         break;
     }
     case FooterGlyph::text_button: {
+        SDL_SetRenderDrawColor(renderer, 198, 211, 234, 255);
         SDL_Rect button{x, center_y - 14, width, 29};
-        SDL_RenderDrawRect(renderer, &button);
+        draw_rounded_rect(renderer, button, 6);
         if (hint.button_label.texture) {
             SDL_Rect target{
                 x + (width - hint.button_label.width) / 2,
@@ -3166,7 +3323,10 @@ struct LibraryUi::Impl {
                                          const char* action) {
             FooterHint hint{};
             hint.glyph = glyph;
-            if (glyph == FooterGlyph::text_button && button && button[0]) {
+            if ((glyph == FooterGlyph::text_button ||
+                 glyph == FooterGlyph::left_stick ||
+                 glyph == FooterGlyph::right_stick) &&
+                button && button[0]) {
                 hint.button_label = make_label(
                     renderer, footer_font, button, white);
             }
@@ -3773,11 +3933,11 @@ struct LibraryUi::Impl {
             add_footer_hint(FooterGlyph::cross, "", "Play");
             add_footer_hint(FooterGlyph::triangle, "", "Remove");
             add_footer_hint(
-                FooterGlyph::text_button,
+                FooterGlyph::left_stick,
                 "L3",
                 "Favorite");
             add_footer_hint(
-                FooterGlyph::text_button,
+                FooterGlyph::right_stick,
                 "R3",
                 "Sort");
             add_footer_hint(FooterGlyph::dpad, "", "Category");
@@ -3791,7 +3951,7 @@ struct LibraryUi::Impl {
             add_footer_hint(FooterGlyph::circle, "", "Back");
             add_footer_hint(FooterGlyph::triangle, "", "Remove");
             add_footer_hint(
-                FooterGlyph::text_button,
+                FooterGlyph::left_stick,
                 "L3",
                 "Favorite");
             add_footer_hint(FooterGlyph::touchpad, "", "Add Media");
@@ -4005,6 +4165,8 @@ bool LibraryUi::open(
         close();
         return false;
     }
+    impl_->controller_buttons_down.fill(false);
+    impl_->navigation_repeat.reset();
     if (mkdir("/data/BFplayer", 0777) != 0 && errno != EEXIST) {
         diagnostics_log(
             DiagnosticLevel::error,
@@ -4770,13 +4932,33 @@ void LibraryUi::render() {
         impl_->rebuild_labels();
     }
 
-    SDL_SetRenderDrawColor(impl_->renderer, 5, 9, 19, 255);
+    SDL_SetRenderDrawColor(impl_->renderer, 4, 8, 17, 255);
     SDL_RenderClear(impl_->renderer);
+    for (int band = 0; band < 8; ++band) {
+        SDL_SetRenderDrawColor(
+            impl_->renderer,
+            static_cast<Uint8>(5 + band),
+            static_cast<Uint8>(11 + band * 2),
+            static_cast<Uint8>(23 + band * 4),
+            255);
+        SDL_Rect background_band{
+            0,
+            192 + band * 100,
+            kUiWidth,
+            100};
+        SDL_RenderFillRect(impl_->renderer, &background_band);
+    }
 
-    SDL_SetRenderDrawColor(impl_->renderer, 9, 16, 30, 255);
+    SDL_SetRenderDrawColor(impl_->renderer, 7, 14, 27, 255);
     SDL_Rect header{0, 0, kUiWidth, 190};
     SDL_RenderFillRect(impl_->renderer, &header);
-    SDL_SetRenderDrawColor(impl_->renderer, 25, 44, 78, 255);
+    SDL_SetRenderDrawColor(impl_->renderer, 12, 28, 52, 255);
+    SDL_Rect header_accent{0, 0, kUiWidth, 6};
+    SDL_RenderFillRect(impl_->renderer, &header_accent);
+    SDL_SetRenderDrawColor(impl_->renderer, 48, 111, 205, 255);
+    SDL_Rect header_glow{0, 188, kUiWidth, 2};
+    SDL_RenderFillRect(impl_->renderer, &header_glow);
+    SDL_SetRenderDrawColor(impl_->renderer, 21, 41, 72, 255);
     SDL_Rect header_shadow{0, 190, kUiWidth, 2};
     SDL_RenderFillRect(impl_->renderer, &header_shadow);
     draw_logo(impl_->renderer, impl_->logo_texture, 82, 94, 112);
@@ -4814,15 +4996,22 @@ void LibraryUi::render() {
         overlay_open || dlna_open || empty_library_view
             ? kUiWidth - 84
             : kListWidth;
-    SDL_SetRenderDrawColor(impl_->renderer, 9, 16, 30, 255);
+    SDL_SetRenderDrawColor(impl_->renderer, 2, 6, 14, 130);
+    SDL_Rect list_shadow{
+        48,
+        kRowsTop - 6,
+        content_width,
+        kArtworkPanelHeight + 24};
+    fill_rounded_rect(impl_->renderer, list_shadow, 18);
+    SDL_SetRenderDrawColor(impl_->renderer, 8, 17, 32, 255);
     SDL_Rect list_panel{
         42,
         kRowsTop - 12,
         content_width,
         kArtworkPanelHeight + 24};
-    SDL_RenderFillRect(impl_->renderer, &list_panel);
-    SDL_SetRenderDrawColor(impl_->renderer, 25, 42, 71, 255);
-    SDL_RenderDrawRect(impl_->renderer, &list_panel);
+    fill_rounded_rect(impl_->renderer, list_panel, 18);
+    SDL_SetRenderDrawColor(impl_->renderer, 29, 54, 91, 255);
+    draw_rounded_rect(impl_->renderer, list_panel, 18);
 
     for (int row = 0; row < static_cast<int>(impl_->row_labels.size()); ++row) {
         const int absolute = active_first + row;
@@ -4832,22 +5021,26 @@ void LibraryUi::render() {
             content_width - 28,
             kRowHeight - 7};
         if (absolute == active_selection) {
-            SDL_SetRenderDrawColor(impl_->renderer, 27, 61, 111, 255);
+            SDL_SetRenderDrawColor(impl_->renderer, 25, 68, 127, 255);
         } else {
             SDL_SetRenderDrawColor(
                 impl_->renderer,
                 row % 2 == 0 ? 13 : 11,
-                row % 2 == 0 ? 23 : 20,
-                row % 2 == 0 ? 41 : 37,
+                row % 2 == 0 ? 27 : 23,
+                row % 2 == 0 ? 48 : 42,
                 255);
         }
-        SDL_RenderFillRect(impl_->renderer, &background);
+        fill_rounded_rect(impl_->renderer, background, 11);
         if (absolute == active_selection) {
             SDL_SetRenderDrawColor(impl_->renderer, 244, 178, 42, 255);
-            SDL_Rect selector{background.x, background.y, 7, background.h};
-            SDL_RenderFillRect(impl_->renderer, &selector);
-            SDL_SetRenderDrawColor(impl_->renderer, 68, 146, 255, 255);
-            SDL_RenderDrawRect(impl_->renderer, &background);
+            SDL_Rect selector{
+                background.x + 4,
+                background.y + 9,
+                6,
+                background.h - 18};
+            fill_rounded_rect(impl_->renderer, selector, 3);
+            SDL_SetRenderDrawColor(impl_->renderer, 80, 158, 255, 255);
+            draw_rounded_rect(impl_->renderer, background, 11);
         }
         const Label& label = impl_->row_labels[static_cast<std::size_t>(row)];
         if (label.texture) {
@@ -4885,9 +5078,9 @@ void LibraryUi::render() {
                 64};
             if (impl_->empty_action_enabled) {
                 SDL_SetRenderDrawColor(impl_->renderer, 26, 73, 132, 255);
-                SDL_RenderFillRect(impl_->renderer, &action);
+                fill_rounded_rect(impl_->renderer, action, 14);
                 SDL_SetRenderDrawColor(impl_->renderer, 83, 164, 255, 255);
-                SDL_RenderDrawRect(impl_->renderer, &action);
+                draw_rounded_rect(impl_->renderer, action, 14);
             }
             SDL_Rect target{
                 kUiWidth / 2 - impl_->empty_help_label.width / 2,
@@ -4903,15 +5096,22 @@ void LibraryUi::render() {
     }
 
     if (!overlay_open && !dlna_open && !empty_library_view) {
-        SDL_SetRenderDrawColor(impl_->renderer, 11, 20, 37, 255);
+        SDL_SetRenderDrawColor(impl_->renderer, 2, 6, 14, 150);
+        SDL_Rect artwork_shadow{
+            kArtworkPanelX + 6,
+            kRowsTop - 6,
+            kArtworkPanelWidth,
+            kArtworkPanelHeight + 24};
+        fill_rounded_rect(impl_->renderer, artwork_shadow, 18);
+        SDL_SetRenderDrawColor(impl_->renderer, 9, 19, 36, 255);
         SDL_Rect artwork_panel{
             kArtworkPanelX,
             kRowsTop - 12,
             kArtworkPanelWidth,
             kArtworkPanelHeight + 24};
-        SDL_RenderFillRect(impl_->renderer, &artwork_panel);
-        SDL_SetRenderDrawColor(impl_->renderer, 25, 42, 71, 255);
-        SDL_RenderDrawRect(impl_->renderer, &artwork_panel);
+        fill_rounded_rect(impl_->renderer, artwork_panel, 18);
+        SDL_SetRenderDrawColor(impl_->renderer, 29, 54, 91, 255);
+        draw_rounded_rect(impl_->renderer, artwork_panel, 18);
     }
     if (!overlay_open &&
         !dlna_open &&
@@ -4933,7 +5133,7 @@ void LibraryUi::render() {
             height};
         SDL_SetRenderDrawColor(impl_->renderer, 3, 7, 14, 255);
         SDL_Rect frame{target.x - 8, target.y - 8, target.w + 16, target.h + 16};
-        SDL_RenderFillRect(impl_->renderer, &frame);
+        fill_rounded_rect(impl_->renderer, frame, 12);
         SDL_RenderCopy(impl_->renderer, impl_->artwork_texture, nullptr, &target);
     } else if (!overlay_open &&
                !dlna_open &&
@@ -4945,9 +5145,9 @@ void LibraryUi::render() {
             kRowsTop + 22,
             kArtworkPanelWidth - 68,
             kArtworkPanelHeight - 118};
-        SDL_RenderFillRect(impl_->renderer, &empty_art);
+        fill_rounded_rect(impl_->renderer, empty_art, 14);
         SDL_SetRenderDrawColor(impl_->renderer, 28, 49, 82, 255);
-        SDL_RenderDrawRect(impl_->renderer, &empty_art);
+        draw_rounded_rect(impl_->renderer, empty_art, 14);
     }
     if (!overlay_open &&
         impl_->browser_mode &&
@@ -4990,9 +5190,9 @@ void LibraryUi::render() {
             width,
             58};
         SDL_SetRenderDrawColor(impl_->renderer, 24, 72, 126, 245);
-        SDL_RenderFillRect(impl_->renderer, &toast);
+        fill_rounded_rect(impl_->renderer, toast, 14);
         SDL_SetRenderDrawColor(impl_->renderer, 83, 164, 255, 255);
-        SDL_RenderDrawRect(impl_->renderer, &toast);
+        draw_rounded_rect(impl_->renderer, toast, 14);
         SDL_Rect target{
             toast.x + (toast.w - impl_->notice_label.width) / 2,
             toast.y + (toast.h - impl_->notice_label.height) / 2,
@@ -5005,25 +5205,38 @@ void LibraryUi::render() {
             &target);
     }
 
-    SDL_SetRenderDrawColor(impl_->renderer, 10, 18, 33, 255);
+    SDL_SetRenderDrawColor(impl_->renderer, 7, 14, 26, 255);
     SDL_Rect footer{0, 990, kUiWidth, 90};
     SDL_RenderFillRect(impl_->renderer, &footer);
-    SDL_SetRenderDrawColor(impl_->renderer, 28, 48, 80, 255);
+    SDL_SetRenderDrawColor(impl_->renderer, 38, 72, 120, 255);
     SDL_Rect footer_line{0, 990, kUiWidth, 2};
     SDL_RenderFillRect(impl_->renderer, &footer_line);
-    int footer_x = 48;
+    int footer_x = 38;
     const int footer_center_y = 1035;
     for (const FooterHint& hint : impl_->footer_hints) {
         const int glyph_width = footer_glyph_width(hint);
+        const int label_width =
+            hint.action_label.texture ? hint.action_label.width : 0;
+        const int chip_width = 15 + glyph_width + 10 + label_width + 17;
+        SDL_Rect chip{
+            footer_x,
+            footer_center_y - 27,
+            chip_width,
+            54};
+        SDL_SetRenderDrawColor(impl_->renderer, 13, 27, 48, 255);
+        fill_rounded_rect(impl_->renderer, chip, 14);
+        SDL_SetRenderDrawColor(impl_->renderer, 31, 58, 96, 255);
+        draw_rounded_rect(impl_->renderer, chip, 14);
+        const int glyph_x = footer_x + 15;
         draw_footer_glyph(
             impl_->renderer,
             hint,
-            footer_x,
+            glyph_x,
             footer_center_y);
-        footer_x += glyph_width + 9;
+        int label_x = glyph_x + glyph_width + 10;
         if (hint.action_label.texture) {
             SDL_Rect target{
-                footer_x,
+                label_x,
                 footer_center_y - hint.action_label.height / 2,
                 hint.action_label.width,
                 hint.action_label.height};
@@ -5032,9 +5245,8 @@ void LibraryUi::render() {
                 hint.action_label.texture,
                 nullptr,
                 &target);
-            footer_x += hint.action_label.width;
         }
-        footer_x += 27;
+        footer_x += chip_width + 12;
     }
     SDL_RenderPresent(impl_->renderer);
 }

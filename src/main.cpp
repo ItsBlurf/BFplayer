@@ -53,6 +53,46 @@ extern "C" {
 #include <vector>
 #include <fcntl.h>
 
+#if defined(BFPLAYER_PS5)
+extern "C" int BFplayer_PS5_IsNativeHdrOutput(void)
+    __attribute__((weak));
+extern "C" int BFplayer_PS5_SupportsNativeHdr(void)
+    __attribute__((weak));
+extern "C" int BFplayer_PS5_SetNativeHdrOutput(int enabled)
+    __attribute__((weak));
+extern "C" int BFplayer_PS5_PrepareNativeHdrHlg(void)
+    __attribute__((weak));
+extern "C" int BFplayer_PS5_PresentNativeHdrYuv420P10Frame(
+    const void* y_plane,
+    int y_pitch_bytes,
+    const void* u_plane,
+    int u_pitch_bytes,
+    const void* v_plane,
+    int v_pitch_bytes,
+    int width,
+    int height,
+    int output_width,
+    int output_height,
+    int source_x,
+    int source_y,
+    int source_width,
+    int source_height,
+    int destination_x,
+    int destination_y,
+    int destination_width,
+    int destination_height,
+    int full_range,
+    int hlg_to_pq,
+    const void* overlay_pixels,
+    int overlay_pitch_bytes,
+    int overlay_width,
+    int overlay_height,
+    int overlay_x,
+    int overlay_y,
+    int overlay_region_width,
+    int overlay_region_height) __attribute__((weak));
+#endif
+
 namespace {
 
 extern "C" int sceSystemServiceGetAppIdOfRunningBigApp(void);
@@ -85,6 +125,142 @@ constexpr int kAudioPacketBufferCount = 64;
 constexpr int kNetworkAudioPacketBufferCount = 128;
 constexpr int kAudioFrameBufferCount = 64;
 constexpr std::uint64_t kAudioBytesPerSecond = 48000ULL * 2ULL * 2ULL;
+
+bool ps5_native_hdr_output_active() noexcept {
+#if defined(BFPLAYER_PS5)
+    return BFplayer_PS5_IsNativeHdrOutput != nullptr &&
+        BFplayer_PS5_PresentNativeHdrYuv420P10Frame != nullptr &&
+        BFplayer_PS5_IsNativeHdrOutput() != 0;
+#else
+    return false;
+#endif
+}
+
+bool ps5_native_hdr_output_supported() noexcept {
+#if defined(BFPLAYER_PS5)
+    return BFplayer_PS5_SupportsNativeHdr != nullptr &&
+        BFplayer_PS5_SetNativeHdrOutput != nullptr &&
+        BFplayer_PS5_PresentNativeHdrYuv420P10Frame != nullptr &&
+        BFplayer_PS5_SupportsNativeHdr() != 0;
+#else
+    return false;
+#endif
+}
+
+int set_ps5_native_hdr_output(bool enabled) noexcept {
+#if defined(BFPLAYER_PS5)
+    if (BFplayer_PS5_SetNativeHdrOutput != nullptr) {
+        return BFplayer_PS5_SetNativeHdrOutput(enabled ? 1 : 0);
+    }
+#else
+    (void)enabled;
+#endif
+    return enabled ? -1 : 0;
+}
+
+int prepare_ps5_native_hdr_hlg() noexcept {
+#if defined(BFPLAYER_PS5)
+    return BFplayer_PS5_PrepareNativeHdrHlg != nullptr
+        ? BFplayer_PS5_PrepareNativeHdrHlg()
+        : -1;
+#else
+    return -1;
+#endif
+}
+
+int present_ps5_native_hdr_yuv420p10_frame(
+    const void* y_plane,
+    int y_pitch_bytes,
+    const void* u_plane,
+    int u_pitch_bytes,
+    const void* v_plane,
+    int v_pitch_bytes,
+    int width,
+    int height,
+    int output_width,
+    int output_height,
+    int source_x,
+    int source_y,
+    int source_width,
+    int source_height,
+    int destination_x,
+    int destination_y,
+    int destination_width,
+    int destination_height,
+    bool full_range,
+    bool hlg_to_pq,
+    const void* overlay_pixels,
+    int overlay_pitch_bytes,
+    int overlay_width,
+    int overlay_height,
+    int overlay_x,
+    int overlay_y,
+    int overlay_region_width,
+    int overlay_region_height) noexcept {
+#if defined(BFPLAYER_PS5)
+    if (BFplayer_PS5_PresentNativeHdrYuv420P10Frame != nullptr) {
+        return BFplayer_PS5_PresentNativeHdrYuv420P10Frame(
+            y_plane,
+            y_pitch_bytes,
+            u_plane,
+            u_pitch_bytes,
+            v_plane,
+            v_pitch_bytes,
+            width,
+            height,
+            output_width,
+            output_height,
+            source_x,
+            source_y,
+            source_width,
+            source_height,
+            destination_x,
+            destination_y,
+            destination_width,
+            destination_height,
+            full_range ? 1 : 0,
+            hlg_to_pq ? 1 : 0,
+            overlay_pixels,
+            overlay_pitch_bytes,
+            overlay_width,
+            overlay_height,
+            overlay_x,
+            overlay_y,
+            overlay_region_width,
+            overlay_region_height);
+    }
+#else
+    (void)y_plane;
+    (void)y_pitch_bytes;
+    (void)u_plane;
+    (void)u_pitch_bytes;
+    (void)v_plane;
+    (void)v_pitch_bytes;
+    (void)width;
+    (void)height;
+    (void)output_width;
+    (void)output_height;
+    (void)source_x;
+    (void)source_y;
+    (void)source_width;
+    (void)source_height;
+    (void)destination_x;
+    (void)destination_y;
+    (void)destination_width;
+    (void)destination_height;
+    (void)full_range;
+    (void)hlg_to_pq;
+    (void)overlay_pixels;
+    (void)overlay_pitch_bytes;
+    (void)overlay_width;
+    (void)overlay_height;
+    (void)overlay_x;
+    (void)overlay_y;
+    (void)overlay_region_width;
+    (void)overlay_region_height;
+#endif
+    return -1;
+}
 
 struct PlaybackBufferPolicy {
     int video_packets = kVideoPacketBufferCount;
@@ -273,6 +449,7 @@ struct App {
     int output_width = kWindowWidth;
     int output_height = kWindowHeight;
     bool true_4k_output = false;
+    bool native_hdr_output = false;
     bfplayer::PlayerSettings settings;
     PlaybackOverlay playback_overlay = PlaybackOverlay::none;
     int playback_overlay_selected = 0;
@@ -450,6 +627,8 @@ struct VideoSourceInfo {
     const char* color_primaries = "unknown";
     AVColorRange color_range_value = AVCOL_RANGE_UNSPECIFIED;
     AVColorSpace color_space_value = AVCOL_SPC_UNSPECIFIED;
+    AVColorTransferCharacteristic color_transfer_value =
+        AVCOL_TRC_UNSPECIFIED;
     bool hdr_source = false;
     bool demanding_software_decode = false;
 };
@@ -509,6 +688,7 @@ VideoSourceInfo inspect_video_source(
             av_color_transfer_name(parameters->color_trc)) {
         info.color_transfer = name;
     }
+    info.color_transfer_value = parameters->color_trc;
     if (const char* name =
             av_color_primaries_name(parameters->color_primaries)) {
         info.color_primaries = name;
@@ -547,18 +727,25 @@ VideoSourceInfo inspect_video_source(
 Kit_VideoFormatRequest make_video_format_request(
     const VideoSourceInfo& source,
     int output_width,
-    int output_height) {
+    int output_height,
+    bool native_hdr_output) {
     Kit_VideoFormatRequest request{};
     Kit_ResetVideoFormatRequest(&request);
+    /*
+     * Kitchensink can preserve 10-bit planar frames for BFplayer's direct
+     * PS5 presentation path, but SDL textures cannot upload I010. Keep every
+     * non-direct path explicitly on SDL's supported IYUV format instead of
+     * allowing a 10-bit SDR source to select the private I010 format.
+     */
+    request.format = native_hdr_output
+        ? KIT_PIXELFORMAT_YUV420P10LE
+        : SDL_PIXELFORMAT_IYUV;
     if (output_width < 2 || output_height < 2) {
         output_width = kWindowWidth;
         output_height = kWindowHeight;
     }
     if (source.width < 1 || source.height < 1 ||
         (source.width <= output_width && source.height <= output_height)) {
-        if (source.hdr_source) {
-            request.format = SDL_PIXELFORMAT_IYUV;
-        }
         return request;
     }
     const double scale = std::min(
@@ -570,9 +757,6 @@ Kit_VideoFormatRequest make_video_format_request(
     request.height = std::max(
         2,
         static_cast<int>(std::floor(source.height * scale)) & ~1);
-    if (source.hdr_source) {
-        request.format = SDL_PIXELFORMAT_IYUV;
-    }
     return request;
 }
 
@@ -1365,7 +1549,8 @@ bool create_video_textures(App& app) {
     Kit_PlayerInfo info{};
     Kit_GetPlayerInfo(app.player, &info);
 
-    if (Kit_GetPlayerVideoStream(app.player) >= 0) {
+    if (Kit_GetPlayerVideoStream(app.player) >= 0 &&
+        !app.native_hdr_output) {
         SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "linear");
         app.video = SDL_CreateTexture(
             app.renderer,
@@ -1377,8 +1562,8 @@ bool create_video_textures(App& app) {
             log_sdl("SDL_CreateTexture(video)");
             return false;
         }
-        SDL_RenderSetLogicalSize(app.renderer, kWindowWidth, kWindowHeight);
     }
+    SDL_RenderSetLogicalSize(app.renderer, kWindowWidth, kWindowHeight);
 
     return create_subtitle_texture(app);
 }
@@ -1488,7 +1673,7 @@ bool set_stream(App& app, Kit_StreamType type, int index) {
          */
         const double refresh_from = std::max(0.0, refresh_position);
         if (Kit_PlayerSeek(app.player, refresh_from) == 0) {
-            if (app.audio != 0) {
+            if (app.audio != 0 && type == KIT_STREAMTYPE_AUDIO) {
                 SDL_ClearQueuedAudio(app.audio);
             }
             bfplayer::diagnostics_log(
@@ -1934,6 +2119,30 @@ void consume_remote_commands(App& app, bool in_playback) {
                     cycle_subtitles(app);
                 }
                 break;
+            case bfplayer::RemoteCommandType::button: {
+                if (command.button < 0 ||
+                    command.button >= SDL_CONTROLLER_BUTTON_MAX) {
+                    break;
+                }
+                SDL_Event down{};
+                down.type = SDL_CONTROLLERBUTTONDOWN;
+                down.cbutton.type = SDL_CONTROLLERBUTTONDOWN;
+                down.cbutton.state = SDL_PRESSED;
+                down.cbutton.button =
+                    static_cast<Uint8>(command.button);
+                SDL_Event up = down;
+                up.type = SDL_CONTROLLERBUTTONUP;
+                up.cbutton.type = SDL_CONTROLLERBUTTONUP;
+                up.cbutton.state = SDL_RELEASED;
+                if (SDL_PushEvent(&down) < 0 || SDL_PushEvent(&up) < 0) {
+                    bfplayer::diagnostics_log(
+                        bfplayer::DiagnosticLevel::warning,
+                        "remote-button injection failed button=%d error=%s",
+                        command.button,
+                        SDL_GetError());
+                }
+                break;
+            }
             case bfplayer::RemoteCommandType::stop:
                 if (in_playback) {
                     app.playback_running = false;
@@ -3452,14 +3661,29 @@ PlaybackOutcome run_player(
     app.subtitle_delay_ms = 0;
     app.playback_overlay = PlaybackOverlay::none;
     app.playback_overlay_selected = 0;
+    const bool native_hdr_surface_at_open =
+        ps5_native_hdr_output_active();
+    bfplayer::diagnostics_log(
+        bfplayer::DiagnosticLevel::info,
+        "playback-open-stage stage=opening-osd-open-begin");
     const bool opening_osd_ready =
         app.osd.open(app.renderer, app.fallback_font);
-    if (opening_osd_ready) {
+    bfplayer::diagnostics_log(
+        bfplayer::DiagnosticLevel::info,
+        "playback-open-stage stage=opening-osd-open-complete ready=%d",
+        opening_osd_ready ? 1 : 0);
+    if (opening_osd_ready && !native_hdr_surface_at_open) {
         SDL_SetRenderDrawColor(app.renderer, 8, 13, 25, 255);
         SDL_RenderClear(app.renderer);
         app.osd.show("Opening media...", 60000);
         app.osd.render(0.0, 0.0, false);
+        bfplayer::diagnostics_log(
+            bfplayer::DiagnosticLevel::info,
+            "playback-open-stage stage=opening-frame-present-begin");
         SDL_RenderPresent(app.renderer);
+        bfplayer::diagnostics_log(
+            bfplayer::DiagnosticLevel::info,
+            "playback-open-stage stage=opening-frame-present-complete");
     }
     const auto show_open_error = [&](const std::string& message) {
         if (!opening_osd_ready) {
@@ -3485,7 +3709,17 @@ PlaybackOutcome run_player(
         }
     };
     std::string source_error;
+    bfplayer::diagnostics_log(
+        bfplayer::DiagnosticLevel::info,
+        "playback-open-stage stage=source-open-begin");
     app.source = create_bounded_source(app, path, source_error);
+    bfplayer::diagnostics_log(
+        app.source
+            ? bfplayer::DiagnosticLevel::info
+            : bfplayer::DiagnosticLevel::error,
+        "playback-open-stage stage=source-open-complete success=%d error=%s",
+        app.source ? 1 : 0,
+        source_error.empty() ? "<none>" : source_error.c_str());
     if (!app.source) {
         bfplayer::diagnostics_log(
             bfplayer::DiagnosticLevel::error,
@@ -3577,9 +3811,69 @@ PlaybackOutcome run_player(
     app.source_hdr = source_video.hdr_source;
     app.source_hdr_transfer = source_video.color_transfer;
     app.source_display_aspect = source_video.display_aspect;
+    const bool backend_native_hdr =
+        ps5_native_hdr_output_supported();
+    const char* native_hdr_policy = std::getenv("BFPLAYER_NATIVE_HDR");
+    const bool native_hdr_allowed =
+        !native_hdr_policy ||
+        std::strcmp(native_hdr_policy, "0") != 0;
+    const bool hlg_source =
+        source_video.color_transfer_value == AVCOL_TRC_ARIB_STD_B67;
+    const bool pq_source =
+        source_video.color_transfer_value == AVCOL_TRC_SMPTE2084;
+    const bool native_hdr_requested =
+        source_video.hdr_source &&
+        (pq_source || hlg_source) &&
+        backend_native_hdr &&
+        native_hdr_allowed;
+    const int native_hdr_result =
+        native_hdr_requested
+        ? set_ps5_native_hdr_output(true)
+        : 0;
+    const bool native_hdr_output =
+        native_hdr_requested && native_hdr_result == 0;
+    app.native_hdr_output = native_hdr_output;
+    const char* hdr_output_policy =
+        native_hdr_output
+            ? hlg_source
+                ? "native-bt2020-hlg-to-pq-10bit"
+                : "native-bt2020-pq-10bit"
+            : source_video.hdr_source
+                ? "software-tone-map-bt709-limited"
+                : "passthrough";
+    const Uint64 hlg_prepare_started =
+        SDL_GetPerformanceCounter();
+    const int hlg_prepare_result =
+        native_hdr_output && hlg_source
+            ? prepare_ps5_native_hdr_hlg()
+            : 0;
+    const double hlg_prepare_ms =
+        native_hdr_output && hlg_source
+            ? elapsed_performance_ms(
+                  hlg_prepare_started,
+                  SDL_GetPerformanceCounter(),
+                  SDL_GetPerformanceFrequency())
+            : 0.0;
+    if (native_hdr_output && hlg_source) {
+        bfplayer::diagnostics_log(
+            hlg_prepare_result == 0
+                ? bfplayer::DiagnosticLevel::info
+                : bfplayer::DiagnosticLevel::warning,
+            "native-hdr-hlg-prepare result=%d elapsed_ms=%.3f",
+            hlg_prepare_result,
+            hlg_prepare_ms);
+    }
+    bfplayer::diagnostics_log(
+        native_hdr_requested && !native_hdr_output
+            ? bfplayer::DiagnosticLevel::warning
+            : bfplayer::DiagnosticLevel::info,
+        "native-hdr-switch requested=%d active=%d result=%d",
+        native_hdr_requested ? 1 : 0,
+        native_hdr_output ? 1 : 0,
+        native_hdr_result);
     SDL_YUV_CONVERSION_MODE yuv_conversion_mode =
         SDL_YUV_CONVERSION_AUTOMATIC;
-    if (source_video.hdr_source) {
+    if (source_video.hdr_source && !native_hdr_output) {
         // The decoder tone-maps HDR to limited-range BT.709 SDR in place.
         yuv_conversion_mode = SDL_YUV_CONVERSION_BT709;
     } else if (source_video.color_range_value == AVCOL_RANGE_JPEG) {
@@ -3593,23 +3887,26 @@ PlaybackOutcome run_player(
         "video-color-output source_hdr=%d sdl_yuv_mode=%d hdr_policy=%s",
         source_video.hdr_source ? 1 : 0,
         static_cast<int>(yuv_conversion_mode),
-        source_video.hdr_source
-            ? "software-tone-map-bt709-limited"
-            : "passthrough");
+        hdr_output_policy);
     const bool source_above_1080p =
         source_video.width > kWindowWidth ||
         source_video.height > kWindowHeight;
     /*
-     * The public PS5 homebrew stack currently has no usable hardware video
-     * decoder. Preserve native 4K for normal-rate sources, but avoid asking
-     * the CPU to decode, convert, render, and swizzle demanding 4K50/60
-     * sources at full output resolution. A 1080p output is substantially
-     * smoother and removes the presentation backlog that otherwise causes
-     * visible jumps and long input latency.
+     * Preserve source resolution by default. BFplayer's direct native-PQ path
+     * and bounded software path avoid the old redundant 4K texture copies, so
+     * silently reducing demanding sources to 1080p is no longer appropriate.
+     * An explicit "smooth" policy remains available as a compatibility escape
+     * hatch for unusually expensive files or storage/network bottlenecks.
      */
+    const char* output_policy = std::getenv("BFPLAYER_OUTPUT_POLICY");
+    const bool request_smooth_output =
+        output_policy &&
+        std::strcmp(output_policy, "smooth") == 0;
     const bool smooth_software_output =
         source_above_1080p &&
-        source_video.demanding_software_decode;
+        source_video.demanding_software_decode &&
+        request_smooth_output &&
+        !native_hdr_output;
     const bool wants_true_4k =
         source_above_1080p && !smooth_software_output;
     if (wants_true_4k) {
@@ -3631,7 +3928,8 @@ PlaybackOutcome run_player(
         make_video_format_request(
             source_video,
             app.output_width,
-            app.output_height);
+            app.output_height,
+            native_hdr_output);
     bfplayer::diagnostics_log(
         bfplayer::DiagnosticLevel::info,
         "video-source codec=%s profile=%d pix_fmt=%s bit_depth=%d size=%dx%d sar=%d:%d dar=%.6f fps=%.3f bitrate=%lld range=%s colorspace=%s transfer=%s primaries=%s hdr=%d demanding_software_decode=%d",
@@ -3654,7 +3952,7 @@ PlaybackOutcome run_player(
         source_video.demanding_software_decode ? 1 : 0);
     bfplayer::diagnostics_log(
         bfplayer::DiagnosticLevel::info,
-        "video-output-request source=%dx%d output=%dx%d display=%dx%d downscale=%d true_4k=%d smooth_software_output=%d hdr_chroma_levels=%d hdr_static_dither=1",
+        "video-output-request source=%dx%d output=%dx%d display=%dx%d downscale=%d true_4k=%d smooth_software_output=%d output_policy=%s native_hdr=%d pixel_format=%u hdr_chroma_levels=%d hdr_static_dither=1",
         source_video.width,
         source_video.height,
         video_request.width,
@@ -3664,6 +3962,9 @@ PlaybackOutcome run_player(
         video_request.width > 0 && video_request.height > 0 ? 1 : 0,
         app.true_4k_output ? 1 : 0,
         smooth_software_output ? 1 : 0,
+        smooth_software_output ? "smooth" : "source",
+        native_hdr_output ? 1 : 0,
+        video_request.format,
         BFPLAYER_HDR_CHROMA_LEVELS);
     // Kitchensink requires a video decoder for subtitle layout. Audio-only
     // files with timed lyrics must still open instead of failing creation.
@@ -3821,10 +4122,14 @@ PlaybackOutcome run_player(
                 pending_resume_seconds,
                 Kit_GetError());
         }
+    } else if (native_hdr_output) {
+        app.osd.show(
+            "Native 4K HDR   Cross Play/Pause   D-pad Seek   Options Menu",
+            4000);
     } else if (source_video.demanding_software_decode) {
         app.osd.show(
             "High-load 4K video: software decoding may drop frames",
-            10000);
+            5000);
     } else {
         app.osd.show(
             "Cross Play/Pause   D-pad Seek   Touchpad Controls   Options Menu",
@@ -3834,6 +4139,9 @@ PlaybackOutcome run_player(
     Uint64 last_diagnostics = last_resume_save;
     Uint64 last_remote_status = last_resume_save;
     Uint64 last_visual_render = 0;
+    SDL_Rect previous_native_overlay_bounds{};
+    bool previous_native_overlay_active = false;
+    bool native_overlay_surface_initialized = false;
     const Uint64 performance_frequency = SDL_GetPerformanceFrequency();
     TimingWindow loop_timing;
     TimingWindow audio_pull_timing;
@@ -3852,12 +4160,16 @@ PlaybackOutcome run_player(
     remote_status.source_height = source_video.height;
     remote_status.output_width = info.video_format.width;
     remote_status.output_height = info.video_format.height;
+    remote_status.display_width = app.output_width;
+    remote_status.display_height = app.output_height;
     remote_status.audio_stream =
         Kit_GetPlayerAudioStream(app.player);
     remote_status.subtitle_stream =
         Kit_GetPlayerSubtitleStream(app.player);
     remote_status.hdr_source = source_video.hdr_source;
+    remote_status.native_hdr_output = native_hdr_output;
     remote_status.hdr_transfer = source_video.color_transfer;
+    remote_status.hdr_output_policy = hdr_output_policy;
     std::uint64_t video_updates = 0;
     std::uint64_t video_empty_polls = 0;
     static_assert(kAudioBufferBytes % sizeof(std::int16_t) == 0);
@@ -3921,19 +4233,361 @@ PlaybackOutcome run_player(
         }
 
         bool video_frame_updated = false;
-        if (app.video && !app.paused) {
+        if ((app.video || native_hdr_output) && !app.paused) {
             const Uint64 video_pull_started = SDL_GetPerformanceCounter();
-            const int video_result = Kit_GetPlayerVideoSDLTexture(
-                app.player, app.video, nullptr);
-            video_pull_timing.add(elapsed_performance_ms(
-                video_pull_started,
-                SDL_GetPerformanceCounter(),
-                performance_frequency));
-            if (video_result == 0) {
-                video_frame_updated = true;
-                ++video_updates;
+            int video_result = 1;
+            if (native_hdr_output) {
+                unsigned char** frame_data = nullptr;
+                int* frame_lines = nullptr;
+                SDL_Rect frame_area{};
+                video_result = Kit_LockPlayerVideoRawFrame(
+                    app.player,
+                    &frame_data,
+                    &frame_lines,
+                    &frame_area);
+                video_pull_timing.add(elapsed_performance_ms(
+                    video_pull_started,
+                    SDL_GetPerformanceCounter(),
+                    performance_frequency));
+                if (video_result == 0) {
+                    SDL_Surface* overlay_surface = nullptr;
+                    bool overlay_active = false;
+                    SDL_Rect overlay_bounds{};
+                    const auto include_overlay_bounds =
+                        [&](SDL_Rect bounds) {
+                            const int left = std::clamp(
+                                bounds.x, 0, kWindowWidth);
+                            const int top = std::clamp(
+                                bounds.y, 0, kWindowHeight);
+                            const int right = std::clamp(
+                                bounds.x + bounds.w,
+                                0,
+                                kWindowWidth);
+                            const int bottom = std::clamp(
+                                bounds.y + bounds.h,
+                                0,
+                                kWindowHeight);
+                            if (right <= left || bottom <= top) {
+                                return;
+                            }
+                            if (!overlay_active) {
+                                overlay_bounds = {
+                                    left,
+                                    top,
+                                    right - left,
+                                    bottom - top};
+                            } else {
+                                const int union_left = std::min(
+                                    overlay_bounds.x, left);
+                                const int union_top = std::min(
+                                    overlay_bounds.y, top);
+                                const int union_right = std::max(
+                                    overlay_bounds.x + overlay_bounds.w,
+                                    right);
+                                const int union_bottom = std::max(
+                                    overlay_bounds.y + overlay_bounds.h,
+                                    bottom);
+                                overlay_bounds = {
+                                    union_left,
+                                    union_top,
+                                    union_right - union_left,
+                                    union_bottom - union_top};
+                            }
+                            overlay_active = true;
+                        };
+                    /*
+                     * The native frame is 4K, so SDL's software surface is
+                     * also 4K even though UI coordinates remain 1920x1080.
+                     * Clearing all 33 MiB every frame starves software video
+                     * decoding. Clear only the prior overlay footprint after
+                     * the first frame.
+                     */
+                    SDL_RenderSetLogicalSize(
+                        app.renderer, kWindowWidth, kWindowHeight);
+                    SDL_SetRenderDrawBlendMode(
+                        app.renderer, SDL_BLENDMODE_NONE);
+                    SDL_SetRenderDrawColor(app.renderer, 0, 0, 0, 0);
+                    if (!native_overlay_surface_initialized) {
+                        SDL_Rect full_overlay{
+                            0, 0, kWindowWidth, kWindowHeight};
+                        SDL_RenderFillRect(
+                            app.renderer, &full_overlay);
+                        native_overlay_surface_initialized = true;
+                    } else if (previous_native_overlay_active) {
+                        SDL_RenderFillRect(
+                            app.renderer,
+                            &previous_native_overlay_bounds);
+                    }
+                    SDL_SetRenderDrawBlendMode(
+                        app.renderer, SDL_BLENDMODE_BLEND);
+                    if (app.subtitles) {
+                        const double subtitle_clock =
+                            Kit_GetPlayerPosition(app.player) -
+                            static_cast<double>(app.subtitle_delay_ms) /
+                                1000.0;
+                        const int fragments =
+                            bfplayer_get_player_subtitle_texture_at(
+                                app.player,
+                                app.subtitles,
+                                subtitle_sources.data(),
+                                subtitle_targets.data(),
+                                static_cast<int>(subtitle_sources.size()),
+                                subtitle_clock);
+                        const int safe_fragments = std::clamp(
+                            fragments,
+                            0,
+                            static_cast<int>(subtitle_sources.size()));
+                        for (int i = 0; i < safe_fragments; ++i) {
+                            include_overlay_bounds(
+                                subtitle_targets[
+                                    static_cast<std::size_t>(i)]);
+                            SDL_RenderCopy(
+                                app.renderer,
+                                app.subtitles,
+                                &subtitle_sources[
+                                    static_cast<std::size_t>(i)],
+                                &subtitle_targets[
+                                    static_cast<std::size_t>(i)]);
+                        }
+                    }
+                    if (app.external_subtitles.is_open()) {
+                        const auto position_ms = seconds_to_milliseconds(
+                            Kit_GetPlayerPosition(app.player));
+                        if (!app.external_subtitles.render(
+                                position_ms,
+                                app.subtitle_delay_ms)) {
+                            std::fprintf(
+                                stderr,
+                                "External subtitle render: %s\n",
+                                app.external_subtitles.error().c_str());
+                            bfplayer::diagnostics_log(
+                                bfplayer::DiagnosticLevel::error,
+                                "subtitle-render failed error=%s",
+                                app.external_subtitles.error().c_str());
+                            app.external_subtitles.close();
+                            app.external_subtitle_index = -1;
+                        } else {
+                            int subtitle_x = 0;
+                            int subtitle_y = 0;
+                            int subtitle_width = 0;
+                            int subtitle_height = 0;
+                            if (app.external_subtitles.visible_bounds(
+                                    subtitle_x,
+                                    subtitle_y,
+                                    subtitle_width,
+                                    subtitle_height)) {
+                                include_overlay_bounds(
+                                    {
+                                        subtitle_x,
+                                        subtitle_y,
+                                        subtitle_width,
+                                        subtitle_height});
+                            }
+                        }
+                    }
+                    if (app.paused || app.osd.visible()) {
+                        app.osd.render(
+                            Kit_GetPlayerPosition(app.player),
+                            Kit_GetPlayerDuration(app.player),
+                            app.paused);
+                        include_overlay_bounds(
+                            {0, kWindowHeight - 170, kWindowWidth, 170});
+                        if (app.osd.panel_visible()) {
+                            include_overlay_bounds(
+                                {0, 126, kWindowWidth, 824});
+                        }
+                    }
+                    if (overlay_active ||
+                        previous_native_overlay_active) {
+                        (void)SDL_RenderFlush(app.renderer);
+                    }
+                    previous_native_overlay_bounds = overlay_bounds;
+                    previous_native_overlay_active = overlay_active;
+                    if (overlay_active) {
+                        overlay_surface = SDL_GetWindowSurface(app.window);
+                        if (!overlay_surface ||
+                            overlay_surface->format->BytesPerPixel != 4) {
+                            overlay_active = false;
+                            bfplayer::diagnostics_log(
+                                bfplayer::DiagnosticLevel::error,
+                                "native-hdr-overlay unavailable error=%s",
+                                SDL_GetError());
+                        }
+                    }
+                    SDL_Rect physical_overlay_bounds{};
+                    if (overlay_active && overlay_surface) {
+                        const auto scale_floor = [](
+                                                     int value,
+                                                     int output,
+                                                     int logical) {
+                            return static_cast<int>(
+                                static_cast<std::int64_t>(value) *
+                                output / logical);
+                        };
+                        const auto scale_ceil = [](
+                                                    int value,
+                                                    int output,
+                                                    int logical) {
+                            return static_cast<int>(
+                                (static_cast<std::int64_t>(value) *
+                                     output +
+                                 logical - 1) /
+                                logical);
+                        };
+                        const int left = scale_floor(
+                            overlay_bounds.x,
+                            overlay_surface->w,
+                            kWindowWidth);
+                        const int top = scale_floor(
+                            overlay_bounds.y,
+                            overlay_surface->h,
+                            kWindowHeight);
+                        const int right = scale_ceil(
+                            overlay_bounds.x + overlay_bounds.w,
+                            overlay_surface->w,
+                            kWindowWidth);
+                        const int bottom = scale_ceil(
+                            overlay_bounds.y + overlay_bounds.h,
+                            overlay_surface->h,
+                            kWindowHeight);
+                        physical_overlay_bounds = {
+                            left,
+                            top,
+                            std::max(0, right - left),
+                            std::max(0, bottom - top)};
+                    }
+                    const bfplayer::VideoLayout native_layout =
+                        player_video_layout(app);
+                    const auto scale_layout_value = [](
+                                                        int value,
+                                                        int output,
+                                                        int logical) {
+                        return static_cast<int>(std::llround(
+                            static_cast<double>(value) *
+                            static_cast<double>(output) /
+                            static_cast<double>(logical)));
+                    };
+                    const int native_source_x =
+                        native_layout.crop_source
+                        ? native_layout.source.x
+                        : 0;
+                    const int native_source_y =
+                        native_layout.crop_source
+                        ? native_layout.source.y
+                        : 0;
+                    const int native_source_width =
+                        native_layout.crop_source
+                        ? native_layout.source.width
+                        : frame_area.w;
+                    const int native_source_height =
+                        native_layout.crop_source
+                        ? native_layout.source.height
+                        : frame_area.h;
+                    const int native_destination_x =
+                        scale_layout_value(
+                            native_layout.destination.x,
+                            app.output_width,
+                            kWindowWidth);
+                    const int native_destination_y =
+                        scale_layout_value(
+                            native_layout.destination.y,
+                            app.output_height,
+                            kWindowHeight);
+                    const int native_destination_width =
+                        scale_layout_value(
+                            native_layout.destination.width,
+                            app.output_width,
+                            kWindowWidth);
+                    const int native_destination_height =
+                        scale_layout_value(
+                            native_layout.destination.height,
+                            app.output_height,
+                            kWindowHeight);
+                    const Uint64 present_started =
+                        SDL_GetPerformanceCounter();
+                    const int present_result =
+                        present_ps5_native_hdr_yuv420p10_frame(
+                            frame_data ? frame_data[0] : nullptr,
+                            frame_lines ? frame_lines[0] : 0,
+                            frame_data ? frame_data[1] : nullptr,
+                            frame_lines ? frame_lines[1] : 0,
+                            frame_data ? frame_data[2] : nullptr,
+                            frame_lines ? frame_lines[2] : 0,
+                            frame_area.w,
+                            frame_area.h,
+                            app.output_width,
+                            app.output_height,
+                            native_source_x,
+                            native_source_y,
+                            native_source_width,
+                            native_source_height,
+                            native_destination_x,
+                            native_destination_y,
+                            native_destination_width,
+                            native_destination_height,
+                            source_video.color_range_value ==
+                                AVCOL_RANGE_JPEG,
+                            hlg_source,
+                            overlay_active
+                                ? overlay_surface->pixels
+                                : nullptr,
+                            overlay_active
+                                ? overlay_surface->pitch
+                                : 0,
+                            overlay_active
+                                ? overlay_surface->w
+                                : 0,
+                            overlay_active
+                                ? overlay_surface->h
+                                : 0,
+                            overlay_active
+                                ? physical_overlay_bounds.x
+                                : 0,
+                            overlay_active
+                                ? physical_overlay_bounds.y
+                                : 0,
+                            overlay_active
+                                ? physical_overlay_bounds.w
+                                : 0,
+                            overlay_active
+                                ? physical_overlay_bounds.h
+                                : 0);
+                    present_timing.add(elapsed_performance_ms(
+                        present_started,
+                        SDL_GetPerformanceCounter(),
+                        performance_frequency));
+                    Kit_UnlockPlayerVideoRawFrame(app.player);
+                    if (present_result == 0) {
+                        video_frame_updated = true;
+                        ++video_updates;
+                    } else {
+                        bfplayer::diagnostics_log(
+                            bfplayer::DiagnosticLevel::error,
+                            "native-hdr-present failed result=%d frame=%dx%d output=%dx%d",
+                            present_result,
+                            frame_area.w,
+                            frame_area.h,
+                            app.output_width,
+                            app.output_height);
+                        app.playback_running = false;
+                    }
+                } else {
+                    ++video_empty_polls;
+                }
+                video_result = -1;
             } else {
-                ++video_empty_polls;
+                video_result = Kit_GetPlayerVideoSDLTexture(
+                    app.player, app.video, nullptr);
+                video_pull_timing.add(elapsed_performance_ms(
+                    video_pull_started,
+                    SDL_GetPerformanceCounter(),
+                    performance_frequency));
+                if (video_result == 0) {
+                    video_frame_updated = true;
+                    ++video_updates;
+                } else {
+                    ++video_empty_polls;
+                }
             }
         }
         Uint64 now = SDL_GetTicks64();
@@ -3942,7 +4596,14 @@ PlaybackOutcome run_player(
         const bool should_render =
             app.redraw_requested || video_frame_updated ||
             audio_only_refresh;
-        if (should_render) {
+        if (native_hdr_output) {
+            if (video_frame_updated) {
+                app.redraw_requested = false;
+                last_visual_render = now;
+            } else {
+                SDL_Delay(app.paused ? 8 : 1);
+            }
+        } else if (should_render) {
             const Uint64 render_started = SDL_GetPerformanceCounter();
             SDL_SetRenderDrawColor(app.renderer, 0, 0, 0, 255);
             SDL_RenderClear(app.renderer);
@@ -4168,7 +4829,13 @@ PlaybackOutcome run_player(
                 bfplayer::video_scale_mode_name(app.video_scale_mode),
                 bfplayer::video_aspect_mode_name(app.video_aspect_mode),
                 bfplayer::video_crop_mode_name(app.video_crop_mode));
-            if (source_video.hdr_source) {
+            if (source_video.hdr_source && native_hdr_output) {
+                bfplayer::diagnostics_log(
+                    bfplayer::DiagnosticLevel::info,
+                    "hdr-output mode=native-hdr10 transfer=%s policy=%s tone_map=0",
+                    source_video.color_transfer,
+                    hdr_output_policy);
+            } else if (source_video.hdr_source) {
                 bfplayer::diagnostics_log(
                     tone_map_info.active
                         ? bfplayer::DiagnosticLevel::info
@@ -4321,6 +4988,17 @@ void close_media(App& app) {
             bfplayer::DiagnosticLevel::info,
             "media-close path=%s",
             app.current_media_path.c_str());
+    }
+    if (app.native_hdr_output) {
+        const int hdr_result = set_ps5_native_hdr_output(false);
+        bfplayer::diagnostics_log(
+            hdr_result == 0
+                ? bfplayer::DiagnosticLevel::info
+                : bfplayer::DiagnosticLevel::error,
+            "native-hdr-switch requested=0 active=%d result=%d",
+            hdr_result == 0 ? 0 : 1,
+            hdr_result);
+        app.native_hdr_output = false;
     }
     app.io_cancel.store(true, std::memory_order_relaxed);
     app.source_open_deadline_ms.store(0, std::memory_order_relaxed);

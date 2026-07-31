@@ -17,6 +17,13 @@ extern "C" {
 
 #define KIT_MAX_HW_DEVICES 32
 
+/*
+ * Raw planar 10-bit 4:2:0 output used by BFplayer's native PS5 HDR path.
+ * I010 is a private Kitchensink request here; SDL itself does not upload this
+ * format as a texture.
+ */
+#define KIT_PIXELFORMAT_YUV420P10LE 0x30313049u
+
 typedef enum
 {
     KIT_HWDEVICE_TYPE_NONE = 0,

@@ -18,11 +18,10 @@ The payload:
    context when the tile requests `/launch`, avoiding a second full-size
    decompression allocation.
 
-The loopback response is a short dark handoff screen. It repeatedly attempts
-`window.close()`, `self.close()`, and browser history return. PS5 WebKit can
-still reject script-initiated closure depending on how the tile created the
-window, so the visible fallback says `Press O to close this window`; Circle
-dismisses it without opening the PlayStation control center.
+After a successful handoff, the loopback route returns an empty HTTP 204
+response instead of deliberately creating a launcher document. If the BigApp
+handoff fails, the route returns a short error page so the failure remains
+visible and recoverable.
 
 After successful injection setup, the resident launcher sends a native PS5
 notification confirming that BFplayer is loaded and available in Media.

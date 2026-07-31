@@ -79,8 +79,10 @@ reaching the SDL audio device. BFplayer derives that timestamp from the next
 decoded sample position minus `SDL_GetQueuedAudioSize()`. Video follows this
 audible clock, which avoids treating a wall-clock video timer as authoritative
 while audio is still buffered. Video remains the primary clock only for
-video-only media. Seeks and audio/subtitle changes clear stale SDL audio and
-refresh demuxed packets around the current playback position.
+video-only media. Seeks and audio changes clear stale SDL audio and refresh
+demuxed packets around the requested position. Subtitle changes refresh
+subtitle packets while preserving already queued audio, avoiding an
+unnecessary audible gap.
 
 Local playback uses 64 compressed video packets and 3 converted video frames.
 Network playback uses 128 compressed video packets and 4 converted video
@@ -94,19 +96,27 @@ memory, queue occupancy, and queued-audio milliseconds for hardware
 measurement.
 
 The display backend uses 1920x1080 for media up to 1080p and switches to a
-real 3840x2160 renderer and framebuffer for larger sources. Its software
-presentation path divides each frame into tiles handled by a persistent worker
-pool, copies pixels in row-major groups, and pipelines framebuffer flips to
-reduce the time spent presenting 4K frames. The UI keeps a 1920x1080 logical
-canvas in both modes.
+real 3840x2160 framebuffer for larger sources. Source resolution is preserved
+by default. An explicit `BFPLAYER_OUTPUT_POLICY=smooth` compatibility option
+can request proportional 1080p conversion for unusually expensive SDR media;
+it is not used automatically or for native HDR.
 
-The public PS5 SDL output path currently exposes only 8-bit ABGR8888 and no
-safe HDR metadata or transfer signalling. BFplayer therefore detects PQ and
-HLG frames, reads MaxCLL or mastering-display peak metadata when present, and
-tone-maps BT.2020 HDR to limited-range BT.709 SDR before presentation. The
-conversion uses a compact 17 by 17 chroma and 256 luma lookup table, updates
-YUV420 frames in place, and shares work across the decoder thread and seven
-persistent workers. It does not allocate another full decoded frame.
+For 10-bit BT.2020/PQ, BFplayer configures the PS5 VideoOut HDR10 format and
+presents decoded YUV420P10 frames directly through a 12-worker tiled
+YUV-to-RGB10 path. The output remains BT.2020/PQ, avoiding the former
+HDR-to-SDR conversion and redundant SDL texture copies. HLG follows the same
+native HDR10 path after a BT.2100 HLG OETF/OOTF-to-PQ conversion. A
+precomputed 10-bit table approximates the shared display gain from source luma
+in 64 bins while retaining 10-bit channel input and output, keeping the steady
+4K60 path inside the frame budget. PQ bypasses that table and remains direct.
+
+The direct presenter accepts independent source crop and destination
+rectangles, so original aspect, anamorphic display ratio, letterboxing, crop,
+and manual scale modes remain valid at 4K. The UI keeps a 1920x1080 logical
+canvas; active controls and subtitles are mapped into the physical output and
+blended at an HDR-safe reference level. Non-HDR and unsupported HDR transfers
+retain the bounded SDL software path, including the existing HDR-to-SDR
+fallback when native signalling cannot be enabled.
 
 The video renderer separates decoded pixel dimensions from the stream display
 aspect ratio. Pure, host-tested layout math independently applies the complete

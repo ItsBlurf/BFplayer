@@ -1,7 +1,8 @@
 [CmdletBinding()]
 param(
     [ValidateSet('Debug', 'Release')]
-    [string]$Configuration = 'Release'
+    [string]$Configuration = 'Release',
+    [string]$SdlVideoOverrideSource = ''
 )
 
 $ErrorActionPreference = 'Stop'
@@ -19,21 +20,28 @@ if (-not $pacbrewHome) {
     $pacbrewHome = Join-Path $toolchains 'pacbrew-v0.37\homebrew'
 }
 $pacbrewHome = (Resolve-Path -LiteralPath $pacbrewHome).Path
-$sdlVideoOverrideSource = Join-Path $projectRoot (
-    'vendor\SDL_ps5_backend\lib\SDL_ps5video.c.o')
-$sdlVideoOverrideHashFile = "$sdlVideoOverrideSource.sha256"
-if (-not (Test-Path -LiteralPath $sdlVideoOverrideSource) -or
-    -not (Test-Path -LiteralPath $sdlVideoOverrideHashFile)) {
-    throw 'Missing PS5 SDL video override. Run tools\rebuild-sdl-ps5-video.ps1.'
-}
-$expectedSdlVideoOverrideHash = ((
-    Get-Content -Raw -LiteralPath $sdlVideoOverrideHashFile
-).Trim() -split '\s+')[0].ToLowerInvariant()
-$actualSdlVideoOverrideHash = (
-    Get-FileHash -Algorithm SHA256 -LiteralPath $sdlVideoOverrideSource
-).Hash.ToLowerInvariant()
-if ($actualSdlVideoOverrideHash -ne $expectedSdlVideoOverrideHash) {
-    throw 'PS5 SDL video override hash mismatch. Rebuild it before linking.'
+$usingCustomSdlVideoOverride = [bool]$SdlVideoOverrideSource
+if ($usingCustomSdlVideoOverride) {
+    $sdlVideoOverrideSource = (
+        Resolve-Path -LiteralPath $SdlVideoOverrideSource
+    ).Path
+} else {
+    $sdlVideoOverrideSource = Join-Path $projectRoot (
+        'vendor\SDL_ps5_backend\lib\SDL_ps5video.c.o')
+    $sdlVideoOverrideHashFile = "$sdlVideoOverrideSource.sha256"
+    if (-not (Test-Path -LiteralPath $sdlVideoOverrideSource) -or
+        -not (Test-Path -LiteralPath $sdlVideoOverrideHashFile)) {
+        throw 'Missing PS5 SDL video override. Run tools\rebuild-sdl-ps5-video.ps1.'
+    }
+    $expectedSdlVideoOverrideHash = ((
+        Get-Content -Raw -LiteralPath $sdlVideoOverrideHashFile
+    ).Trim() -split '\s+')[0].ToLowerInvariant()
+    $actualSdlVideoOverrideHash = (
+        Get-FileHash -Algorithm SHA256 -LiteralPath $sdlVideoOverrideSource
+    ).Hash.ToLowerInvariant()
+    if ($actualSdlVideoOverrideHash -ne $expectedSdlVideoOverrideHash) {
+        throw 'PS5 SDL video override hash mismatch. Rebuild it before linking.'
+    }
 }
 
 $required = @(

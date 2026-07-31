@@ -173,6 +173,36 @@ bool parse_finite_double(const std::string& text, double& value) {
     return true;
 }
 
+bool parse_controller_button(const std::string& name, int& button) {
+    struct NamedButton {
+        const char* name;
+        SDL_GameControllerButton button;
+    };
+    static constexpr NamedButton buttons[] = {
+        {"cross", SDL_CONTROLLER_BUTTON_A},
+        {"circle", SDL_CONTROLLER_BUTTON_B},
+        {"square", SDL_CONTROLLER_BUTTON_X},
+        {"triangle", SDL_CONTROLLER_BUTTON_Y},
+        {"dpad-up", SDL_CONTROLLER_BUTTON_DPAD_UP},
+        {"dpad-down", SDL_CONTROLLER_BUTTON_DPAD_DOWN},
+        {"dpad-left", SDL_CONTROLLER_BUTTON_DPAD_LEFT},
+        {"dpad-right", SDL_CONTROLLER_BUTTON_DPAD_RIGHT},
+        {"l1", SDL_CONTROLLER_BUTTON_LEFTSHOULDER},
+        {"r1", SDL_CONTROLLER_BUTTON_RIGHTSHOULDER},
+        {"l3", SDL_CONTROLLER_BUTTON_LEFTSTICK},
+        {"r3", SDL_CONTROLLER_BUTTON_RIGHTSTICK},
+        {"options", SDL_CONTROLLER_BUTTON_BACK},
+        {"touchpad", SDL_CONTROLLER_BUTTON_START},
+    };
+    for (const NamedButton& candidate : buttons) {
+        if (name == candidate.name) {
+            button = static_cast<int>(candidate.button);
+            return true;
+        }
+    }
+    return false;
+}
+
 const char* command_name(RemoteCommandType type) {
     switch (type) {
         case RemoteCommandType::open:
@@ -191,6 +221,8 @@ const char* command_name(RemoteCommandType type) {
             return "cycle-audio";
         case RemoteCommandType::cycle_subtitle:
             return "cycle-subtitle";
+        case RemoteCommandType::button:
+            return "button";
         case RemoteCommandType::stop:
             return "stop";
         case RemoteCommandType::exit:
@@ -229,7 +261,9 @@ std::string status_json(const RemotePlaybackStatus& status) {
         "\"audioPackets\":{\"length\":%u,\"capacity\":%u},"
         "\"audioStream\":%d,\"subtitleStream\":%d,"
         "\"sourceWidth\":%d,\"sourceHeight\":%d,"
-        "\"outputWidth\":%d,\"outputHeight\":%d,\"hdrSource\":%s,"
+        "\"outputWidth\":%d,\"outputHeight\":%d,"
+        "\"displayWidth\":%d,\"displayHeight\":%d,"
+        "\"hdrSource\":%s,\"nativeHdrOutput\":%s,"
         "\"hdrToneMapActive\":%s,\"hdrInputFullRange\":%s,"
         "\"hdrInputBt2020\":%s,\"hdrSourcePeakNits\":%.3f,"
         "\"hdrTargetPeakNits\":%.3f,\"hdrToneMapAverageMs\":%.6f,"
@@ -284,7 +318,10 @@ std::string status_json(const RemotePlaybackStatus& status) {
         status.source_height,
         status.output_width,
         status.output_height,
+        status.display_width,
+        status.display_height,
         status.hdr_source ? "true" : "false",
+        status.native_hdr_output ? "true" : "false",
         status.hdr_tone_map_active ? "true" : "false",
         status.hdr_input_full_range ? "true" : "false",
         status.hdr_input_bt2020 ? "true" : "false",
@@ -300,7 +337,9 @@ std::string status_json(const RemotePlaybackStatus& status) {
     return "{\"ok\":true,\"phase\":\"" + json_escape(status.phase) +
         "\",\"mediaPath\":\"" + json_escape(status.media_path) + "\"," +
         numeric + ",\"hdrTransfer\":\"" +
-        json_escape(status.hdr_transfer) + "\"}";
+        json_escape(status.hdr_transfer) +
+        "\",\"hdrOutputPolicy\":\"" +
+        json_escape(status.hdr_output_policy) + "\"}";
 }
 
 bool write_all(int descriptor, const void* data, std::size_t size) {
@@ -638,6 +677,13 @@ void handle_client(RemoteControlServer::Impl& impl, int client) {
         command.type = RemoteCommandType::cycle_audio;
     } else if (route == "/v1/cycle-subtitle") {
         command.type = RemoteCommandType::cycle_subtitle;
+    } else if (route == "/v1/button") {
+        command.type = RemoteCommandType::button;
+        std::string name;
+        if (!query_argument(query, "name", 32, name) ||
+            !parse_controller_button(lower_ascii(name), command.button)) {
+            error = "missing or invalid button name";
+        }
     } else if (route == "/v1/stop") {
         command.type = RemoteCommandType::stop;
     } else if (route == "/v1/exit") {

@@ -638,9 +638,27 @@ int Kit_PlayerSeek(Kit_Player *player, double seek_set) {
         seek_set = 0;
     if(seek_set >= duration)
         seek_set = duration;
+
+    /*
+     * Complete the demux seek before any decoder can consume another frame.
+     * The old asynchronous ordering allowed already-decoded audio to re-anchor
+     * the shared clock to the pre-seek timestamp and could make a successful
+     * seek appear to do nothing, especially on HTTP/DLNA sources.
+     */
+    Kit_StopThreads(player);
+    Kit_SignalAllBuffers(player);
+    Kit_WaitThreads(player);
+    Kit_FlushAllBuffers(player);
+    if(!Kit_DemuxerSeek(
+            player->demuxer,
+            (int64_t)(seek_set * AV_TIME_BASE))) {
+        Kit_StartThreads(player);
+        Kit_SetError("Unable to seek media source");
+        return 1;
+    }
     Kit_SeekAudioDecoder(player->decoders[KIT_AUDIO_INDEX], seek_set);
     Kit_AdjustTimerBase(player->sync_timer, seek_set);
-    Kit_SeekDemuxerThread(player->demux_thread, seek_set * AV_TIME_BASE);
+    Kit_StartThreads(player);
     return 0;
 }
 

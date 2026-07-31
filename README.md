@@ -1,7 +1,8 @@
 # BFplayer
 
-**AI use notice:** I used ai and specefically Codex with gpt 5.5 then 5.6 while developing BFplayer.  I direct the development and have spent many hours across 
-multiple days testing builds and playback behavior on my own PS5.
+**AI use notice:** BFplayer has been developed with OpenAI Codex. I direct the
+development and have spent many hours across multiple days testing builds and
+playback behavior on my own PS5.
 
 BFplayer is a native media library and player for jailbroken
 PlayStation 5 consoles. The standalone release installs its own tile in the
@@ -30,20 +31,20 @@ Playback is powered by FFmpeg 7.0.1, SDL2, SDL_kitchensink, and libass. Decoding
 is currently software-based, so demanding 4K HEVC or AV1 files may not play
 smoothly.
 
-The player selects 1920x1080 output for media up to 1080p and native
-3840x2160 output for larger normal-rate sources. Demanding 4K50/60
-software-decoded video uses adaptive 1920x1080 output to keep presentation
-real-time. Its PS5 presentation path uses persistent parallel workers and
-pipelined framebuffer flips. PQ and HLG sources are tone-mapped in place from
-BT.2020 HDR to BT.709 SDR because the current public PS5 SDL homebrew path does
-not expose safe native HDR output signalling.
+BFplayer preserves source resolution by default and switches the PS5 display
+to 3840x2160 for larger sources. Its direct 10-bit PS5 path presents BT.2020/PQ
+as native HDR10 without an HDR-to-SDR conversion. BT.2020/HLG is converted to
+PQ for the same native HDR10 output. An explicit `BFPLAYER_OUTPUT_POLICY=smooth`
+escape hatch can request proportional 1080p conversion, but it is never the
+default and is not used for native HDR.
 
-On the exact alpha.43 standalone and websrv release players, the supplied
-3840x2160 59.94 fps VP9/PQ WebM held 59.94 fps at 1920x1080 with about
-773 MiB peak resident memory. The 1920x1080 23.976 fps test file held its
-source frame rate. These are sample-specific measurements, not format
-guarantees. Demanding 4K HEVC, AV1, or unusual high-bitrate files can still
-exceed the available processing budget.
+On the alpha.44 hardware build, the supplied 3840x2160 59.94 fps VP9 Profile 2
+PQ WebM held about 59.9 fps at native 3840x2160 with zero steady-state misses
+and roughly 819 MiB peak resident memory. The equivalent HLG presentation
+workload also held 59.9 fps after warm-up. These are sample-specific
+measurements, not format guarantees. Decoding is still software-based, so
+demanding HEVC, AV1, unusual encodes, or slow storage/network sources can
+exceed the available CPU or I/O budget.
 
 Every video starts in **Best fit**, **Original** aspect, and **No crop** mode.
 The player uses the source stream's display ratio, including anamorphic

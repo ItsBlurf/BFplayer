@@ -46,11 +46,11 @@ Copy-Item -LiteralPath $SourceDirectory -Destination (Join-Path $scratchRoot 'SD
 $scratchSource = Join-Path $scratchRoot 'SDL'
 
 $patch = Join-Path $projectRoot 'vendor\SDL_ps5_backend\ps5-4k-output.patch'
-& git -C $scratchSource apply --check $patch
+& git -C $scratchSource apply --unidiff-zero --check $patch
 if ($LASTEXITCODE -ne 0) {
     throw 'The BFplayer PS5 SDL patch no longer applies cleanly.'
 }
-& git -C $scratchSource apply $patch
+& git -C $scratchSource apply --unidiff-zero $patch
 if ($LASTEXITCODE -ne 0) {
     throw 'Unable to apply the BFplayer PS5 SDL patch.'
 }

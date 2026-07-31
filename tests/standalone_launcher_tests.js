@@ -22,6 +22,9 @@ const libraryUi = fs.readFileSync(
 const player = fs.readFileSync(
     path.join(root, 'src', 'main.cpp'),
     'utf8');
+const remoteControl = fs.readFileSync(
+    path.join(root, 'src', 'core', 'remote_control.cpp'),
+    'utf8');
 const subtitleBrowser = fs.readFileSync(
     path.join(root, 'src', 'core', 'subtitle_browser.cpp'),
     'utf8');
@@ -83,6 +86,9 @@ const dlnaClient = fs.readFileSync(
 const build = fs.readFileSync(path.join(root, 'build.ps1'), 'utf8');
 
 assert.strictEqual(param.applicationCategoryType, 65536);
+assert.strictEqual(param.attribute, 536870913);
+assert.strictEqual(param.attribute2, 0);
+assert.strictEqual(param.attribute3, 4);
 assert.strictEqual(param.titleId, 'PSMC00001');
 assert.deepStrictEqual(Object.keys(param.localizedParameters).sort(), [
     'defaultLanguage',
@@ -162,6 +168,8 @@ assert(!launcher.includes('press the PS button'));
 assert(launcher.includes('sceKernelSendNotificationRequest'));
 assert(launcher.includes('Open it from Media'));
 assert(launcher.includes('history.back()'));
+assert(launcher.includes('status == 204 ? "No Content"'));
+assert(launcher.includes('send_response(\n                    connection,\n                    204,'));
 assert(!launcher.includes('microhttpd'));
 assert(!launcher.includes('#include "websrv'));
 assert(!launcher.includes('8080'));
@@ -194,6 +202,7 @@ assert(hbldr.includes('hbldr_prepare_host'));
 assert(hbldr.includes('#define HOST_TITLE_ID "PSMC00001"'));
 assert(hbldr.includes('BFPLAYER00000000'));
 assert(hbldr.includes('"  \\"applicationCategoryType\\": 65536,\\n"'));
+assert(hbldr.includes('"  \\"attribute\\": 536870913,\\n"'));
 assert(!hbldr.includes('"  \\"applicationCategoryType\\": 0,\\n"'));
 assert(!hbldr.includes('PSMR00001'));
 assert(!hbldr.includes('FAKE00000'));
@@ -220,6 +229,11 @@ assert(libraryUi.includes('"Square     Import as mixed library"'));
 assert(libraryUi.includes('"Saves only after import completes"'));
 assert(libraryUi.includes('"R3"'));
 assert(libraryUi.includes('"Sort"'));
+assert(libraryUi.includes('FooterGlyph::left_stick'));
+assert(libraryUi.includes('FooterGlyph::right_stick'));
+assert(libraryUi.includes('fill_circle(renderer, center_x, center_y, 16)'));
+assert(libraryUi.includes('fill_rounded_rect(impl_->renderer, chip, 14)'));
+assert(libraryUi.includes('controller_buttons_down.fill(false)'));
 assert(libraryUi.includes('FooterGlyph::triangle, "", "Remove"'));
 assert(libraryUi.includes('draw_logo(impl_->renderer, impl_->logo_texture'));
 assert(libraryUi.includes('title = "BFplayer"'));
@@ -271,6 +285,8 @@ assert(player.includes('create_subtitle_texture'),
     'subtitle switching updates only the subtitle texture');
 assert(player.includes('track-switch refresh'),
     'audio and subtitle switches refresh around the current position');
+assert(player.includes('app.audio != 0 && type == KIT_STREAMTYPE_AUDIO'),
+    'subtitle changes preserve queued audio while refreshing packets');
 assert(player.includes('PlaybackOverlay::subtitles'),
     'playback options expose a dedicated subtitle screen');
 assert(player.includes('Browse subtitle files...'),
@@ -347,6 +363,16 @@ assert(kitchensinkPlayer.includes(
     'const bool audio_primary = audio_stream_index > -1'));
 assert(kitchensinkPlayer.includes(
     'const bool video_primary = !audio_primary && video_stream_index > -1'));
+const seekImplementation = kitchensinkPlayer.slice(
+    kitchensinkPlayer.indexOf('int Kit_PlayerSeek('),
+    kitchensinkPlayer.indexOf('double Kit_GetPlayerDuration('));
+assert(
+    seekImplementation.indexOf('Kit_StopThreads(player)') <
+        seekImplementation.indexOf('Kit_DemuxerSeek('));
+assert(
+    seekImplementation.indexOf('Kit_DemuxerSeek(') <
+        seekImplementation.indexOf('Kit_AdjustTimerBase('));
+assert(seekImplementation.includes('Unable to seek media source'));
 assert(kitchensinkAudio.includes(
     'bfplayer_audio_audible_position('));
 assert(kitchensinkAudio.includes(
@@ -363,7 +389,13 @@ assert(player.includes('video_update_fps=%.3f'));
 assert(player.includes('present_p95_ms=%.3f'));
 assert(player.includes('media_read_ms=%.3f'));
 assert(player.includes('remote-control start failed'));
+assert(remoteControl.includes('route == "/v1/button"'));
+assert(remoteControl.includes('"missing or invalid button name"'));
+assert(player.includes('SDL_PushEvent(&down)'));
+assert(player.includes('SDL_PushEvent(&up)'));
 assert(player.includes('demanding_software_decode'));
+assert(player.includes('std::strcmp(output_policy, "smooth") == 0'));
+assert(!player.includes('std::strcmp(output_policy, "source") == 0'));
 assert(player.includes('display_aspect_from_sample_aspect('));
 assert(player.includes('av_guess_sample_aspect_ratio('));
 assert(player.includes(

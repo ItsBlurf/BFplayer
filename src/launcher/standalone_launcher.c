@@ -944,6 +944,11 @@ static void send_response(
     const char* body) {
     char header[512];
     const size_t body_length = body ? strlen(body) : 0U;
+    const char* reason =
+        status == 200 ? "OK" :
+        status == 204 ? "No Content" :
+        status == 500 ? "Internal Server Error" :
+        "Not Found";
     const int header_length = snprintf(
         header,
         sizeof(header),
@@ -953,7 +958,7 @@ static void send_response(
         "Cache-Control: no-store\r\n"
         "Connection: close\r\n\r\n",
         status,
-        status == 200 ? "OK" : "Not Found",
+        reason,
         content_type,
         body_length);
     if (header_length > 0 && header_length < (int)sizeof(header)) {
@@ -1175,10 +1180,24 @@ static void serve_forever(int listener) {
             request[0] = '\0';
         }
         if (bfplayer_request_is_launch(request)) {
-            send_response(connection, 200, "text/html", launch_page);
-            close(connection);
             launcher_log("request route=/launch");
-            (void)launch_installed_player();
+            if (launch_installed_player() == 0) {
+                /*
+                 * The dashboard deeplink must enter WebKit to reach this
+                 * loopback route, but a successful native handoff does not
+                 * need to leave a browser document behind. A bodyless 204
+                 * keeps the transient handoff out of browser history so
+                 * returning from BFplayer goes straight to the dashboard.
+                 */
+                send_response(
+                    connection,
+                    204,
+                    "application/octet-stream",
+                    "");
+            } else {
+                send_response(connection, 500, "text/html", launch_page);
+            }
+            close(connection);
         } else if (bfplayer_request_is_shutdown(request)) {
             send_response(connection, 200, "text/plain", "Shutting down\n");
             close(connection);

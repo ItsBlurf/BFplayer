@@ -5,6 +5,7 @@
 
 static enum AVPixelFormat supported_list[] = {
     AV_PIX_FMT_YUV420P,
+    AV_PIX_FMT_YUV420P10LE,
     AV_PIX_FMT_YUYV422,
     AV_PIX_FMT_UYVY422,
     AV_PIX_FMT_NV12,
@@ -29,6 +30,8 @@ unsigned int Kit_FindSDLPixelFormat(const enum AVPixelFormat fmt) {
     switch(fmt) {
         case AV_PIX_FMT_YUV420P:
             return SDL_PIXELFORMAT_IYUV;
+        case AV_PIX_FMT_YUV420P10LE:
+            return KIT_PIXELFORMAT_YUV420P10LE;
         case AV_PIX_FMT_YUYV422:
             return SDL_PIXELFORMAT_YUY2;
         case AV_PIX_FMT_UYVY422:
@@ -37,6 +40,8 @@ unsigned int Kit_FindSDLPixelFormat(const enum AVPixelFormat fmt) {
             return SDL_PIXELFORMAT_NV12;
         case AV_PIX_FMT_NV21:
             return SDL_PIXELFORMAT_NV21;
+        case AV_PIX_FMT_X2RGB10LE:
+            return SDL_PIXELFORMAT_ARGB2101010;
         default:
             return SDL_PIXELFORMAT_RGBA32;
     }
@@ -79,6 +84,8 @@ enum AVPixelFormat Kit_FindAVPixelFormat(const unsigned int fmt)
         case SDL_PIXELFORMAT_YV12:
         case SDL_PIXELFORMAT_IYUV:
             return AV_PIX_FMT_YUV420P;
+        case KIT_PIXELFORMAT_YUV420P10LE:
+            return AV_PIX_FMT_YUV420P10LE;
         case SDL_PIXELFORMAT_YUY2:
             return AV_PIX_FMT_YUYV422;
         case SDL_PIXELFORMAT_UYVY:
@@ -103,6 +110,8 @@ enum AVPixelFormat Kit_FindAVPixelFormat(const unsigned int fmt)
             return AV_PIX_FMT_RGB565;
         case SDL_PIXELFORMAT_BGR565:
             return AV_PIX_FMT_BGR565;
+        case SDL_PIXELFORMAT_ARGB2101010:
+            return AV_PIX_FMT_X2RGB10LE;
         default:
             return AV_PIX_FMT_NONE;
     }

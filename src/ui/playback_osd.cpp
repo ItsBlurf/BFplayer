@@ -294,6 +294,11 @@ bool PlaybackOsd::panel_visible() const noexcept {
     return impl_->panel_visible;
 }
 
+bool PlaybackOsd::visible() const noexcept {
+    return impl_->panel_visible ||
+        SDL_GetTicks64() < impl_->visible_until;
+}
+
 void PlaybackOsd::render(double position_seconds, double duration_seconds, bool paused) {
     if (!impl_->renderer || !impl_->font) {
         return;
@@ -304,7 +309,12 @@ void PlaybackOsd::render(double position_seconds, double duration_seconds, bool 
     }
     SDL_RenderSetLogicalSize(impl_->renderer, kScreenWidth, kScreenHeight);
     SDL_SetRenderDrawBlendMode(impl_->renderer, SDL_BLENDMODE_BLEND);
-    SDL_SetRenderDrawColor(impl_->renderer, 5, 8, 15, 220);
+    /*
+     * Keep the transport strip opaque. Besides improving text contrast over
+     * bright HDR scenes, the native HDR compositor can replace these pixels
+     * directly instead of blending more than a million 4K output pixels.
+     */
+    SDL_SetRenderDrawColor(impl_->renderer, 5, 8, 15, 255);
     SDL_Rect panel{0, kScreenHeight - 170, kScreenWidth, 170};
     SDL_RenderFillRect(impl_->renderer, &panel);
 
@@ -370,7 +380,7 @@ void PlaybackOsd::render(double position_seconds, double duration_seconds, bool 
             static_cast<int>(impl_->panel_row_textures.size());
         const int panel_height =
             std::min(820, 112 + row_count * row_height);
-        SDL_SetRenderDrawColor(impl_->renderer, 7, 12, 23, 248);
+        SDL_SetRenderDrawColor(impl_->renderer, 7, 12, 23, 255);
         SDL_Rect modal{panel_x, panel_y, panel_width, panel_height};
         SDL_RenderFillRect(impl_->renderer, &modal);
         SDL_SetRenderDrawColor(impl_->renderer, 58, 133, 231, 255);

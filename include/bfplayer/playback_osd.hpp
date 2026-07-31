@@ -28,6 +28,7 @@ public:
         std::vector<bool> enabled = {});
     void hide_panel();
     [[nodiscard]] bool panel_visible() const noexcept;
+    [[nodiscard]] bool visible() const noexcept;
     void render(double position_seconds, double duration_seconds, bool paused);
 
     [[nodiscard]] const std::string& error() const noexcept;

@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.1.0-alpha.44 - native HDR and source-quality test build
+
+- Preserve source resolution by default instead of silently reducing demanding
+  4K50/60 media to 1080p.
+- Present 10-bit BT.2020/PQ directly through the PS5 HDR10 output and convert
+  HLG to PQ for native HDR instead of forcing HDR through SDR.
+- Add a parallel direct-frame path with correct letterboxing, crop, aspect
+  handling, and HDR-safe on-screen controls.
+- Make seeks synchronous and keep queued audio intact during subtitle changes,
+  reducing delayed seeks and track-switch interruptions.
+- Refresh the library UI with rounded navy panels, clearer selection, and
+  graphical PlayStation button hints.
+- Return an empty 204 response after a successful standalone launch so the
+  launcher does not deliberately leave a handoff page behind.
+- Verify local 4K60 PQ/HLG playback, DLNA browsing and playback, seeking,
+  audio/subtitle changes, and both release package layouts on PS5.
+
 ## 0.1.0-alpha.43 - smooth 4K60 WebM test build
 
 - Use adaptive 1920x1080 output for demanding 4K50/60 software-decoded video

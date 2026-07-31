@@ -1,14 +1,95 @@
 diff --git a/src/video/ps5/SDL_ps5video.c b/src/video/ps5/SDL_ps5video.c
-index 699812e..4622bc2 100644
+index 699812e..3127b2c 100644
 --- a/src/video/ps5/SDL_ps5video.c
 +++ b/src/video/ps5/SDL_ps5video.c
-@@ -33,49 +33,179 @@
-
- #define PS5_THREAD_COUNT 12
-
+@@ -26,0 +27,2 @@
++#include <immintrin.h>
++#include <math.h>
+@@ -33,0 +36,2 @@
++extern int sceVideoOutAddBufferHdrPrivilege(void);
++
+@@ -34,0 +39,701 @@
++#define PS5_VIDEO_FORMAT_SDR 0x8000000022000000UL
++#define PS5_VIDEO_FORMAT_HDR10 0x8100070400000000UL
++#define PS5_VIDEO_OPTION_STRICT_COLORIMETRY (1UL << 3)
++
++static SDL_bool PS5_native_hdr_requested = SDL_FALSE;
++
++static SDL_bool PS5_NativeHdrRequested(void)
++{
++    return PS5_native_hdr_requested;
++}
++
++int BFplayer_PS5_IsNativeHdrOutput(void)
++{
++    return PS5_NativeHdrRequested() == SDL_TRUE;
++}
++
++int BFplayer_PS5_SupportsNativeHdr(void)
++{
++    return 1;
++}
++
++static Uint32 PS5_SurfaceFormat(void)
++{
++    /*
++     * BFplayer presents HDR video directly to VideoOut. Keep SDL's software
++     * renderer on its stable 8-bit surface for the library and controls.
++     */
++    return SDL_PIXELFORMAT_ABGR8888;
++}
++
++static uint64_t PS5_VideoFormat(void)
++{
++    return PS5_NativeHdrRequested()
++               ? PS5_VIDEO_FORMAT_HDR10
++               : PS5_VIDEO_FORMAT_SDR;
++}
++
++static uint64_t PS5_VideoOptions(void)
++{
++    return PS5_NativeHdrRequested()
++               ? PS5_VIDEO_OPTION_STRICT_COLORIMETRY
++               : 0;
++}
++
++typedef struct BFplayer_TileWork {
++    const uint32_t *src;
++    uint32_t *dst;
++    size_t frame_width;
++    size_t frame_height;
++    size_t source_pitch_pixels;
++    size_t first_row;
++    size_t last_row;
++    const uint16_t *y_plane;
++    const uint16_t *u_plane;
++    const uint16_t *v_plane;
++    size_t y_pitch_samples;
++    size_t u_pitch_samples;
++    size_t v_pitch_samples;
++    size_t source_x;
++    size_t source_y;
++    size_t source_width;
++    size_t source_height;
++    size_t destination_x;
++    size_t destination_y;
++    size_t destination_width;
++    size_t destination_height;
++    int hlg_to_pq;
++    int full_range;
++    const uint32_t *overlay;
++    size_t overlay_pitch_pixels;
++    size_t overlay_width;
++    size_t overlay_height;
++    size_t overlay_x;
++    size_t overlay_y;
++    size_t overlay_region_width;
++    size_t overlay_region_height;
++} BFplayer_TileWork;
++
 +typedef struct PS5_TileWorkerPool {
 +    pthread_t threads[PS5_THREAD_COUNT];
-+    PS5_DrawChunk chunks[PS5_THREAD_COUNT];
++    BFplayer_TileWork chunks[PS5_THREAD_COUNT];
 +    pthread_mutex_t mutex;
 +    pthread_cond_t work_ready;
 +    pthread_cond_t work_done;
@@ -21,19 +102,378 @@ index 699812e..4622bc2 100644
 +
 +static PS5_TileWorkerPool PS5_tile_workers;
 +static uint32_t PS5_frame_id;
++static PS5_DeviceData *BFplayer_video_device;
++static SDL_VideoDevice *BFplayer_sdl_video_device;
++#define PS5_HLG_LUMA_BINS 64
++#define PS5_HLG_CODE_LEVELS 1024
++static int PS5_hlg_to_pq_lut[
++    PS5_HLG_LUMA_BINS * PS5_HLG_CODE_LEVELS];
++static pthread_once_t PS5_hlg_lut_once = PTHREAD_ONCE_INIT;
 +
-+static void PS5_DrawTileRows(const PS5_DrawChunk *chunk)
++static int PS5_Clamp10(int value)
++{
++    if (value < 0)
++        return 0;
++    if (value > 1023)
++        return 1023;
++    return value;
++}
++
++static double PS5_PqEncode(double normalized_luminance)
++{
++    const double m1 = 2610.0 / 16384.0;
++    const double m2 = 2523.0 / 32.0;
++    const double c1 = 3424.0 / 4096.0;
++    const double c2 = 2413.0 / 128.0;
++    const double c3 = 2392.0 / 128.0;
++    const double level =
++        pow(SDL_max(0.0, normalized_luminance), m1);
++    return pow((c1 + c2 * level) / (1.0 + c3 * level), m2);
++}
++
++static void PS5_InitializeHlgLuts(void)
++{
++    const double a = 0.17883277;
++    const double b = 0.28466892;
++    const double c = 0.55991073;
++    for (int luma_bin = 0;
++         luma_bin < PS5_HLG_LUMA_BINS;
++         luma_bin++) {
++        const double luma_signal =
++            ((double)luma_bin + 0.5) /
++            (double)PS5_HLG_LUMA_BINS;
++        const double scene_luminance =
++            luma_signal <= 0.5
++                ? luma_signal * luma_signal / 3.0
++                : (exp((luma_signal - c) / a) + b) / 12.0;
++        /*
++         * BT.2100 HLG OOTF for a 1000-nit reference display. The gain uses
++         * scene luminance. Approximate that shared gain from source luma in
++         * 64 bins; this keeps the 4K60 hot path to three integer table gathers
++         * while retaining each channel's full 10-bit input/output precision.
++         */
++        const double gain =
++            scene_luminance > 0.0
++                ? pow(scene_luminance, 0.2)
++                : 0.0;
++        for (int code = 0;
++             code < PS5_HLG_CODE_LEVELS;
++             code++) {
++            const double signal =
++                (double)code /
++                (double)(PS5_HLG_CODE_LEVELS - 1);
++            const double scene_component =
++                signal <= 0.5
++                    ? signal * signal / 3.0
++                    : (exp((signal - c) / a) + b) / 12.0;
++            const double display_component =
++                SDL_min(1.0, scene_component * gain);
++            PS5_hlg_to_pq_lut[
++                luma_bin * PS5_HLG_CODE_LEVELS + code] =
++                PS5_Clamp10((int)llround(
++                    PS5_PqEncode(display_component * 0.1) *
++                    1023.0));
++        }
++    }
++}
++
++int BFplayer_PS5_PrepareNativeHdrHlg(void)
++{
++    return pthread_once(
++        &PS5_hlg_lut_once,
++        PS5_InitializeHlgLuts);
++}
++
++static uint32_t PS5_ConvertBt2020Pixel(
++    int y_code,
++    int u_code,
++    int v_code,
++    int full_range)
++{
++    const int cb = u_code - 512;
++    const int cr = v_code - 512;
++    int red;
++    int green;
++    int blue;
++
++    if (full_range) {
++        red = (1024 * y_code + 1510 * cr + 512) >> 10;
++        green =
++            (1024 * y_code - 168 * cb - 585 * cr + 512) >> 10;
++        blue = (1024 * y_code + 1927 * cb + 512) >> 10;
++    } else {
++        const int luma = y_code - 64;
++        red = (1196 * luma + 1724 * cr + 512) >> 10;
++        green =
++            (1196 * luma - 192 * cb - 668 * cr + 512) >> 10;
++        blue = (1196 * luma + 2200 * cb + 512) >> 10;
++    }
++
++    return ((uint32_t)PS5_Clamp10(red) << 20) |
++           ((uint32_t)PS5_Clamp10(green) << 10) |
++           (uint32_t)PS5_Clamp10(blue);
++}
++
++static uint32_t PS5_ConvertHlgPackedToPq(
++    uint32_t packed,
++    int y_code,
++    int full_range)
++{
++    const int luma_bin = full_range
++        ? SDL_min(PS5_HLG_LUMA_BINS - 1,
++                  SDL_max(0, y_code) >> 4)
++        : SDL_min(
++              PS5_HLG_LUMA_BINS - 1,
++              SDL_max(
++                  0,
++                  ((y_code - 64) * PS5_HLG_LUMA_BINS +
++                   438) /
++                      876));
++    const int base = luma_bin * PS5_HLG_CODE_LEVELS;
++    return ((uint32_t)PS5_hlg_to_pq_lut[
++                base + ((packed >> 20) & 1023)] << 20) |
++           ((uint32_t)PS5_hlg_to_pq_lut[
++                base + ((packed >> 10) & 1023)] << 10) |
++           (uint32_t)PS5_hlg_to_pq_lut[
++               base + (packed & 1023)];
++}
++
++__attribute__((target("avx2")))
++static __m128i PS5_ConvertBt2020Four(
++    const uint16_t *y_samples,
++    const uint16_t *u_samples,
++    const uint16_t *v_samples,
++    int full_range,
++    int hlg_to_pq)
++{
++    const __m128i zero = _mm_setzero_si128();
++    const __m128i maximum = _mm_set1_epi32(1023);
++    __m128i y = _mm_cvtepu16_epi32(
++        _mm_loadl_epi64((const __m128i *)y_samples));
++    const __m128i y_codes = y;
++    const __m128i u = _mm_setr_epi32(
++        u_samples[0] & 1023,
++        u_samples[0] & 1023,
++        u_samples[1] & 1023,
++        u_samples[1] & 1023);
++    const __m128i v = _mm_setr_epi32(
++        v_samples[0] & 1023,
++        v_samples[0] & 1023,
++        v_samples[1] & 1023,
++        v_samples[1] & 1023);
++    const __m128i cb = _mm_sub_epi32(u, _mm_set1_epi32(512));
++    const __m128i cr = _mm_sub_epi32(v, _mm_set1_epi32(512));
++    __m128i red;
++    __m128i green;
++    __m128i blue;
++
++    if (full_range) {
++        red = _mm_add_epi32(
++            _mm_add_epi32(
++                _mm_mullo_epi32(y, _mm_set1_epi32(1024)),
++                _mm_mullo_epi32(cr, _mm_set1_epi32(1510))),
++            _mm_set1_epi32(512));
++        green = _mm_add_epi32(
++            _mm_add_epi32(
++                _mm_add_epi32(
++                    _mm_mullo_epi32(y, _mm_set1_epi32(1024)),
++                    _mm_mullo_epi32(cb, _mm_set1_epi32(-168))),
++                _mm_mullo_epi32(cr, _mm_set1_epi32(-585))),
++            _mm_set1_epi32(512));
++        blue = _mm_add_epi32(
++            _mm_add_epi32(
++                _mm_mullo_epi32(y, _mm_set1_epi32(1024)),
++                _mm_mullo_epi32(cb, _mm_set1_epi32(1927))),
++            _mm_set1_epi32(512));
++    } else {
++        y = _mm_sub_epi32(y, _mm_set1_epi32(64));
++        red = _mm_add_epi32(
++            _mm_add_epi32(
++                _mm_mullo_epi32(y, _mm_set1_epi32(1196)),
++                _mm_mullo_epi32(cr, _mm_set1_epi32(1724))),
++            _mm_set1_epi32(512));
++        green = _mm_add_epi32(
++            _mm_add_epi32(
++                _mm_add_epi32(
++                    _mm_mullo_epi32(y, _mm_set1_epi32(1196)),
++                    _mm_mullo_epi32(cb, _mm_set1_epi32(-192))),
++                _mm_mullo_epi32(cr, _mm_set1_epi32(-668))),
++            _mm_set1_epi32(512));
++        blue = _mm_add_epi32(
++            _mm_add_epi32(
++                _mm_mullo_epi32(y, _mm_set1_epi32(1196)),
++                _mm_mullo_epi32(cb, _mm_set1_epi32(2200))),
++            _mm_set1_epi32(512));
++    }
++
++    red = _mm_min_epi32(
++        maximum,
++        _mm_max_epi32(zero, _mm_srai_epi32(red, 10)));
++    green = _mm_min_epi32(
++        maximum,
++        _mm_max_epi32(zero, _mm_srai_epi32(green, 10)));
++    blue = _mm_min_epi32(
++        maximum,
++        _mm_max_epi32(zero, _mm_srai_epi32(blue, 10)));
++    if (hlg_to_pq) {
++        __m128i luma_bin;
++        if (full_range) {
++            luma_bin = _mm_srli_epi32(y_codes, 4);
++        } else {
++            /*
++             * 4789 / 65536 closely approximates 64 / 876. Clamp studio
++             * range before applying it so out-of-range samples stay safe.
++             */
++            luma_bin = _mm_srai_epi32(
++                _mm_add_epi32(
++                    _mm_mullo_epi32(
++                        _mm_max_epi32(
++                            zero,
++                            _mm_sub_epi32(
++                                y_codes,
++                                _mm_set1_epi32(64))),
++                        _mm_set1_epi32(4789)),
++                    _mm_set1_epi32(32768)),
++                16);
++        }
++        luma_bin = _mm_min_epi32(
++            _mm_set1_epi32(PS5_HLG_LUMA_BINS - 1),
++            _mm_max_epi32(zero, luma_bin));
++        const __m128i base = _mm_slli_epi32(luma_bin, 10);
++        red = _mm_i32gather_epi32(
++            PS5_hlg_to_pq_lut,
++            _mm_add_epi32(base, red),
++            sizeof(int));
++        green = _mm_i32gather_epi32(
++            PS5_hlg_to_pq_lut,
++            _mm_add_epi32(base, green),
++            sizeof(int));
++        blue = _mm_i32gather_epi32(
++            PS5_hlg_to_pq_lut,
++            _mm_add_epi32(base, blue),
++            sizeof(int));
++    }
++
++    return _mm_or_si128(
++        _mm_or_si128(
++            _mm_slli_epi32(red, 20),
++            _mm_slli_epi32(green, 10)),
++        blue);
++}
++
++typedef struct BFplayer_OverlayBlend {
++    unsigned int inverse_alpha;
++    unsigned int red;
++    unsigned int green;
++    unsigned int blue;
++    uint32_t packed;
++    int active;
++} BFplayer_OverlayBlend;
++
++static BFplayer_OverlayBlend PS5_PrepareSdrOverlay(uint32_t overlay)
++{
++    BFplayer_OverlayBlend blend;
++    const unsigned int alpha = overlay >> 24;
++    unsigned int pq_red;
++    unsigned int pq_green;
++    unsigned int pq_blue;
++
++    blend.inverse_alpha = 255 - alpha;
++    blend.active = alpha != 0;
++    /*
++     * Place opaque SDR UI white at approximately 100 nits in the native PQ
++     * signal. Blending in code space is deliberate here: it keeps this hot
++     * per-pixel overlay path bounded while preserving readable antialiasing.
++     */
++    pq_red = ((overlay & 255) * 520 + 127) / 255;
++    pq_green = (((overlay >> 8) & 255) * 520 + 127) / 255;
++    pq_blue = (((overlay >> 16) & 255) * 520 + 127) / 255;
++    blend.red = (pq_red * alpha + 127) / 255;
++    blend.green = (pq_green * alpha + 127) / 255;
++    blend.blue = (pq_blue * alpha + 127) / 255;
++    blend.packed = (blend.red << 20) | (blend.green << 10) | blend.blue;
++    return blend;
++}
++
++static uint32_t PS5_ApplySdrOverlay(
++    uint32_t video,
++    const BFplayer_OverlayBlend *blend)
++{
++    unsigned int video_red;
++    unsigned int video_green;
++    unsigned int video_blue;
++
++    if (!blend->active)
++        return video;
++    if (blend->inverse_alpha == 0)
++        return blend->packed;
++    video_red =
++        ((((video >> 20) & 1023) * blend->inverse_alpha + 127) / 255) +
++        blend->red;
++    video_green =
++        ((((video >> 10) & 1023) * blend->inverse_alpha + 127) / 255) +
++        blend->green;
++    video_blue =
++        (((video & 1023) * blend->inverse_alpha + 127) / 255) +
++        blend->blue;
++    return (video_red << 20) | (video_green << 10) | video_blue;
++}
++
++static void PS5_DrawTileRows(const BFplayer_TileWork *chunk)
 +{
 +    const size_t width = chunk->frame_width;
-+    const size_t first_row = chunk->src_start;
-+    const size_t last_row = chunk->src_end;
++    const size_t first_row = chunk->first_row;
++    const size_t last_row = chunk->last_row;
++    const int exact_yuv_layout =
++        chunk->y_plane != NULL &&
++        chunk->source_x == 0 &&
++        chunk->source_y == 0 &&
++        chunk->source_width == width &&
++        chunk->source_height == chunk->frame_height &&
++        chunk->destination_x == 0 &&
++        chunk->destination_y == 0 &&
++        chunk->destination_width == width &&
++        chunk->destination_height == chunk->frame_height;
 +
 +    for (size_t y = first_row; y < last_row; y++) {
 +        const size_t tile_y = y / PS5_TILE_HEIGHT;
 +        const size_t local_y = y % PS5_TILE_HEIGHT;
-+        const size_t src_row = y * width;
 +        const size_t dst_tile_row = tile_y * width * PS5_TILE_HEIGHT;
 +        const unsigned short *tile_offsets = PS5_tilemap[local_y];
++        const uint16_t *y_row = NULL;
++        const uint16_t *u_row = NULL;
++        const uint16_t *v_row = NULL;
++        const uint32_t *overlay_row = NULL;
++        uint32_t cached_overlay = 0;
++        BFplayer_OverlayBlend cached_blend;
++        int have_cached_overlay = 0;
++        size_t src_row = 0;
++
++        if (chunk->y_plane != NULL && exact_yuv_layout) {
++            y_row = chunk->y_plane + y * chunk->y_pitch_samples;
++            u_row = chunk->u_plane + (y / 2) * chunk->u_pitch_samples;
++            v_row = chunk->v_plane + (y / 2) * chunk->v_pitch_samples;
++        } else {
++            src_row = y * chunk->source_pitch_pixels;
++        }
++        if (chunk->y_plane != NULL && chunk->overlay != NULL) {
++            size_t mapped_overlay_y;
++            if (chunk->overlay_height == chunk->frame_height)
++                mapped_overlay_y = y;
++            else if (chunk->overlay_height * 2 == chunk->frame_height)
++                mapped_overlay_y = y / 2;
++            else
++                mapped_overlay_y =
++                    y * chunk->overlay_height / chunk->frame_height;
++            if (mapped_overlay_y >= chunk->overlay_y &&
++                mapped_overlay_y <
++                    chunk->overlay_y +
++                    chunk->overlay_region_height) {
++                overlay_row =
++                    chunk->overlay +
++                    mapped_overlay_y * chunk->overlay_pitch_pixels;
++            }
++        }
 +
 +        /*
 +         * Every four adjacent source pixels remain adjacent in the PS5 tile
@@ -47,29 +487,221 @@ index 699812e..4622bc2 100644
 +            const size_t dst_tile =
 +                dst_tile_row +
 +                (tile_x / PS5_TILE_WIDTH) * PS5_TILE_SIZE;
-+            const uint32_t *source =
-+                chunk->src + src_row + tile_x;
 +            size_t local_x = 0;
 +
-+            for (; local_x + 4 <= copy_width; local_x += 4) {
-+                SDL_memcpy(
-+                    chunk->dst + dst_tile + tile_offsets[local_x],
-+                    source + local_x,
-+                    4 * sizeof(uint32_t));
-+            }
-+            for (; local_x < copy_width; local_x++) {
-+                chunk->dst[dst_tile + tile_offsets[local_x]] =
-+                    source[local_x];
++            if (chunk->y_plane != NULL && !exact_yuv_layout) {
++                for (; local_x < copy_width; local_x++) {
++                    const size_t output_x = tile_x + local_x;
++                    uint32_t converted = 0;
++                    const int inside_video =
++                        y >= chunk->destination_y &&
++                        y < chunk->destination_y +
++                                chunk->destination_height &&
++                        output_x >= chunk->destination_x &&
++                        output_x < chunk->destination_x +
++                                chunk->destination_width;
++                    if (inside_video) {
++                        size_t source_x =
++                            chunk->source_x +
++                            (output_x - chunk->destination_x) *
++                                chunk->source_width /
++                                chunk->destination_width;
++                        size_t source_y =
++                            chunk->source_y +
++                            (y - chunk->destination_y) *
++                                chunk->source_height /
++                                chunk->destination_height;
++                        const size_t source_x_limit =
++                            chunk->source_x + chunk->source_width - 1;
++                        const size_t source_y_limit =
++                            chunk->source_y + chunk->source_height - 1;
++                        if (source_x > source_x_limit)
++                            source_x = source_x_limit;
++                        if (source_y > source_y_limit)
++                            source_y = source_y_limit;
++                        converted = PS5_ConvertBt2020Pixel(
++                            chunk->y_plane[
++                                source_y * chunk->y_pitch_samples +
++                                source_x] &
++                                1023,
++                            chunk->u_plane[
++                                (source_y / 2) *
++                                    chunk->u_pitch_samples +
++                                source_x / 2] &
++                                1023,
++                            chunk->v_plane[
++                                (source_y / 2) *
++                                    chunk->v_pitch_samples +
++                                source_x / 2] &
++                                1023,
++                            chunk->full_range);
++                        if (chunk->hlg_to_pq) {
++                            converted =
++                                PS5_ConvertHlgPackedToPq(
++                                    converted,
++                                    chunk->y_plane[
++                                        source_y *
++                                            chunk->y_pitch_samples +
++                                        source_x] &
++                                        1023,
++                                    chunk->full_range);
++                        }
++                    }
++                    if (overlay_row != NULL) {
++                        size_t mapped_overlay_x;
++                        if (chunk->overlay_width == width)
++                            mapped_overlay_x = output_x;
++                        else if (chunk->overlay_width * 2 == width)
++                            mapped_overlay_x = output_x / 2;
++                        else
++                            mapped_overlay_x =
++                                output_x * chunk->overlay_width / width;
++                        if (mapped_overlay_x >= chunk->overlay_x &&
++                            mapped_overlay_x <
++                                chunk->overlay_x +
++                                chunk->overlay_region_width) {
++                            const uint32_t overlay =
++                                overlay_row[mapped_overlay_x];
++                            if (!have_cached_overlay ||
++                                overlay != cached_overlay) {
++                                cached_overlay = overlay;
++                                cached_blend =
++                                    PS5_PrepareSdrOverlay(overlay);
++                                have_cached_overlay = 1;
++                            }
++                            converted = PS5_ApplySdrOverlay(
++                                converted,
++                                &cached_blend);
++                        }
++                    }
++                    chunk->dst[
++                        dst_tile + tile_offsets[local_x]] = converted;
++                }
++            } else if (y_row != NULL) {
++                if (overlay_row == NULL) {
++                    for (; local_x + 4 <= copy_width;
++                         local_x += 4) {
++                        const size_t source_x =
++                            tile_x + local_x;
++                        const __m128i converted =
++                            PS5_ConvertBt2020Four(
++                                y_row + source_x,
++                                u_row + source_x / 2,
++                                v_row + source_x / 2,
++                                chunk->full_range,
++                                chunk->hlg_to_pq);
++                        _mm_storeu_si128(
++                            (__m128i *)(
++                                chunk->dst +
++                                dst_tile +
++                                tile_offsets[local_x]),
++                            converted);
++                    }
++                    for (; local_x < copy_width;
++                         local_x++) {
++                        const size_t source_x =
++                            tile_x + local_x;
++                        chunk->dst[
++                            dst_tile + tile_offsets[local_x]] =
++                            PS5_ConvertBt2020Pixel(
++                                y_row[source_x] & 1023,
++                                u_row[source_x / 2] & 1023,
++                                v_row[source_x / 2] & 1023,
++                                chunk->full_range);
++                        if (chunk->hlg_to_pq) {
++                            chunk->dst[
++                                dst_tile + tile_offsets[local_x]] =
++                                PS5_ConvertHlgPackedToPq(
++                                    chunk->dst[
++                                        dst_tile +
++                                        tile_offsets[local_x]],
++                                    y_row[source_x] & 1023,
++                                    chunk->full_range);
++                        }
++                    }
++                    continue;
++                }
++                for (; local_x < copy_width; local_x++) {
++                    const size_t source_x = tile_x + local_x;
++                    const BFplayer_OverlayBlend *blend = NULL;
++                    if (overlay_row != NULL) {
++                        size_t overlay_x;
++                        if (chunk->overlay_width == width)
++                            overlay_x = source_x;
++                        else if (chunk->overlay_width * 2 == width)
++                            overlay_x = source_x / 2;
++                        else
++                            overlay_x =
++                                source_x * chunk->overlay_width / width;
++                        if (overlay_x >= chunk->overlay_x &&
++                            overlay_x <
++                                chunk->overlay_x +
++                                chunk->overlay_region_width) {
++                            const uint32_t overlay =
++                                overlay_row[overlay_x];
++                            if (!have_cached_overlay ||
++                                overlay != cached_overlay) {
++                                cached_overlay = overlay;
++                                cached_blend =
++                                    PS5_PrepareSdrOverlay(overlay);
++                                have_cached_overlay = 1;
++                            }
++                            blend = &cached_blend;
++                        }
++                    }
++                    uint32_t converted;
++                    if (blend != NULL && blend->active &&
++                        blend->inverse_alpha == 0) {
++                        /*
++                         * Opaque controls replace the video pixel completely,
++                         * so avoid doing a YUV-to-RGB conversion that cannot
++                         * contribute to the result.
++                         */
++                        converted = blend->packed;
++                    } else {
++                        converted =
++                            PS5_ConvertBt2020Pixel(
++                                y_row[source_x] & 1023,
++                                u_row[source_x / 2] & 1023,
++                                v_row[source_x / 2] & 1023,
++                                chunk->full_range);
++                        if (chunk->hlg_to_pq) {
++                            converted =
++                                PS5_ConvertHlgPackedToPq(
++                                    converted,
++                                    y_row[source_x] & 1023,
++                                    chunk->full_range);
++                        }
++                        if (blend != NULL) {
++                            converted = PS5_ApplySdrOverlay(
++                                converted,
++                                blend);
++                        }
++                    }
++                    chunk->dst[
++                        dst_tile + tile_offsets[local_x]] = converted;
++                }
++            } else {
++                const uint32_t *source =
++                    chunk->src + src_row + tile_x;
++                for (; local_x + 4 <= copy_width; local_x += 4) {
++                    SDL_memcpy(
++                        chunk->dst + dst_tile + tile_offsets[local_x],
++                        source + local_x,
++                        4 * sizeof(uint32_t));
++                }
++                for (; local_x < copy_width; local_x++) {
++                    chunk->dst[dst_tile + tile_offsets[local_x]] =
++                        source[local_x];
++                }
 +            }
 +        }
 +    }
 +}
-
--static void* PS5_DrawTileThread(void* arg) {
--    const PS5_DrawChunk* chunk = (PS5_DrawChunk*)arg;
++
 +static void* PS5_DrawTileThread(void* arg)
 +{
-+    PS5_DrawChunk *chunk = (PS5_DrawChunk *)arg;
++    BFplayer_TileWork *chunk = (BFplayer_TileWork *)arg;
 +    uint64_t observed_generation = 0;
 +
 +    pthread_mutex_lock(&PS5_tile_workers.mutex);
@@ -78,16 +710,23 @@ index 699812e..4622bc2 100644
 +               observed_generation == PS5_tile_workers.generation)
 +            pthread_cond_wait(&PS5_tile_workers.work_ready,
 +                              &PS5_tile_workers.mutex);
-+
+@@ -35,0 +741,2 @@
 +        if (PS5_tile_workers.stopping)
 +            break;
-+
+@@ -37,2 +744,5 @@
+-static void* PS5_DrawTileThread(void* arg) {
+-    const PS5_DrawChunk* chunk = (PS5_DrawChunk*)arg;
 +        observed_generation = PS5_tile_workers.generation;
-+        PS5_DrawChunk work = *chunk;
++        BFplayer_TileWork work = *chunk;
 +        pthread_mutex_unlock(&PS5_tile_workers.mutex);
 +        PS5_DrawTileRows(&work);
 +        pthread_mutex_lock(&PS5_tile_workers.mutex);
-+
+@@ -40,5 +750,22 @@ static void* PS5_DrawTileThread(void* arg) {
+-    for (int ind = chunk->src_start; ind < chunk->src_end; ind++) {
+-        int x = ind % chunk->frame_width;
+-        int y = ind / chunk->frame_width;
+-        int ty = y / PS5_TILE_HEIGHT;
+-        int tx = x / PS5_TILE_WIDTH;
 +        PS5_tile_workers.completed++;
 +        if (PS5_tile_workers.completed == PS5_THREAD_COUNT)
 +            pthread_cond_signal(&PS5_tile_workers.work_done);
@@ -95,12 +734,7 @@ index 699812e..4622bc2 100644
 +    pthread_mutex_unlock(&PS5_tile_workers.mutex);
 +    return NULL;
 +}
-
--    for (int ind = chunk->src_start; ind < chunk->src_end; ind++) {
--        int x = ind % chunk->frame_width;
--        int y = ind / chunk->frame_width;
--        int ty = y / PS5_TILE_HEIGHT;
--        int tx = x / PS5_TILE_WIDTH;
++
 +static int PS5_StartTileWorkers(void)
 +{
 +    SDL_zero(PS5_tile_workers);
@@ -115,7 +749,7 @@ index 699812e..4622bc2 100644
 +        pthread_mutex_destroy(&PS5_tile_workers.mutex);
 +        return -1;
 +    }
-
+@@ -46,4 +773,17 @@ static void* PS5_DrawTileThread(void* arg) {
 -        int t = (int)(PS5_TILE_SIZE * (tx + ty * ((double)chunk->frame_width /
 -                                                  PS5_TILE_WIDTH)));
 -        int i = PS5_tilemap[y % PS5_TILE_HEIGHT][x % PS5_TILE_WIDTH];
@@ -137,11 +771,9 @@ index 699812e..4622bc2 100644
 +            return -1;
 +        }
 +        PS5_tile_workers.started++;
-     }
+@@ -50,0 +791 @@ static void* PS5_DrawTileThread(void* arg) {
 +    PS5_tile_workers.ready = 1;
-     return 0;
- }
-
+@@ -53,0 +795,167 @@ static void* PS5_DrawTileThread(void* arg) {
 +static void PS5_StopTileWorkers(void)
 +{
 +    if (!PS5_tile_workers.ready)
@@ -159,13 +791,164 @@ index 699812e..4622bc2 100644
 +    SDL_zero(PS5_tile_workers);
 +}
 +
- static void PS5_DrawPixelsAsTiles(uint32_t *src, uint32_t *dst,
-                                   int frame_width, int frame_height)
- {
++static void PS5_DrawPixelsAsTilesPitched(const uint32_t *src, uint32_t *dst,
++                                         int frame_width, int frame_height,
++                                         size_t source_pitch_pixels)
++{
++    if (!PS5_tile_workers.ready) {
++        BFplayer_TileWork fallback = {
++            src, dst, (size_t)frame_width, (size_t)frame_height,
++            source_pitch_pixels, 0, (size_t)frame_height
++        };
++        PS5_DrawTileRows(&fallback);
++        return;
++    }
++
++    pthread_mutex_lock(&PS5_tile_workers.mutex);
++    PS5_tile_workers.completed = 0;
++    for (int i = 0; i < PS5_THREAD_COUNT; i++) {
++        BFplayer_TileWork *chunk = &PS5_tile_workers.chunks[i];
++        chunk->src = src;
++        chunk->dst = dst;
++        chunk->frame_width = (size_t)frame_width;
++        chunk->frame_height = (size_t)frame_height;
++        chunk->source_pitch_pixels = source_pitch_pixels;
++        chunk->y_plane = NULL;
++        chunk->u_plane = NULL;
++        chunk->v_plane = NULL;
++        chunk->overlay = NULL;
++        chunk->first_row =
++            (size_t)frame_height * (size_t)i / PS5_THREAD_COUNT;
++        chunk->last_row =
++            (size_t)frame_height * (size_t)(i + 1) / PS5_THREAD_COUNT;
++    }
++    PS5_tile_workers.generation++;
++    pthread_cond_broadcast(&PS5_tile_workers.work_ready);
++    while (PS5_tile_workers.completed < PS5_THREAD_COUNT)
++        pthread_cond_wait(&PS5_tile_workers.work_done,
++                          &PS5_tile_workers.mutex);
++    pthread_mutex_unlock(&PS5_tile_workers.mutex);
++}
++
++static void PS5_DrawYuv420P10AsTilesPitched(
++    const uint16_t *y_plane,
++    const uint16_t *u_plane,
++    const uint16_t *v_plane,
++    uint32_t *dst,
++    int frame_width,
++    int frame_height,
++    int source_x,
++    int source_y,
++    int source_width,
++    int source_height,
++    int destination_x,
++    int destination_y,
++    int destination_width,
++    int destination_height,
++    size_t y_pitch_samples,
++    size_t u_pitch_samples,
++    size_t v_pitch_samples,
++    int full_range,
++    int hlg_to_pq,
++    const uint32_t *overlay,
++    size_t overlay_pitch_pixels,
++    size_t overlay_width,
++    size_t overlay_height,
++    size_t overlay_x,
++    size_t overlay_y,
++    size_t overlay_region_width,
++    size_t overlay_region_height)
++{
++    if (!PS5_tile_workers.ready) {
++        BFplayer_TileWork fallback;
++        SDL_zero(fallback);
++        fallback.dst = dst;
++        fallback.frame_width = (size_t)frame_width;
++        fallback.frame_height = (size_t)frame_height;
++        fallback.first_row = 0;
++        fallback.last_row = (size_t)frame_height;
++        fallback.y_plane = y_plane;
++        fallback.u_plane = u_plane;
++        fallback.v_plane = v_plane;
++        fallback.y_pitch_samples = y_pitch_samples;
++        fallback.u_pitch_samples = u_pitch_samples;
++        fallback.v_pitch_samples = v_pitch_samples;
++        fallback.source_x = (size_t)source_x;
++        fallback.source_y = (size_t)source_y;
++        fallback.source_width = (size_t)source_width;
++        fallback.source_height = (size_t)source_height;
++        fallback.destination_x = (size_t)destination_x;
++        fallback.destination_y = (size_t)destination_y;
++        fallback.destination_width = (size_t)destination_width;
++        fallback.destination_height = (size_t)destination_height;
++        fallback.hlg_to_pq = hlg_to_pq;
++        fallback.full_range = full_range;
++        fallback.overlay = overlay;
++        fallback.overlay_pitch_pixels = overlay_pitch_pixels;
++        fallback.overlay_width = overlay_width;
++        fallback.overlay_height = overlay_height;
++        fallback.overlay_x = overlay_x;
++        fallback.overlay_y = overlay_y;
++        fallback.overlay_region_width = overlay_region_width;
++        fallback.overlay_region_height = overlay_region_height;
++        PS5_DrawTileRows(&fallback);
++        return;
++    }
++
++    pthread_mutex_lock(&PS5_tile_workers.mutex);
++    PS5_tile_workers.completed = 0;
++    for (int i = 0; i < PS5_THREAD_COUNT; i++) {
++        BFplayer_TileWork *chunk = &PS5_tile_workers.chunks[i];
++        chunk->src = NULL;
++        chunk->dst = dst;
++        chunk->frame_width = (size_t)frame_width;
++        chunk->frame_height = (size_t)frame_height;
++        chunk->source_pitch_pixels = 0;
++        chunk->first_row =
++            (size_t)frame_height * (size_t)i / PS5_THREAD_COUNT;
++        chunk->last_row =
++            (size_t)frame_height * (size_t)(i + 1) / PS5_THREAD_COUNT;
++        chunk->y_plane = y_plane;
++        chunk->u_plane = u_plane;
++        chunk->v_plane = v_plane;
++        chunk->y_pitch_samples = y_pitch_samples;
++        chunk->u_pitch_samples = u_pitch_samples;
++        chunk->v_pitch_samples = v_pitch_samples;
++        chunk->source_x = (size_t)source_x;
++        chunk->source_y = (size_t)source_y;
++        chunk->source_width = (size_t)source_width;
++        chunk->source_height = (size_t)source_height;
++        chunk->destination_x = (size_t)destination_x;
++        chunk->destination_y = (size_t)destination_y;
++        chunk->destination_width = (size_t)destination_width;
++        chunk->destination_height = (size_t)destination_height;
++        chunk->hlg_to_pq = hlg_to_pq;
++        chunk->full_range = full_range;
++        chunk->overlay = overlay;
++        chunk->overlay_pitch_pixels = overlay_pitch_pixels;
++        chunk->overlay_width = overlay_width;
++        chunk->overlay_height = overlay_height;
++        chunk->overlay_x = overlay_x;
++        chunk->overlay_y = overlay_y;
++        chunk->overlay_region_width = overlay_region_width;
++        chunk->overlay_region_height = overlay_region_height;
++    }
++    PS5_tile_workers.generation++;
++    pthread_cond_broadcast(&PS5_tile_workers.work_ready);
++    while (PS5_tile_workers.completed < PS5_THREAD_COUNT)
++        pthread_cond_wait(&PS5_tile_workers.work_done,
++                          &PS5_tile_workers.mutex);
++    pthread_mutex_unlock(&PS5_tile_workers.mutex);
++}
++
+@@ -57,3 +965,3 @@ static void PS5_DrawPixelsAsTiles(uint32_t *src, uint32_t *dst,
 -    int chunk_size = frame_width * frame_height / PS5_THREAD_COUNT;
 -    PS5_DrawChunk chunks[PS5_THREAD_COUNT];
 -    pthread_t threads[PS5_THREAD_COUNT];
--
++    PS5_DrawPixelsAsTilesPitched(
++        src, dst, frame_width, frame_height, (size_t)frame_width);
++}
+@@ -61,7 +969,34 @@ static void PS5_DrawPixelsAsTiles(uint32_t *src, uint32_t *dst,
 -    for (int i=0; i<PS5_THREAD_COUNT; i++) {
 -        chunks[i].src = src;
 -        chunks[i].dst = dst;
@@ -173,59 +956,132 @@ index 699812e..4622bc2 100644
 -        chunks[i].src_end = (i + 1) * chunk_size;
 -        chunks[i].frame_width = frame_width;
 -        chunks[i].frame_height = frame_height;
--
++int BFplayer_PS5_PresentNativeHdrYuv420P10Frame(
++    const void *y_plane,
++    int y_pitch_bytes,
++    const void *u_plane,
++    int u_pitch_bytes,
++    const void *v_plane,
++    int v_pitch_bytes,
++    int width,
++    int height,
++    int output_width,
++    int output_height,
++    int source_x,
++    int source_y,
++    int source_width,
++    int source_height,
++    int destination_x,
++    int destination_y,
++    int destination_width,
++    int destination_height,
++    int full_range,
++    int hlg_to_pq,
++    const void *overlay_pixels,
++    int overlay_pitch_bytes,
++    int overlay_width,
++    int overlay_height,
++    int overlay_x,
++    int overlay_y,
++    int overlay_region_width,
++    int overlay_region_height)
++{
++    PS5_DeviceData *device_data = BFplayer_video_device;
++    struct kevent evt;
++    uint8_t idx;
++    int junk;
+@@ -69,3 +1004,3 @@ static void PS5_DrawPixelsAsTiles(uint32_t *src, uint32_t *dst,
 -        if(i == PS5_THREAD_COUNT - 1) {
 -            chunks[i].src_end = frame_width * frame_height;
 -        }
--
++    if (hlg_to_pq &&
++        BFplayer_PS5_PrepareNativeHdrHlg() != 0)
++        return -4;
+@@ -73 +1008,36 @@ static void PS5_DrawPixelsAsTiles(uint32_t *src, uint32_t *dst,
 -        pthread_create(&threads[i], 0, &PS5_DrawTileThread, &chunks[i]);
-+    if (!PS5_tile_workers.ready) {
-+        PS5_DrawChunk fallback = {
-+            src, dst, (uint16_t)frame_width, (uint16_t)frame_height,
-+            0, (size_t)frame_height
-+        };
-+        PS5_DrawTileRows(&fallback);
-+        return;
-     }
-
++    if (!PS5_NativeHdrRequested() || device_data == NULL ||
++        device_data->surface == NULL ||
++        y_plane == NULL || u_plane == NULL || v_plane == NULL ||
++        output_width != device_data->surface->w ||
++        output_height != device_data->surface->h ||
++        source_x < 0 || source_y < 0 ||
++        source_width <= 0 || source_height <= 0 ||
++        source_x + source_width > width ||
++        source_y + source_height > height ||
++        destination_x < 0 || destination_y < 0 ||
++        destination_width <= 0 || destination_height <= 0 ||
++        destination_x + destination_width > output_width ||
++        destination_y + destination_height > output_height ||
++        y_pitch_bytes < width * (int)sizeof(uint16_t) ||
++        u_pitch_bytes < ((width + 1) / 2) * (int)sizeof(uint16_t) ||
++        v_pitch_bytes < ((width + 1) / 2) * (int)sizeof(uint16_t) ||
++        y_pitch_bytes % (int)sizeof(uint16_t) != 0 ||
++        u_pitch_bytes % (int)sizeof(uint16_t) != 0 ||
++        v_pitch_bytes % (int)sizeof(uint16_t) != 0 ||
++        (overlay_pixels != NULL &&
++         (overlay_width <= 0 || overlay_height <= 0 ||
++          overlay_x < 0 || overlay_y < 0 ||
++          overlay_region_width <= 0 || overlay_region_height <= 0 ||
++          overlay_x + overlay_region_width > overlay_width ||
++          overlay_y + overlay_region_height > overlay_height ||
++          overlay_pitch_bytes <
++              overlay_width * (int)sizeof(uint32_t) ||
++          overlay_pitch_bytes % (int)sizeof(uint32_t) != 0))) {
++        return -1;
++    }
++
++    idx = PS5_frame_id % 2;
++    if (PS5_frame_id >= 2 &&
++        sceKernelWaitEqueue(
++            device_data->evt_queue, &evt, 1, &junk, 0)) {
++        return -2;
+@@ -76,2 +1046,33 @@ static void PS5_DrawPixelsAsTiles(uint32_t *src, uint32_t *dst,
 -    for (int i=0; i<PS5_THREAD_COUNT; i++) {
 -        pthread_join(threads[i], 0);
-+    pthread_mutex_lock(&PS5_tile_workers.mutex);
-+    PS5_tile_workers.completed = 0;
-+    for (int i = 0; i < PS5_THREAD_COUNT; i++) {
-+        PS5_DrawChunk *chunk = &PS5_tile_workers.chunks[i];
-+        chunk->src = src;
-+        chunk->dst = dst;
-+        chunk->frame_width = (uint16_t)frame_width;
-+        chunk->frame_height = (uint16_t)frame_height;
-+        chunk->src_start =
-+            (size_t)frame_height * (size_t)i / PS5_THREAD_COUNT;
-+        chunk->src_end =
-+            (size_t)frame_height * (size_t)(i + 1) / PS5_THREAD_COUNT;
-     }
-+    PS5_tile_workers.generation++;
-+    pthread_cond_broadcast(&PS5_tile_workers.work_ready);
-+    while (PS5_tile_workers.completed < PS5_THREAD_COUNT)
-+        pthread_cond_wait(&PS5_tile_workers.work_done,
-+                          &PS5_tile_workers.mutex);
-+    pthread_mutex_unlock(&PS5_tile_workers.mutex);
- }
-
- static void PS5_DestroyWindowFramebuffer(_THIS, SDL_Window *window)
-@@ -116,8 +246,7 @@ static int PS5_UpdateWindowFramebuffer(_THIS, SDL_Window *window,
-                                        const SDL_Rect *rects, int numrects)
- {
-     PS5_DeviceData *device_data = (PS5_DeviceData *)_this->driverdata;
++    PS5_DrawYuv420P10AsTilesPitched(
++        (const uint16_t *)y_plane,
++        (const uint16_t *)u_plane,
++        (const uint16_t *)v_plane,
++        device_data->vbuf[idx].data,
++        output_width,
++        output_height,
++        source_x,
++        source_y,
++        source_width,
++        source_height,
++        destination_x,
++        destination_y,
++        destination_width,
++        destination_height,
++        (size_t)y_pitch_bytes / sizeof(uint16_t),
++        (size_t)u_pitch_bytes / sizeof(uint16_t),
++        (size_t)v_pitch_bytes / sizeof(uint16_t),
++        full_range,
++        hlg_to_pq,
++        (const uint32_t *)overlay_pixels,
++        overlay_pixels != NULL
++            ? (size_t)overlay_pitch_bytes / sizeof(uint32_t)
++            : 0,
++        overlay_pixels != NULL ? (size_t)overlay_width : 0,
++        overlay_pixels != NULL ? (size_t)overlay_height : 0,
++        overlay_pixels != NULL ? (size_t)overlay_x : 0,
++        overlay_pixels != NULL ? (size_t)overlay_y : 0,
++        overlay_pixels != NULL ? (size_t)overlay_region_width : 0,
++        overlay_pixels != NULL ? (size_t)overlay_region_height : 0);
++    if (sceVideoOutSubmitFlip(
++            device_data->handle, idx, 1, PS5_frame_id)) {
++        return -3;
+@@ -78,0 +1080,2 @@ static void PS5_DrawPixelsAsTiles(uint32_t *src, uint32_t *dst,
++    PS5_frame_id++;
++    return 0;
+@@ -93 +1096 @@ static int PS5_CreateWindowFramebuffer(_THIS, SDL_Window *window,
+-    const Uint32 surface_format = SDL_PIXELFORMAT_ABGR8888;
++    const Uint32 surface_format = PS5_SurfaceFormat();
+@@ -119,2 +1122 @@ static int PS5_UpdateWindowFramebuffer(_THIS, SDL_Window *window,
 -    static uint32_t frame_id = 0;
 -    uint8_t idx = frame_id % 2;
 +    uint8_t idx = PS5_frame_id % 2;
-     SDL_Surface *surface;
-     struct kevent evt;
-     int junk;
-@@ -127,29 +256,41 @@ static int PS5_UpdateWindowFramebuffer(_THIS, SDL_Window *window,
-         return SDL_SetError("Couldn't find surface for window");
-     }
-
+@@ -129,0 +1132,12 @@ static int PS5_UpdateWindowFramebuffer(_THIS, SDL_Window *window,
 +    /*
 +     * Keep at most two submitted flips in flight. Waiting before reusing a
 +     * video buffer lets SDL's YUV conversion and software render for this
@@ -238,11 +1094,7 @@ index 699812e..4622bc2 100644
 +        return SDL_SetError("sceKernelWaitEqueue: %s", strerror(errno));
 +    }
 +
-     if(surface->w == device_data->surface->w &&
-        surface->h == device_data->surface->h) {
-         PS5_DrawPixelsAsTiles(surface->pixels, device_data->vbuf[idx].data,
-                               surface->w, surface->h);
-     } else {
+@@ -135,4 +1149,7 @@ static int PS5_UpdateWindowFramebuffer(_THIS, SDL_Window *window,
 -        SDL_BlitSurface(surface, NULL, device_data->surface,
 -                        &(SDL_Rect){(device_data->surface->w - surface->w) / 2,
 -                                    (device_data->surface->h - surface->h) / 2,
@@ -254,40 +1106,25 @@ index 699812e..4622bc2 100644
 +            device_data->surface->h
 +        };
 +        SDL_BlitScaled(surface, NULL, device_data->surface, &destination);
-         PS5_DrawPixelsAsTiles(device_data->surface->pixels,
-                               device_data->vbuf[idx].data,
-                               device_data->surface->w,
-                               device_data->surface->h);
-     }
-
+@@ -145 +1162,2 @@ static int PS5_UpdateWindowFramebuffer(_THIS, SDL_Window *window,
 -    if (sceVideoOutSubmitFlip(device_data->handle, idx, 1, frame_id)) {
 +    if (sceVideoOutSubmitFlip(
 +            device_data->handle, idx, 1, PS5_frame_id)) {
-         return SDL_SetError("sceVideoOutSubmitFlip: %s", strerror(errno));
-     }
+@@ -148,5 +1166 @@ static int PS5_UpdateWindowFramebuffer(_THIS, SDL_Window *window,
 -
 -    if (sceKernelWaitEqueue(device_data->evt_queue, &evt, 1, &junk, 0)) {
 -        return SDL_SetError("sceKernelWaitEqueue: %s", strerror(errno));
 -    }
 -    frame_id++;
 +    PS5_frame_id++;
-
-     return 0;
- }
-@@ -165,7 +306,8 @@ static void PS5_GetDisplayModes(_THIS, SDL_VideoDisplay * display)
-     mode.refresh_rate = 60;
-
-     SDL_AddDisplayMode(display, &display->current_mode);
+@@ -162 +1176 @@ static void PS5_GetDisplayModes(_THIS, SDL_VideoDisplay * display)
+-    mode.format = SDL_PIXELFORMAT_ABGR8888;
++    mode.format = PS5_SurfaceFormat();
+@@ -168 +1182,2 @@ static void PS5_GetDisplayModes(_THIS, SDL_VideoDisplay * display)
 -    //SDL_AddDisplayMode(display, &mode);
 +    if (display->current_mode.w != mode.w || display->current_mode.h != mode.h)
 +        SDL_AddDisplayMode(display, &mode);
- }
-
- static int PS5_SetDisplayMode(_THIS, SDL_VideoDisplay * display,
-@@ -173,6 +315,24 @@ static int PS5_SetDisplayMode(_THIS, SDL_VideoDisplay * display,
- {
-     PS5_DeviceData *device_data = (PS5_DeviceData *)_this->driverdata;
-     PS5_VideoAttr vattr = {0};
+@@ -175,0 +1191,18 @@ static int PS5_SetDisplayMode(_THIS, SDL_VideoDisplay * display,
 +    SDL_Surface *replacement;
 +    size_t frame_bytes;
 +
@@ -300,69 +1137,84 @@ index 699812e..4622bc2 100644
 +                            mode->w, mode->h);
 +
 +    replacement = SDL_CreateRGBSurfaceWithFormat(
-+        0, mode->w, mode->h, 32, SDL_PIXELFORMAT_ABGR8888);
++        0, mode->w, mode->h, 32, PS5_SurfaceFormat());
 +    if (!replacement)
 +        return -1;
 +
 +    SDL_memset(device_data->vbuf[0].data, 0, frame_bytes);
 +    SDL_memset(device_data->vbuf[1].data, 0, frame_bytes);
-
-     if(device_data->evt_queue) {
-         sceVideoOutDeleteFlipEvent(device_data->evt_queue, device_data->handle);
-@@ -185,12 +345,15 @@ static int PS5_SetDisplayMode(_THIS, SDL_VideoDisplay * display,
-     device_data->handle = sceVideoOutOpen(0xff, 0, 0, NULL);
-
-     if (sceKernelCreateEqueue(&device_data->evt_queue, "flip queue")) {
+@@ -187,0 +1221 @@ static int PS5_SetDisplayMode(_THIS, SDL_VideoDisplay * display,
 +        SDL_FreeSurface(replacement);
-         return SDL_SetError("sceKernelCreateEqueue: %s", strerror(errno));
-     }
-     if (sceVideoOutAddFlipEvent(device_data->evt_queue, device_data->handle, 0)) {
+@@ -190,0 +1225 @@ static int PS5_SetDisplayMode(_THIS, SDL_VideoDisplay * display,
 +        SDL_FreeSurface(replacement);
-         return SDL_SetError("sceVideoOutAddFlipEvent: %s", strerror(errno));
-     }
-     if (sceVideoOutSetFlipRate(device_data->handle, 0)) {
+@@ -193,0 +1229 @@ static int PS5_SetDisplayMode(_THIS, SDL_VideoDisplay * display,
 +        SDL_FreeSurface(replacement);
-         return SDL_SetError("sceVideoOutSetFlipRate: %s", strerror(errno));
-     }
-
-@@ -199,9 +362,16 @@ static int PS5_SetDisplayMode(_THIS, SDL_VideoDisplay * display,
-
-     if (sceVideoOutRegisterBuffers2(device_data->handle, 0, 0,
-                                     device_data->vbuf, 2, &vattr, 0, NULL)) {
+@@ -197,2 +1233,3 @@ static int PS5_SetDisplayMode(_THIS, SDL_VideoDisplay * display,
+-    sceVideoOutSetBufferAttribute2(&vattr, 0x8000000022000000UL, 0,
+-                                   mode->w, mode->h, 0, 0, 0);
++    sceVideoOutSetBufferAttribute2(&vattr, PS5_VideoFormat(), 0,
++                                   mode->w, mode->h, PS5_VideoOptions(),
++                                   0, 0);
+@@ -201,0 +1239 @@ static int PS5_SetDisplayMode(_THIS, SDL_VideoDisplay * display,
 +        SDL_FreeSurface(replacement);
-         return SDL_SetError("sceVideoOutRegisterBuffers2: %s", strerror(errno));
-     }
-
+@@ -204,0 +1243,38 @@ static int PS5_SetDisplayMode(_THIS, SDL_VideoDisplay * display,
 +    if (device_data->surface)
 +        SDL_FreeSurface(device_data->surface);
 +    device_data->surface = replacement;
 +    PS5_frame_id = 0;
 +    display->current_mode = *mode;
 +
-     return 0;
- }
-
-@@ -221,6 +391,7 @@ static int PS5_VideoInit(_THIS)
-
-     memset(device_data->vbuf, 0, sizeof(device_data->vbuf));
-     memset(&vattr, 0, sizeof(vattr));
++    return 0;
++}
++
++int BFplayer_PS5_SetNativeHdrOutput(int enabled)
++{
++    SDL_VideoDisplay *display;
++    SDL_DisplayMode mode;
++    const SDL_bool requested = enabled ? SDL_TRUE : SDL_FALSE;
++    const SDL_bool previous = PS5_native_hdr_requested;
++
++    if (BFplayer_sdl_video_device == NULL ||
++        BFplayer_sdl_video_device->num_displays < 1) {
++        return -1;
++    }
++    if (requested == previous) {
++        return 0;
++    }
++    if (requested &&
++        sceVideoOutAddBufferHdrPrivilege() != 0) {
++        return -2;
++    }
++
++    display = &BFplayer_sdl_video_device->displays[0];
++    mode = display->current_mode;
++    PS5_native_hdr_requested = requested;
++    if (PS5_SetDisplayMode(
++            BFplayer_sdl_video_device, display, &mode) != 0) {
++        PS5_native_hdr_requested = previous;
++        (void)PS5_SetDisplayMode(
++            BFplayer_sdl_video_device, display, &mode);
++        return -3;
++    }
+@@ -217 +1293,3 @@ static int PS5_VideoInit(_THIS)
+-    mode.format = SDL_PIXELFORMAT_ABGR8888;
++    BFplayer_sdl_video_device = _this;
++    BFplayer_video_device = device_data;
++    mode.format = PS5_SurfaceFormat();
+@@ -223,0 +1302 @@ static int PS5_VideoInit(_THIS)
 +    PS5_frame_id = 0;
-
-     sceSystemServiceHideSplashScreen();
-     device_data->handle = sceVideoOutOpen(0xff, 0, 0, NULL);
-@@ -268,6 +439,8 @@ static int PS5_VideoInit(_THIS)
-     display.current_mode = mode;
-
-     SDL_AddVideoDisplay(&display, SDL_FALSE);
+@@ -256,2 +1335,2 @@ static int PS5_VideoInit(_THIS)
+-    sceVideoOutSetBufferAttribute2(&vattr, 0x8000000022000000UL, 0,
+-                                   mode.w, mode.h, 0, 0, 0);
++    sceVideoOutSetBufferAttribute2(&vattr, PS5_VideoFormat(), 0,
++                                   mode.w, mode.h, PS5_VideoOptions(), 0, 0);
+@@ -270,0 +1350,2 @@ static int PS5_VideoInit(_THIS)
 +    if (PS5_StartTileWorkers() != 0)
 +        return SDL_SetError("Unable to create persistent PS5 tile workers");
-
-     return 0;
- }
-@@ -276,6 +449,13 @@ static void PS5_VideoQuit(_THIS)
- {
-     PS5_DeviceData *device_data = (PS5_DeviceData *)_this->driverdata;
-
+@@ -278,0 +1360,10 @@ static void PS5_VideoQuit(_THIS)
++    BFplayer_video_device = NULL;
++    BFplayer_sdl_video_device = NULL;
++    PS5_native_hdr_requested = SDL_FALSE;
 +    PS5_StopTileWorkers();
 +
 +    if (device_data->surface) {
@@ -370,6 +1222,3 @@ index 699812e..4622bc2 100644
 +        device_data->surface = NULL;
 +    }
 +
-     if (device_data->handle != 0) {
-         sceVideoOutClose(device_data->handle);
-         device_data->handle = 0;

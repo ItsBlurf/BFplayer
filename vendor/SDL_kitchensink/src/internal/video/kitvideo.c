@@ -260,9 +260,15 @@ static struct SwsContext *Kit_GetSwsContext(
     int output_h,
     enum AVPixelFormat out_fmt
 ) {
+    const AVPixFmtDescriptor *output_descriptor =
+        av_pix_fmt_desc_get(out_fmt);
+    const int rgb_output =
+        output_descriptor != NULL &&
+        (output_descriptor->flags & AV_PIX_FMT_FLAG_RGB) != 0;
     const int scaling_flags =
         (output_w < input_w || output_h < input_h)
-        ? SWS_BICUBIC | SWS_ACCURATE_RND | SWS_FULL_CHR_H_INT
+        ? SWS_BICUBIC | SWS_ACCURATE_RND |
+              (rgb_output ? 0 : SWS_FULL_CHR_H_INT)
         : SWS_BILINEAR | SWS_ACCURATE_RND;
     struct SwsContext *new_context = sws_getCachedContext(
         old_context,
@@ -311,56 +317,79 @@ static void dec_read_video(const Kit_Decoder *decoder) {
     const int input_w = video_decoder->in_frame->width;
     const int input_h = video_decoder->in_frame->height;
 
-    // Convert frame format, if needed. Note that converter context MAY need to be changed here,
-    // as video frame size can, in theory, change whenever.
-    struct SwsContext *old_sws = video_decoder->sws;
-    video_decoder->sws = Kit_GetSwsContext(
-        video_decoder->sws,
-        input_w,
-        input_h,
-        in_fmt,
-        video_decoder->output.width,
-        video_decoder->output.height,
-        out_fmt);
-    if(video_decoder->sws == NULL) {
-        return;
-    }
-    const int colorspace = Kit_FrameColorSpace(
-        decoder,
-        video_decoder->in_frame);
-    const int full_range = Kit_FrameFullRange(
-        decoder,
-        video_decoder->in_frame);
-    if(old_sws != video_decoder->sws ||
-       colorspace != video_decoder->sws_colorspace ||
-       full_range != video_decoder->sws_full_range) {
-        const int *coefficients = sws_getCoefficients(
-            colorspace == AVCOL_SPC_UNSPECIFIED
-            ? AVCOL_SPC_BT709
-            : colorspace);
-        if(coefficients != NULL) {
-            (void)sws_setColorspaceDetails(
-                video_decoder->sws,
-                coefficients,
-                full_range,
-                coefficients,
-                full_range,
-                0,
-                1 << 16,
-                1 << 16);
-        }
-        video_decoder->sws_colorspace = colorspace;
-        video_decoder->sws_full_range = full_range;
-    }
-    if(av_frame_copy_props(
-           video_decoder->out_frame,
-           video_decoder->in_frame) < 0 ||
-       sws_scale_frame(
-           video_decoder->sws,
-           video_decoder->out_frame,
-           video_decoder->in_frame) < 0) {
+    /*
+     * Preserve a decoder-owned reference when no conversion or scaling is
+     * required. This removes a full 16-bit 4K frame copy from native HDR
+     * playback while the output queue still owns the pixels safely.
+     */
+    if(in_fmt == out_fmt &&
+       input_w == video_decoder->output.width &&
+       input_h == video_decoder->output.height) {
         av_frame_unref(video_decoder->out_frame);
-        return;
+        if(av_frame_ref(
+               video_decoder->out_frame,
+               video_decoder->in_frame) < 0) {
+            return;
+        }
+    } else {
+        // Convert frame format, if needed. Note that converter context MAY need to be changed here,
+        // as video frame size can, in theory, change whenever.
+        struct SwsContext *old_sws = video_decoder->sws;
+        video_decoder->sws = Kit_GetSwsContext(
+            video_decoder->sws,
+            input_w,
+            input_h,
+            in_fmt,
+            video_decoder->output.width,
+            video_decoder->output.height,
+            out_fmt);
+        if(video_decoder->sws == NULL) {
+            return;
+        }
+        const int colorspace = Kit_FrameColorSpace(
+            decoder,
+            video_decoder->in_frame);
+        const int full_range = Kit_FrameFullRange(
+            decoder,
+            video_decoder->in_frame);
+        const AVPixFmtDescriptor *output_descriptor =
+            av_pix_fmt_desc_get(out_fmt);
+        const int output_full_range =
+            output_descriptor != NULL &&
+            (output_descriptor->flags & AV_PIX_FMT_FLAG_RGB) != 0
+            ? 1
+            : full_range;
+        if(old_sws != video_decoder->sws ||
+           colorspace != video_decoder->sws_colorspace ||
+           full_range != video_decoder->sws_full_range) {
+            const int *coefficients = sws_getCoefficients(
+                colorspace == AVCOL_SPC_UNSPECIFIED
+                ? AVCOL_SPC_BT709
+                : colorspace);
+            if(coefficients != NULL) {
+                (void)sws_setColorspaceDetails(
+                    video_decoder->sws,
+                    coefficients,
+                    full_range,
+                    coefficients,
+                    output_full_range,
+                    0,
+                    1 << 16,
+                    1 << 16);
+            }
+            video_decoder->sws_colorspace = colorspace;
+            video_decoder->sws_full_range = full_range;
+        }
+        if(av_frame_copy_props(
+               video_decoder->out_frame,
+               video_decoder->in_frame) < 0 ||
+           sws_scale_frame(
+               video_decoder->sws,
+               video_decoder->out_frame,
+               video_decoder->in_frame) < 0) {
+            av_frame_unref(video_decoder->out_frame);
+            return;
+        }
     }
     Kit_ApplyHdrToneMap(decoder, video_decoder);
 

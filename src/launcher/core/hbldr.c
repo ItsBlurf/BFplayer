@@ -60,7 +60,7 @@ along with this program; see the file COPYING. If not, see
 
 static const char param_json[] = "{\n"
   "  \"applicationCategoryType\": 65536,\n"
-  "  \"attribute\": 1,\n"
+  "  \"attribute\": 536870913,\n"
   "  \"attribute2\": 0,\n"
   "  \"attribute3\": 4,\n"
   "  \"titleId\": \"" HOST_TITLE_ID "\",\n"

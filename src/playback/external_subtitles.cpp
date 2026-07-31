@@ -297,8 +297,58 @@ struct ExternalSubtitles::Impl {
     bool populated = false;
     bool bitmap_mode = false;
     int last_bitmap_index = -2;
+    SDL_Rect visible_rect{};
+    bool has_visible_rect = false;
 
     void set_error(std::string value) { last_error = std::move(value); }
+
+    void clear_visible_rect() {
+        visible_rect = {};
+        has_visible_rect = false;
+    }
+
+    void include_visible_rect(int x, int y, int rectangle_width, int rectangle_height) {
+        const int left = std::clamp(x, 0, width);
+        const int top = std::clamp(y, 0, height);
+        const int right = std::clamp(x + rectangle_width, 0, width);
+        const int bottom = std::clamp(y + rectangle_height, 0, height);
+        if (right <= left || bottom <= top) {
+            return;
+        }
+        if (!has_visible_rect) {
+            visible_rect = {left, top, right - left, bottom - top};
+            has_visible_rect = true;
+            return;
+        }
+        const int union_left = std::min(visible_rect.x, left);
+        const int union_top = std::min(visible_rect.y, top);
+        const int union_right =
+            std::max(visible_rect.x + visible_rect.w, right);
+        const int union_bottom =
+            std::max(visible_rect.y + visible_rect.h, bottom);
+        visible_rect = {
+            union_left,
+            union_top,
+            union_right - union_left,
+            union_bottom - union_top};
+    }
+
+    bool draw_visible_texture() {
+        if (!has_visible_rect) {
+            return true;
+        }
+        if (SDL_RenderCopy(
+                sdl_renderer,
+                texture,
+                &visible_rect,
+                &visible_rect) != 0) {
+            set_error(
+                std::string("SDL_RenderCopy(subtitle): ") +
+                SDL_GetError());
+            return false;
+        }
+        return true;
+    }
 
     void release() {
         SDL_DestroyTexture(texture);
@@ -324,6 +374,7 @@ struct ExternalSubtitles::Impl {
         populated = false;
         bitmap_mode = false;
         last_bitmap_index = -2;
+        clear_visible_rect();
     }
 
     bool create_texture(int new_width, int new_height) {
@@ -359,6 +410,7 @@ struct ExternalSubtitles::Impl {
         }
         populated = false;
         last_bitmap_index = -2;
+        clear_visible_rect();
         return true;
     }
 
@@ -701,6 +753,7 @@ struct ExternalSubtitles::Impl {
         }
         if (active != last_bitmap_index) {
             std::fill(rgba.begin(), rgba.end(), 0);
+            clear_visible_rect();
             if (active >= 0) {
                 const BitmapCue& cue = bitmap_cues[static_cast<std::size_t>(active)];
                 const double scale_x = static_cast<double>(width) / cue.canvas_width;
@@ -710,6 +763,11 @@ struct ExternalSubtitles::Impl {
                     const int target_y = static_cast<int>(std::llround(part.y * scale_y));
                     const int target_width = std::max(1, static_cast<int>(std::llround(part.width * scale_x)));
                     const int target_height = std::max(1, static_cast<int>(std::llround(part.height * scale_y)));
+                    include_visible_rect(
+                        target_x,
+                        target_y,
+                        target_width,
+                        target_height);
                     for (int y = 0; y < target_height; ++y) {
                         const int destination_y = target_y + y;
                         if (destination_y < 0 || destination_y >= height) {
@@ -747,8 +805,7 @@ struct ExternalSubtitles::Impl {
             last_bitmap_index = active;
             populated = true;
         }
-        SDL_RenderCopy(sdl_renderer, texture, nullptr, nullptr);
-        return true;
+        return draw_visible_texture();
     }
 
     bool draw(std::int64_t position_ms) {
@@ -758,12 +815,17 @@ struct ExternalSubtitles::Impl {
         int changed = 0;
         ASS_Image* images = ass_render_frame(ass_renderer, track, position_ms, &changed);
         if (!changed && populated) {
-            SDL_RenderCopy(sdl_renderer, texture, nullptr, nullptr);
-            return true;
+            return draw_visible_texture();
         }
 
         std::fill(rgba.begin(), rgba.end(), 0);
+        clear_visible_rect();
         for (const ASS_Image* image = images; image; image = image->next) {
+            include_visible_rect(
+                image->dst_x,
+                image->dst_y,
+                image->w,
+                image->h);
             const std::uint8_t red = static_cast<std::uint8_t>((image->color >> 24U) & 0xffU);
             const std::uint8_t green = static_cast<std::uint8_t>((image->color >> 16U) & 0xffU);
             const std::uint8_t blue = static_cast<std::uint8_t>((image->color >> 8U) & 0xffU);
@@ -793,8 +855,7 @@ struct ExternalSubtitles::Impl {
             return false;
         }
         populated = true;
-        SDL_RenderCopy(sdl_renderer, texture, nullptr, nullptr);
-        return true;
+        return draw_visible_texture();
     }
 };
 
@@ -898,6 +959,25 @@ bool ExternalSubtitles::render(std::int64_t movie_position_ms, std::int64_t dela
         target -= delay_ms;
     }
     return impl_->draw(std::max<std::int64_t>(0, target));
+}
+
+bool ExternalSubtitles::visible_bounds(
+    int& x,
+    int& y,
+    int& width,
+    int& height) const noexcept {
+    if (!impl_ || !impl_->has_visible_rect) {
+        x = 0;
+        y = 0;
+        width = 0;
+        height = 0;
+        return false;
+    }
+    x = impl_->visible_rect.x;
+    y = impl_->visible_rect.y;
+    width = impl_->visible_rect.w;
+    height = impl_->visible_rect.h;
+    return true;
 }
 
 bool ExternalSubtitles::is_open() const noexcept {

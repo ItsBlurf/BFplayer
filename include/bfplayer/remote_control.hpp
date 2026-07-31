@@ -15,6 +15,7 @@ enum class RemoteCommandType {
     seek_absolute,
     cycle_audio,
     cycle_subtitle,
+    button,
     stop,
     exit,
 };
@@ -23,6 +24,7 @@ struct RemoteCommand {
     RemoteCommandType type = RemoteCommandType::stop;
     std::uint64_t sequence = 0;
     double value = 0.0;
+    int button = -1;
     std::string path;
 };
 
@@ -78,8 +80,12 @@ struct RemotePlaybackStatus {
     int source_height = 0;
     int output_width = 0;
     int output_height = 0;
+    int display_width = 0;
+    int display_height = 0;
     bool hdr_source = false;
+    bool native_hdr_output = false;
     std::string hdr_transfer;
+    std::string hdr_output_policy;
     bool hdr_tone_map_active = false;
     bool hdr_input_full_range = false;
     bool hdr_input_bt2020 = false;
